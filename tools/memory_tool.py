@@ -41,7 +41,7 @@ def get_memory_dir() -> Path:
 
 
 from tools.memory_tool_store import (
-    ENTRY_DELIMITER, FAILURE_CLASS, MEMORY_BLOCK_HEADERS, MemoryStore, _scan_memory_content)
+    ENTRY_DELIMITER, FAILURE_CLASS, MEMORY_BLOCK_HEADERS, PATCH_DROP_HINT, MemoryStore, _scan_memory_content)
 
 
 def load_on_disk_store() -> MemoryStore:
@@ -156,6 +156,10 @@ def _validate_single_op(store, action, target, content, old_text) -> Optional[st
     if action == "replace" and not content:
         FAILURE_CLASS.set("missing_content")
         return tool_error("content is required for 'replace' action.", success=False)
+    if action == "patch" and not content:
+        FAILURE_CLASS.set("missing_content")
+        return tool_error(f"content (the new text for the old_text span) is required for 'patch' action. "
+                          f"{PATCH_DROP_HINT}", success=False)
     return None
 
 
@@ -388,7 +392,7 @@ MEMORY_SCHEMA = {
             },
             "old_text": {
                 "type": "string",
-                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring IDENTIFYING the existing entry to modify -- it locates the entry, it is not spliced out. Omit only for 'add'."
+                "description": "REQUIRED for 'replace', 'patch' and 'remove' (single-op shape): a short unique substring IDENTIFYING the existing entry to modify -- it locates the entry ('patch' also replaces exactly this span, which must occur once in the entry; 'replace'/'remove' do not splice it). Omit only for 'add'."
             },
             "new_text": {
                 "type": "string",
@@ -407,7 +411,7 @@ MEMORY_SCHEMA = {
                         "action": {"type": "string", "enum": ["add", "replace", "remove"]},
                         "content": {"type": "string", "description": "Entry content for add/replace. For replace, the COMPLETE new entry (whole entry is overwritten). Alias: 'new_text'."},
                         "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
-                        "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
+                        "old_text": {"type": "string", "description": "Substring identifying the entry for replace/patch/remove; for patch, also the span replaced (must occur once in the entry)."},
                     },
                     "required": ["action"],
                 },
