@@ -2135,7 +2135,7 @@ class MatrixAdapter(BasePlatformAdapter):
         relates_to: dict, mention_claimed: bool = False,
         voice_gate: Optional[VoiceGate] = None) -> Optional[tuple]:
         """Shared mention/thread/DM gating. Returns (body, is_dm, chat_type, thread_id,
-        display_name, source) or None when the message should be dropped. ``mention_claimed``
+        display_name, source, is_mentioned) or None when the message should be dropped. ``mention_claimed``
         marks a parked voice claimed by the sender's follow-up bare @mention; ``voice_gate`` is
         the in-flight mark of a parkable voice, released once the park decision is made."""
         identity = await self._resolve_room_identity(room_id)
@@ -2204,7 +2204,7 @@ class MatrixAdapter(BasePlatformAdapter):
         if thread_id:
             await self._threads.mark_async(thread_id)  # covers real roots and synthetic ones alike
         self._background_read_receipt(room_id, event_id)
-        return body, is_dm, chat_type, thread_id, display_name, source
+        return body, is_dm, chat_type, thread_id, display_name, source, is_mentioned
 
     async def _fetch_reply_origin(
         self, room_id: str, event_id: str
@@ -2290,7 +2290,7 @@ class MatrixAdapter(BasePlatformAdapter):
             ctx = await self._resolve_message_context(room_id, sender, event_id, body, source_content, relates_to)
         if ctx is None:
             return None
-        body, _is_dm, _chat_type, _thread_id, display_name, source = ctx
+        body, _is_dm, _chat_type, _thread_id, display_name, source, is_mentioned = ctx
         body, reply_to, reply_to_text, reply_to_author_id, reply_to_author_name, reply_to_is_own = (
             await self._extract_reply_context(room_id, body, relates_to))
         media_msgtype = extra.pop("media_msgtype", None)
@@ -2300,8 +2300,22 @@ class MatrixAdapter(BasePlatformAdapter):
             extra["message_type"] = MessageType.COMMAND if body.startswith("/") else MessageType.TEXT
         elif _is_bare_media_filename(media_msgtype, body):
             body = ""  # transport filename, not user text
+        # reply_expected: the adapter knows whether this message is addressed to the bot.
+        # Group rooms: addressed (mention, slash command, a reply to our own message) -> True;
+        # admitted-but-unaddressed -> False, so a bare silence marker may stand — the antidote
+        # to the multi-bot-room warning-fallback storm, where every visible fallback is itself
+        # ingested by peer bots and provokes fresh silence verdicts. DMs keep None: a DM is
+        # addressed by construction, so the visible fallback must stay (event.py field doc).
+        if _is_dm:
+            reply_expected = None
+        elif (is_mentioned or extra.get("message_type") == MessageType.COMMAND
+                or reply_to_is_own or self._owns_replied_event(relates_to)):
+            reply_expected = True
+        else:
+            reply_expected = False
         return MessageEvent(
             text=body, source=source, raw_message=source_content, message_id=event_id,
+            reply_expected=reply_expected,
             reply_to_message_id=reply_to, reply_to_text=reply_to_text, reply_to_author_id=reply_to_author_id,
             reply_to_author_name=reply_to_author_name, reply_to_is_own_message=reply_to_is_own,
             # Top-level sender fields mirror source.* — downstream prompt code reads them.
