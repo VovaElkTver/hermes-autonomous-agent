@@ -58,7 +58,7 @@ class LiteralPass:
         if not self.jl.exists():
             return 0
         items = set(self.items)
-        return sum(1 for line in open(self.jl) if line.strip()
+        return sum(1 for line in open(self.jl, encoding='utf-8') if line.strip()
                    and json.loads(line)["status"] == "committed"
                    and json.loads(line)["file"] in items)
 
@@ -101,10 +101,10 @@ class LiteralPass:
                 wb[sheet][cell] = value
             wb.save(tmp)
         elif v.endswith((".txt", ".csv")):
-            lines = open(v).read().splitlines(keepends=True)
+            lines = open(v, encoding='utf-8-sig').read().splitlines(keepends=True)
             for lo, hi, new in sorted(edits, key=lambda e: -e[0]):
                 lines[lo - 1:hi] = [l if l.endswith("\n") else l + "\n" for l in new]
-            tmp.write_text("".join(lines))
+            tmp.write_text("".join(lines), encoding='utf-8')
         else:
             raise PermissionError(f"FAIL-CLOSED: нет верификатора для {v} — запись запрещена")
 
@@ -134,8 +134,8 @@ class LiteralPass:
             # symmetric direction (cells appearing only in staging) is implied:
             # any new value lives at some coordinate compared per-row below.
         else:
-            a = open(v).read().splitlines()
-            b = open(tmp).read().splitlines()
+            a = open(v, encoding='utf-8-sig').read().splitlines()
+            b = open(tmp, encoding='utf-8-sig').read().splitlines()
             allowed = set()
             for lo, hi in manifest.get("lines", []):
                 allowed |= set(range(lo, hi + 1))
@@ -154,7 +154,7 @@ class LiteralPass:
         return problems
 
     def _log(self, v: str, manifest: dict, status: str, problems: list[str]) -> None:
-        with open(self.jl, "a") as f:
+        with open(self.jl, 'a', encoding='utf-8') as f:
             f.write(json.dumps({"ts": time.time(), "file": v, "manifest": manifest,
                                 "status": status, "sha_after": sha(v) if status == "committed" else None,
                                 "problems": problems}, ensure_ascii=False) + "\n")
