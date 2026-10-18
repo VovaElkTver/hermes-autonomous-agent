@@ -136,7 +136,7 @@ async def test_matrix_session_scope_auto_and_thread_preserve_synthetic_threads()
         relates_to={"rel_type": "m.thread", "event_id": "$root"},
     )
     assert real_thread is not None
-    assert real_thread[-1].thread_id == "$root"
+    assert real_thread[3] == "$root"  # thread_id slot (7-tuple since PR #46)
 
 
 @pytest.mark.asyncio
