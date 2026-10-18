@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # Hermes Agent (VovaElkTver fork) one-line installer for Windows.
 #
 #   iwr -useb https://raw.githubusercontent.com/VovaElkTver/hermes-autonomous-agent/main/fork-install.ps1 | iex
@@ -25,7 +25,7 @@ if (Test-Path (Join-Path $Dest ".git")) {
   # Accept checkouts created before the 2026-10 rename (GitHub redirects them).
   $curNorm = $cur -replace 'VovaElkTver/hermes-agent(?!-)', 'VovaElkTver/hermes-autonomous-agent'
   if ($cur -and $curNorm -ne $ForkUrl) {
-    Write-Host "existing checkout origin is: $cur`nexpected:                    $ForkUrl`nrefusing to touch it — remove/move $Dest or set HERMES_FORK_URL." -ForegroundColor Red
+    Write-Host "existing checkout origin is: $cur`nexpected:                    $ForkUrl`nrefusing to touch it -- remove/move $Dest or set HERMES_FORK_URL." -ForegroundColor Red
     exit 1
   }
   Invoke-Step "Updating existing checkout ($Branch)" {
