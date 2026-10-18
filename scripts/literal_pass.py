@@ -58,7 +58,7 @@ class LiteralPass:
         if not self.jl.exists():
             return 0
         items = set(self.items)
-        return sum(1 for line in open(self.jl, encoding='utf-8') if line.strip()
+        return sum(1 for line in open(self.jl, encoding='utf-8-sig') if line.strip()
                    and json.loads(line)["status"] == "committed"
                    and json.loads(line)["file"] in items)
 
@@ -160,7 +160,7 @@ class LiteralPass:
                                 "problems": problems}, ensure_ascii=False) + "\n")
 
     def reconcile(self) -> str:
-        done = [json.loads(l) for l in open(self.jl) if l.strip()] if self.jl.exists() else []
+        done = [json.loads(l) for l in open(self.jl, encoding='utf-8-sig') if l.strip()] if self.jl.exists() else []
         committed = {d["file"] for d in done if d["status"] == "committed"}
         missing = [i for i in self.items if i not in committed]
         verdict = "ACCEPTED" if not missing and self.k == len(self.items) else "NOT DONE"
