@@ -129,44 +129,11 @@ def _matrix_voice_metadata_for_file(path: Path) -> dict[str, Any]:
             logger.debug("Matrix: failed to build voice waveform for %s", path, exc_info=True)
     return metadata
 
-_MATRIX_BANG_COMMAND_RE = re.compile(r"^!([A-Za-z][A-Za-z0-9_-]*)(?=$|\s)(.*)$", re.DOTALL)
-
-
-def _resolve_matrix_bang_command(name: str) -> str | None:
-    """Resolve a ``!command`` token (Matrix clients reserve ``/``) to a dispatchable token.
-    Only known gateway/skill commands resolve, so ordinary exclamations stay chat text. Returns
-    whichever candidate resolved — raw lowercased first, then ``_``→``-`` — never a forced
-    canonical form: aliases pass through for the dispatcher."""
-    if not name:
-        return None
-    candidates = list(dict.fromkeys((name.lower(), name.lower().replace("_", "-"))))
-    try:
-        from hermes_cli.commands import is_gateway_known_command
-        for candidate in candidates:
-            if is_gateway_known_command(candidate):
-                return candidate
-    except Exception:
-        logger.debug("Matrix: is_gateway_known_command failed for %r", name, exc_info=True)
-    try:
-        from agent.skill_commands import get_skill_commands
-        skill_commands = get_skill_commands() or {}  # keys are slash-prefixed ("/arxiv")
-        for candidate in candidates:
-            if f"/{candidate}" in skill_commands:
-                return candidate
-    except Exception:
-        logger.debug("Matrix: get_skill_commands failed for %r", name, exc_info=True)
-    return None
-
-
-def _normalize_matrix_bang_command(text: str) -> str:
-    """Convert Matrix ``!command`` aliases to normal Hermes ``/command`` text."""
-    if not text or not text.startswith("!"):
-        return text
-    match = _MATRIX_BANG_COMMAND_RE.match(text)
-    resolved = _resolve_matrix_bang_command(match.group(1)) if match else None
-    if resolved is None:
-        return text
-    return f"/{resolved}{match.group(2) or ''}"
+# Topical siblings (FILE_LINES ratchet): bang-command aliasing and the reply_expected verdict.
+from plugins.platforms.matrix.reply_verdict import verdict as reply_verdict
+from plugins.platforms.matrix.bang_commands import (
+    normalize_matrix_bang_command as _normalize_matrix_bang_command,  # re-export: tests import it here
+)
 
 
 _REPLY_MEDIA_MSGTYPES = frozenset({"m.image", "m.audio", "m.video", "m.file", "m.sticker"})
@@ -2300,19 +2267,12 @@ class MatrixAdapter(BasePlatformAdapter):
             extra["message_type"] = MessageType.COMMAND if body.startswith("/") else MessageType.TEXT
         elif _is_bare_media_filename(media_msgtype, body):
             body = ""  # transport filename, not user text
-        # reply_expected: the adapter knows whether this message is addressed to the bot.
-        # Group rooms: addressed (mention, slash command, a reply to our own message) -> True;
-        # admitted-but-unaddressed -> False, so a bare silence marker may stand — the antidote
-        # to the multi-bot-room warning-fallback storm, where every visible fallback is itself
-        # ingested by peer bots and provokes fresh silence verdicts. DMs keep None: a DM is
-        # addressed by construction, so the visible fallback must stay (event.py field doc).
-        if _is_dm:
-            reply_expected = None
-        elif (is_mentioned or extra.get("message_type") == MessageType.COMMAND
-                or reply_to_is_own or self._owns_replied_event(relates_to)):
-            reply_expected = True
-        else:
-            reply_expected = False
+        # reply_expected: see plugins/platforms/matrix/reply_verdict.py (multi-bot storm fix).
+        reply_expected = reply_verdict(
+            is_dm=_is_dm, is_mentioned=is_mentioned,
+            is_command=extra.get("message_type") == MessageType.COMMAND,
+            reply_to_is_own=reply_to_is_own,
+            owns_replied_event=self._owns_replied_event(relates_to))
         return MessageEvent(
             text=body, source=source, raw_message=source_content, message_id=event_id,
             reply_expected=reply_expected,
