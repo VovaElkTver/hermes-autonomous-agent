@@ -94,6 +94,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Prefer Git Bash over any system32 WSL bash launcher
+      # On self-hosted Windows (and any box with WSL enabled), a bare
+      # ``shell: bash`` resolves to C:\Windows\System32\bash.exe — the WSL
+      # launcher — which receives the Windows temp-script path with its
+      # backslashes eaten ("C:Usersuseractions-runner...") and dies before
+      # any step runs. Hosted images lack that shim, which is why this only
+      # surfaced on hermes-win. GITHUB_PATH prepends, so every bash step
+      # below resolves Git Bash first, deterministically.
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
     - name: Read PM pins with the runner bootstrap Python
       id: prepare
       shell: bash
