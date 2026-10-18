@@ -129,44 +129,11 @@ def _matrix_voice_metadata_for_file(path: Path) -> dict[str, Any]:
             logger.debug("Matrix: failed to build voice waveform for %s", path, exc_info=True)
     return metadata
 
-_MATRIX_BANG_COMMAND_RE = re.compile(r"^!([A-Za-z][A-Za-z0-9_-]*)(?=$|\s)(.*)$", re.DOTALL)
-
-
-def _resolve_matrix_bang_command(name: str) -> str | None:
-    """Resolve a ``!command`` token (Matrix clients reserve ``/``) to a dispatchable token.
-    Only known gateway/skill commands resolve, so ordinary exclamations stay chat text. Returns
-    whichever candidate resolved — raw lowercased first, then ``_``→``-`` — never a forced
-    canonical form: aliases pass through for the dispatcher."""
-    if not name:
-        return None
-    candidates = list(dict.fromkeys((name.lower(), name.lower().replace("_", "-"))))
-    try:
-        from hermes_cli.commands import is_gateway_known_command
-        for candidate in candidates:
-            if is_gateway_known_command(candidate):
-                return candidate
-    except Exception:
-        logger.debug("Matrix: is_gateway_known_command failed for %r", name, exc_info=True)
-    try:
-        from agent.skill_commands import get_skill_commands
-        skill_commands = get_skill_commands() or {}  # keys are slash-prefixed ("/arxiv")
-        for candidate in candidates:
-            if f"/{candidate}" in skill_commands:
-                return candidate
-    except Exception:
-        logger.debug("Matrix: get_skill_commands failed for %r", name, exc_info=True)
-    return None
-
-
-def _normalize_matrix_bang_command(text: str) -> str:
-    """Convert Matrix ``!command`` aliases to normal Hermes ``/command`` text."""
-    if not text or not text.startswith("!"):
-        return text
-    match = _MATRIX_BANG_COMMAND_RE.match(text)
-    resolved = _resolve_matrix_bang_command(match.group(1)) if match else None
-    if resolved is None:
-        return text
-    return f"/{resolved}{match.group(2) or ''}"
+# Topical siblings (FILE_LINES ratchet): bang-command aliasing and the reply_expected verdict.
+from plugins.platforms.matrix.reply_verdict import verdict as reply_verdict
+from plugins.platforms.matrix.bang_commands import (
+    normalize_matrix_bang_command as _normalize_matrix_bang_command,  # re-export: tests import it here
+)
 
 
 _REPLY_MEDIA_MSGTYPES = frozenset({"m.image", "m.audio", "m.video", "m.file", "m.sticker"})
@@ -2135,7 +2102,7 @@ class MatrixAdapter(BasePlatformAdapter):
         relates_to: dict, mention_claimed: bool = False,
         voice_gate: Optional[VoiceGate] = None) -> Optional[tuple]:
         """Shared mention/thread/DM gating. Returns (body, is_dm, chat_type, thread_id,
-        display_name, source) or None when the message should be dropped. ``mention_claimed``
+        display_name, source, is_mentioned) or None when the message should be dropped. ``mention_claimed``
         marks a parked voice claimed by the sender's follow-up bare @mention; ``voice_gate`` is
         the in-flight mark of a parkable voice, released once the park decision is made."""
         identity = await self._resolve_room_identity(room_id)
@@ -2204,7 +2171,7 @@ class MatrixAdapter(BasePlatformAdapter):
         if thread_id:
             await self._threads.mark_async(thread_id)  # covers real roots and synthetic ones alike
         self._background_read_receipt(room_id, event_id)
-        return body, is_dm, chat_type, thread_id, display_name, source
+        return body, is_dm, chat_type, thread_id, display_name, source, is_mentioned
 
     async def _fetch_reply_origin(
         self, room_id: str, event_id: str
@@ -2290,7 +2257,7 @@ class MatrixAdapter(BasePlatformAdapter):
             ctx = await self._resolve_message_context(room_id, sender, event_id, body, source_content, relates_to)
         if ctx is None:
             return None
-        body, _is_dm, _chat_type, _thread_id, display_name, source = ctx
+        body, _is_dm, _chat_type, _thread_id, display_name, source, is_mentioned = ctx
         body, reply_to, reply_to_text, reply_to_author_id, reply_to_author_name, reply_to_is_own = (
             await self._extract_reply_context(room_id, body, relates_to))
         media_msgtype = extra.pop("media_msgtype", None)
@@ -2300,8 +2267,15 @@ class MatrixAdapter(BasePlatformAdapter):
             extra["message_type"] = MessageType.COMMAND if body.startswith("/") else MessageType.TEXT
         elif _is_bare_media_filename(media_msgtype, body):
             body = ""  # transport filename, not user text
+        # reply_expected: see plugins/platforms/matrix/reply_verdict.py (multi-bot storm fix).
+        reply_expected = reply_verdict(
+            is_dm=_is_dm, is_mentioned=is_mentioned,
+            is_command=extra.get("message_type") == MessageType.COMMAND,
+            reply_to_is_own=reply_to_is_own,
+            owns_replied_event=self._owns_replied_event(relates_to))
         return MessageEvent(
             text=body, source=source, raw_message=source_content, message_id=event_id,
+            reply_expected=reply_expected,
             reply_to_message_id=reply_to, reply_to_text=reply_to_text, reply_to_author_id=reply_to_author_id,
             reply_to_author_name=reply_to_author_name, reply_to_is_own_message=reply_to_is_own,
             # Top-level sender fields mirror source.* — downstream prompt code reads them.

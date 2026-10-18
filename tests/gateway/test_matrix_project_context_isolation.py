@@ -88,7 +88,7 @@ async def _source_for(adapter, room_id: str, event_id: str = "$event"):
         relates_to={},
     )
     assert ctx is not None
-    return ctx[-1]
+    return ctx[5]  # source (the tuple gained is_mentioned as its 7th slot)
 
 
 def _matrix_event(room_id: str, event_id: str, body: str = "What is next?"):
@@ -136,7 +136,7 @@ async def test_matrix_session_scope_auto_and_thread_preserve_synthetic_threads()
         relates_to={"rel_type": "m.thread", "event_id": "$root"},
     )
     assert real_thread is not None
-    assert real_thread[-1].thread_id == "$root"
+    assert real_thread[3] == "$root"  # thread_id slot (7-tuple since PR #46)
 
 
 @pytest.mark.asyncio
