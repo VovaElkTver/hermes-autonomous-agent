@@ -24,7 +24,7 @@ logger = logging.getLogger("controller")
 
 _ctx = None
 _lock_obj = threading.RLock()
-_conn = None
+_tls = threading.local()
 _scope_by_session: dict[str, str] = {}
 
 
@@ -43,12 +43,16 @@ def _enabled() -> bool:
 
 
 def _db():
-    global _conn
-    with _lock_obj:
-        if _conn is None:
-            from controller import model
-            _conn = model.connect()
-        return _conn
+    """Per-thread state.db connection. sqlite3 enforces thread affinity and the
+    gateway serves subagent tool hooks on worker threads: a module-level shared
+    connection fails closed on every autonomous dispatch from a foreign thread
+    (the 19.10 deleg_84b72e21 barrier outage)."""
+    conn = getattr(_tls, "conn", None)
+    if conn is None:
+        from controller import model
+        conn = model.connect()
+        _tls.conn = conn
+    return conn
 
 
 # ---- dispatch barrier --------------------------------------------------------

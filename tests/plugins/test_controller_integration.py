@@ -110,3 +110,42 @@ def test_plugin_registers_off_and_flag_gates(tmp_path, monkeypatch):
     out2 = [cb(tool_name="terminal", args={"command": "ls"}, task_id="k",
                session_id="s") for cb in reg["pre_tool_call"]]
     assert out2 == [None]
+
+
+def test_db_connection_is_per_thread(monkeypatch):
+    """_db() must hand out one connection PER THREAD, cached there.
+
+    19.10 outage: the module-level shared sqlite connection was created on the
+    gateway's main thread, so every subagent tool hook (worker thread) raised
+    'SQLite objects created in a thread can only be used...' and the barrier
+    fail-closed blocked ALL autonomous dispatches from delegate_task children.
+    """
+    import sqlite3
+    import threading
+    from controller import model
+    import plugins.controller as pc
+
+    created = []
+
+    def fake_connect(path=None):
+        created.append(threading.get_ident())
+        return sqlite3.connect(":memory:")
+
+    monkeypatch.setattr(model, "connect", fake_connect)
+    monkeypatch.setattr(pc, "_tls", threading.local())
+
+    c1, c1b = pc._db(), pc._db()
+    assert c1 is c1b and len(created) == 1  # cached on its own thread
+
+    out = {}
+
+    def in_thread():
+        c = pc._db()
+        c.close()  # same-thread close; cross-thread close is itself an affinity error
+        out["c"] = c
+
+    t = threading.Thread(target=in_thread)
+    t.start()
+    t.join()
+    assert out["c"] is not c1 and len(created) == 2  # foreign thread, fresh conn
+    c1.close()
