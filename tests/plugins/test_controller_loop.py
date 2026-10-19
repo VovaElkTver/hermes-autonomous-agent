@@ -78,6 +78,66 @@ def test_requeue_commands_route_from_user_only():
                               origin="tool", sender_ok=True) is None  # docs can't requeue
 
 
+def _mk_verifying(env, goal="g"):
+    """task in verifying with one done checkpoint step and NO review yet."""
+    from controller import model, transitions
+    c, wd = env
+    tid = model.create_task(c, owner="o", workdir=wd, goal=goal)
+    model.agree_contract(c, tid)
+    model.add_step(c, tid, "impl", "do", checkpoint=True)
+    model.set_permission(c, wd, enabled=True, granted_via="user-command")
+    c.execute("UPDATE ctl_task SET state='ready' WHERE task_id=?", (tid,)); c.commit()
+    sid = c.execute("SELECT step_id FROM ctl_step WHERE task_id=?", (tid,)).fetchone()["step_id"]
+    rid = model.start_run(c, task_id=tid, step_id=sid, contract_version=1,
+                          execution_epoch=1, worker_id="test")
+    model.set_run_status(c, rid, "finished")
+    model.finish_step(c, sid, "done")
+    transitions.transition(c, tid, "running", basis="test",
+                           permission=model.get_permission(c, wd))
+    transitions.transition(c, tid, "verifying", basis="test: all steps done")
+    return c, wd, tid, sid, rid
+
+
+def test_finish_verifying_absorbs_late_committed_review(env, monkeypatch):
+    """Prod 19.10 (3 occurrences, e.g. task-6da178e8ee: refusing transition
+    07:52:53 vs review row 07:53:29): the final checkpoint review commits AFTER
+    the guard's first read. The delayed re-check must complete the task, not
+    park needs_human. The review commits INSIDE the patched sleep — deterministic,
+    no clock dependency."""
+    import hashlib
+    import json as _json
+    import pathlib
+    from controller import loop, model
+    c, _wd, tid, sid, rid = _mk_verifying(env)
+    payload = {"file": "do", "v": 1}
+    ah = hashlib.sha256(_json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def commit_during_retry_wait(_s):
+        c2 = model.connect(pathlib.Path(c.execute("PRAGMA database_list").fetchone()[2]))
+        model.add_artifact(c2, tid, rid, "stdout", payload)
+        model.add_review(c2, sid, rid, ah, "pass", "test-judge", "late pass")
+        c2.close()
+
+    monkeypatch.setattr(loop.time, "sleep", commit_during_retry_wait)
+    outcome = loop.finish_verifying(c, tid)
+    state = c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()["state"]
+    assert outcome == "completed" and state == "completed", (outcome, state)
+
+
+def test_finish_verifying_still_parks_when_review_never_arrives(env, monkeypatch):
+    """The retry must not weaken the guard: no review at all -> needs_human
+    (fail-closed preserved, exactly one transition)."""
+    from controller import loop
+    c, _wd, tid, _sid, _rid = _mk_verifying(env)
+    monkeypatch.setattr(loop.time, "sleep", lambda s: None)
+    outcome = loop.finish_verifying(c, tid)
+    state = c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()["state"]
+    assert outcome == "needs_human" and state == "needs_human", (outcome, state)
+    n = c.execute("SELECT COUNT(*) FROM ctl_state_transition WHERE task_id=? AND to_state='needs_human'",
+                  (tid,)).fetchone()[0]
+    assert n == 1, n  # the first 'missing reviews' is a retry, not a park
+
+
 def test_latest_review_per_step_wins_over_stale_needs_human(env):
     """Dogfood 12.10: a retried step carried needs_human rows from dead attempts plus a
     fresh pass; verifying->completed scanned ALL rows and refused forever."""
