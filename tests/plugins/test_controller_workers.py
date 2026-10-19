@@ -55,6 +55,32 @@ def test_worker_passes_in_workdir_regression(env):
     assert wd in toks, "--in must receive the task workdir"
 
 
+def test_worker_model_routing_flags_reach_argv(env):
+    """Background steps can be routed to a dedicated endpoint (config:
+    controller.worker_model/worker_provider) so queue work never competes with
+    the interactive model. The fake bin must SEE -m/--provider."""
+    c, wd, fake = env
+    tid, st = _task(c, wd)
+    res = make_worker(c, hermes_bin=fake, timeout_s=60,
+                      model_id="qwen3.8-27b", provider="spark98")(
+        {"run_id": "r"}, {"task_id": tid, "workdir": wd, "goal": "X"},
+        {"step_id": st, "kind": "impl", "title": "code"})
+    toks = res["artifacts"][0]["stdout_tail"].split()
+    assert "-m" in toks and "qwen3.8-27b" in toks
+    assert "--provider" in toks and "spark98" in toks
+
+
+def test_worker_no_routing_means_inherit_default(env):
+    """Unset routing must NOT emit -m/--provider: pre-routing behavior preserved."""
+    c, wd, fake = env
+    tid, st = _task(c, wd)
+    res = make_worker(c, hermes_bin=fake, timeout_s=60)(
+        {"run_id": "r"}, {"task_id": tid, "workdir": wd, "goal": "X"},
+        {"step_id": st, "kind": "impl", "title": "code"})
+    toks = res["artifacts"][0]["stdout_tail"].split()
+    assert "-m" not in toks and "--provider" not in toks
+
+
 def test_workers_history_shape_reaches_http(env, monkeypatch):
     """PR#13 follow-up: make_review's history items lacked 'tool' -> build_messages
     KeyError failed every LIVE judge call to needs_human regardless of endpoint state."""

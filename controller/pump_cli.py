@@ -24,6 +24,16 @@ def main(argv=None) -> int:
     from controller.workers import make_review, make_worker
 
     conn = model.connect()
+    cfg = {}
+    try:
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly() or {}
+    except (ImportError, OSError) as exc:  # cli/config unreadable -> default routing, never crash the pump
+        import logging
+        logging.getLogger("controller.pump_cli").warning("config load failed: %s", exc)
+    judge_cfg = (cfg.get("plugins", {}).get("entries", {})
+                 .get("supervisor", {}).get("settings", {}).get("judge"))
+    cfg_ctl = cfg.get("controller", {}) or {}
     scopes = a.scope
     if not scopes:
         scopes = [r["workdir"] for r in conn.execute(
@@ -35,17 +45,12 @@ def main(argv=None) -> int:
         if not perm["enabled"]:
             out[scope] = [{"stop": "permission off"}]
             continue
-        judge_cfg = None
-        try:
-            from hermes_cli.config import load_config_readonly
-            cfg = load_config_readonly() or {}
-            judge_cfg = (cfg.get("plugins", {}).get("entries", {})
-                         .get("supervisor", {}).get("settings", {}).get("judge"))
-        except Exception:
-            pass
         out[scope] = run_cycle(
             conn, scope=scope, max_steps=a.max_steps,
-            worker_fn=make_worker(conn),
+            worker_fn=make_worker(
+                conn,
+                model_id=(cfg_ctl.get("worker_model") or None),
+                provider=(cfg_ctl.get("worker_provider") or None)),
             review_fn=make_review(conn, judge_cfg=judge_cfg))
     print(json.dumps(out, ensure_ascii=False, default=str))
     return 0
