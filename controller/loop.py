@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 from . import barrier, model, queue as Q, transitions
 
@@ -186,11 +187,30 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
 
 def finish_verifying(conn, task_id: str) -> str:
     """verifying -> completed|ready|needs_human by the review-currency guard outcome."""
+    # Transient-review race, prod-verified 19.10 (x3): the last checkpoint review
+    # can commit AFTER this guard's first SELECT (the judge LLM call inside
+    # review_fn can outlive the step-done transition of a parallel dispatch —
+    # transition 07:52:53 vs review row 07:53:29 on task-6da178e8ee). Refusing
+    # outright parks the task in needs_human for a human to unstick what will
+    # self-resolve; one delayed re-check absorbs the ordering without weakening
+    # the guard: persistent "missing reviews" still ends in needs_human.
+    outcome = _finish_verifying_once(conn, task_id, allow_retry=True)
+    if outcome == "retry":
+        time.sleep(5)
+        outcome = _finish_verifying_once(conn, task_id, allow_retry=False)
+    return outcome
+
+
+def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
+    """One attempt: completed | needs_human, or 'retry' when the refusal was
+    specifically about reviews that may still be in flight."""
     try:
         transitions.transition(conn, task_id, "completed", basis="all reviews current")
         return "completed"
     except ValueError as e:
         msg = str(e)
+        if "missing reviews" in msg and allow_retry:
+            return "retry"
         if "review" in msg:
             transitions.transition(conn, task_id, "needs_human", basis=f"verify: {msg}")
             return "needs_human"
