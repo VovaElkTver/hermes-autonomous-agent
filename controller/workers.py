@@ -109,7 +109,12 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
 
 def make_worker(conn, *, timeout_s: int = 1800,
                 hermes_bin: str | None = None, extra_env: dict | None = None,
-                preempt_poll_s: float = 2.0, grace_s: float = 60.0):
+                preempt_poll_s: float = 2.0, grace_s: float = 60.0,
+                model_id: str | None = None, provider: str | None = None):
+    # model_id/provider (config: controller.worker_model / worker_provider) route
+    # background steps to a dedicated endpoint (e.g. an idle GPU) so queue work
+    # never competes with the interactive model. Unset -> inherit the default,
+    # exactly the pre-routing behavior.
     # Resolve the OS branch once at binding time: the host OS cannot change
     # mid-run, and the tests that fake os.name='nt' must not have it leak into
     # stdlib internals (tempfile checks os.name too).
@@ -126,13 +131,18 @@ def make_worker(conn, *, timeout_s: int = 1800,
                    "HERMES_CONTROLLER_RUN_ID": run["run_id"]}
             if extra_env:
                 env.update(extra_env)
+            argv = [exe, "chat", "--query-file", qf.name, "--oneshot", "-Q",
+                    "--in", task["workdir"],
+                    "--run-budget", str(timeout_s)]
+            if provider:
+                argv += ["--provider", provider]
+            if model_id:
+                argv += ["-m", model_id]
             # start_new_session: the worker's own grandchildren (terminal/browser tools)
             # must die WITH it — SIGKILL of the direct child alone left orphans writing
             # into the workdir after the pump marked the step failed (review finding 4).
             proc = subprocess.Popen(
-                [exe, "chat", "--query-file", qf.name, "--oneshot", "-Q",
-                 "--in", task["workdir"],
-                 "--run-budget", str(timeout_s)],
+                argv,
                 cwd=task["workdir"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", env=env,
                 **spawn_kwargs)
