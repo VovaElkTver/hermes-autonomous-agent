@@ -28,7 +28,7 @@ def main(argv=None) -> int:
     try:
         from hermes_cli.config import load_config_readonly
         cfg = load_config_readonly() or {}
-    except Exception as exc:  # config unreadable -> default routing, never crash the pump
+    except (ImportError, OSError) as exc:  # cli/config unreadable -> default routing, never crash the pump
         import logging
         logging.getLogger("controller.pump_cli").warning("config load failed: %s", exc)
     judge_cfg = (cfg.get("plugins", {}).get("entries", {})
