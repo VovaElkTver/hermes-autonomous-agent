@@ -486,9 +486,9 @@ def _interpolate_env_vars(value):
             if not resolved:
                 missed.append(m.group(0))
             return resolved or m.group(0)
-        text = _ENV_VAR_PATTERN.sub(_replace, template)
-        if text == template and not missed:
+        if not _ENV_VAR_PATTERN.search(template):
             return value
+        text = _ENV_VAR_PATTERN.sub(_replace, template)
         return _RenderedStr(text, template, missed=bool(missed), unset_ref=missed == [template])
     if isinstance(value, dict):
         return {k: _interpolate_env_vars(v) for k, v in value.items()}

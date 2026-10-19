@@ -30,6 +30,12 @@ def test_unset_whole_ref_counts_as_absent_and_set_values_pass_verbatim():
     assert result["PARTIAL"] == "${OPT_DIR}/bin"
     assert result["RESOLVED_LITERAL"] == "${STILL_UNSET}"  # a set value is data, whatever it looks like
 
+    # Unset at load, set (even to its own placeholder text) by connect: the re-render passes it.
+    from tools.mcp_tool_config import _interpolate_env_vars
+    loaded = _interpolate_env_vars({"FORWARD": "${LATE}"})
+    with patch.dict("os.environ", {**PARENT, "LATE": "${LATE}"}, clear=True):
+        assert _build_safe_env(_interpolate_env_vars(loaded))["FORWARD"] == "${LATE}"
+
 
 def test_child_spawned_through_the_sdk_merge_sees_the_documented_env():
     from mcp.client.stdio import get_default_environment
