@@ -110,3 +110,37 @@ materialize ждёт человеческого «иди task-…», как лю
 ## Отключение
 Снять флаг + убрать controller из plugins.enabled. Ничто кроме controller/ не читает ctl_*;
 таблицы можно удалить вручную (DROP TABLE ctl_*), данные sessions/triggers не затронуты.
+
+
+## To-do layer (ctl_todo) — слой намерений над очередью
+
+To-do — заметка «не забыть заняться» без контракта: ни steps, ни lease, ни приёмки.
+В очередь не попадает сама: только явная операция `materialize` создаёт draft-задачу
+с полным контрактом одним атомарным транзакционным шагом. Pump из `ctl_todo` не
+читает вообще (`queue.eligible/next_step/claim` работают только с ctl_task/ctl_step) —
+отдельный регресс-тест на слепость claim'а.
+
+Приватность: `text` виден владельцу; статусные представления отдают только
+owner/status/deadline_hint (менеджеру видно, что не забыть, а не текст заметки).
+
+CLI:
+```
+python -m controller.pump_cli todo add --owner OWNER --text TEXT [--deadline-hint D]
+python -m controller.pump_cli todo list [--owner O] [--status S] [--full]
+python -m controller.pump_cli todo materialize TODO_ID --workdir DIR
+```
+
+Живой демо-прогон (20.10, чистый каталог, schema-ensure на connect):
+```
+$ todo add  --owner qwen --text '...' --deadline-hint 21.10
+{"ok": true, "todo_id": "todo-d9649c99f7"}
+$ todo list
+{"ok": true, "todos": [{"todo_id": "todo-d9649c99f7", "owner": "qwen", "status": "open", ...}]}
+$ todo materialize todo-d9649c99f7 --workdir /tmp/todo-demo/wd
+{"ok": true, "todo_id": "todo-d9649c99f7", "task_id": "task-8f018c7b9c"}
+$ todo list --status open
+{"ok": true, "todos": []}        # задача осталась в очереди state=draft
+```
+
+Тесты: `tests/plugins/test_controller_todo.py` (жизненный цикл, privacy view,
+слепость pump_claim) + общий контроллер-слайт.
