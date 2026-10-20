@@ -92,9 +92,20 @@ def apply(conn, op: dict, *, scope: str) -> dict:
                 "error": f"cannot agree a task in state {row['state']!r} (draft/ready only)"}
     if kind == "status":
         rows = conn.execute("SELECT task_id, state, contract_version FROM ctl_task").fetchall()
-        return {"ok": True, "op": kind,
-                "tasks": [dict(r) for r in rows],
-                "permission": model.get_permission(conn, scope)}
+        # To-do layer: manager/status view shows owner/status/deadline only —
+        # never the internal text (privacy: the text is the owner's, other
+        # specialists must not read it; todo_list's default omits it).
+        todos = model.todo_list(conn, status="open")
+        return {
+            "ok": True,
+            "op": kind,
+            "tasks": [dict(r) for r in rows],
+            "todos": [
+                {k: t[k] for k in ("todo_id", "owner", "status", "deadline_hint")}
+                for t in todos
+            ],
+            "permission": model.get_permission(conn, scope),
+        }
     return {"ok": False, "error": f"unknown op {kind}"}
 
 

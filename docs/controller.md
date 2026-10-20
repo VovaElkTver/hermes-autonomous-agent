@@ -73,6 +73,40 @@ controller.model / controller.transitions — одна authoritative точка:
   воркер-сабпроцесс режется `_kill_tree` на следующем полле `workers._await_worker`,
   не доигрывая тёрн; brief возобновлённого шага получает блок `## RESUME`.
 
+## To-do слой (намерения над очередью, глава 11 agency-model)
+
+Очередь (`ctl_task` + контракт/steps/приёмка/lease) несёт **обязательства**.
+Слой to-do (`ctl_todo`) — **намерение-заметка** «не забыть, что придётся
+заняться»: без контракта, без steps, без lease. Pump его **не видит и не
+трогает** — `queue.eligible`/`next_step`/claim читают только `ctl_task` и
+`ctl_step` (покрыто тестом `test_pump_claim_does_not_see_ctl_todo`).
+
+Таблица `ctl_todo`: `todo_id, owner, text, origin_ref, deadline_hint,
+status(open|materialized|dropped), created_at, materialized_task_id`.
+
+Materialize to-do → задача = **одна атомарная операция**
+(`controller.model.todo_materialize`): создаёт `ctl_task` в состоянии
+draft + MATERIAL-контракт и бэклинт todo → `materialized_task_id` в одном
+транзакционном коммите (как `create_task`/`clone_watch`). Повторный
+materialize идемпотентен (возвращает тот же task_id). Дropped-и
+materialized-to-do не материализуются; материалized нельзя drop — только
+cancel задачи.
+
+Приватность: `text` приватен другим специалистам (в статусных отчётах его
+нет), но НЕ приватен инфраструктуре восстановления — менеджер видит
+`owner/status/deadline_hint`. В статусной команде «покажи статус задач»
+открытые todo отдаются без `text`/`origin_ref`.
+
+CLI (`python -m controller.pump_cli todo …`):
+- `todo add --owner O --text T [--origin-ref REF] [--deadline-hint HINT]`
+- `todo list [--owner O] [--status open|materialized|dropped] [--full]`
+  (default — менеджер-вью без `text`; `--full` — полный вью владельца)
+- `todo materialize TODO_ID --workdir DIR [--owner O]`
+- `todo drop TODO_ID` (soft-delete, строка остаётся для аудита)
+
+Автоматического попадания to-do в очередь нет: draft-задача после
+materialize ждёт человеческого «иди task-…», как любой draft.
+
 ## Отключение
 Снять флаг + убрать controller из plugins.enabled. Ничто кроме controller/ не читает ctl_*;
 таблицы можно удалить вручную (DROP TABLE ctl_*), данные sessions/triggers не затронуты.

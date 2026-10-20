@@ -419,3 +419,137 @@ def consume_restart_intent(conn) -> str | None:
         conn.commit()
         return row["value"]
     return None
+
+
+# ---- to-do layer (intent-notes; NOT queue entries) ---------------------------
+#
+# ctl_todo rows are lightweight reminders. They carry no contract, no steps,
+# no acceptance criteria. The pump NEVER selects from ctl_todo — only a
+# human-triggered `todo_materialize` promotes one into a real ctl_task with
+# a full contract. Privacy: `text` is withheld from manager/status views;
+# only owner/status/deadline_hint are surfaced.
+
+TODO_STATUSES = frozenset({"open", "materialized", "dropped"})
+
+
+def todo_add(conn, *, owner: str, text: str, origin_ref: str | None = None,
+            deadline_hint: str | None = None) -> str:
+    """Create a to-do intent-note. Returns the new todo_id."""
+    tid = new_id("todo")
+    conn.execute(
+        "INSERT INTO ctl_todo (todo_id, owner, text, origin_ref, deadline_hint,"
+        " status, created_at, materialized_task_id)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (tid, owner, text, origin_ref, deadline_hint, "open", time.time(), None),
+    )
+    conn.commit()
+    return tid
+
+
+def todo_list(conn, owner: str | None = None, status: str | None = None,
+             include_text: bool = False) -> list[dict]:
+    """Return to-do entries. By default `text` is omitted (privacy: manager
+    sees owner/status/deadline only). Pass include_text=True for the owner's
+    own full view."""
+    cols = "todo_id, owner, status, deadline_hint, created_at, materialized_task_id"
+    if include_text:
+        cols += ", text, origin_ref"
+    where = " WHERE 1=1"
+    params: list = []
+    if owner:
+        where += " AND owner=?"
+        params.append(owner)
+    if status:
+        where += " AND status=?"
+        params.append(status)
+    rows = conn.execute(
+        f"SELECT {cols} FROM ctl_todo{where} ORDER BY created_at DESC",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def todo_get(conn, todo_id: str) -> dict | None:
+    """Fetch a single to-do by id (full record including text)."""
+    row = conn.execute("SELECT * FROM ctl_todo WHERE todo_id=?", (todo_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def todo_materialize(conn, todo_id: str, workdir: str, *,
+                     owner: str | None = None, position: str = "tail") -> str:
+    """Promote a to-do into a real controller task (draft state) in ONE
+    transaction. Creates the ctl_task + contract row and back-links the
+    todo. Returns the new task_id.
+
+    Idempotent: if the todo is already materialized, returns the existing
+    materialized_task_id.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT * FROM ctl_todo WHERE todo_id=?", (todo_id,)
+        ).fetchone()
+        if row is None:
+            conn.execute("ROLLBACK")
+            raise LookupError(f"no such todo: {todo_id}")
+        if row["status"] == "materialized" and row["materialized_task_id"]:
+            conn.execute("ROLLBACK")
+            return row["materialized_task_id"]  # idempotent
+        if row["status"] != "open":
+            conn.execute("ROLLBACK")
+            raise ValueError(f"cannot materialize todo in status {row['status']!r}")
+
+        task_owner = owner or row["owner"]
+        tid = _create_task_inline(
+            conn,
+            owner=task_owner,
+            workdir=workdir,
+            goal=f"[from todo {todo_id}] {row['text']}",
+            position=position,
+        )
+        conn.execute(
+            "UPDATE ctl_todo SET status='materialized', materialized_task_id=?"
+            " WHERE todo_id=?",
+            (tid, todo_id),
+        )
+        conn.commit()
+        return tid
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+
+
+def _create_task_inline(conn, *, owner: str, workdir: str, goal: str,
+                       position: str = "tail") -> str:
+    """Inline task creation (avoids create_task, which commits mid-transaction).
+    Used by todo_materialize so task+contract+todo-backlink land in one commit."""
+    if position not in ("head", "tail"):
+        raise ValueError(f"unknown queue position: {position}")
+    tid = new_id("task")
+    now = time.time()
+    conn.execute(
+        "INSERT INTO ctl_task VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (tid, owner, "", str(Path(workdir).resolve()), goal, "draft", 1, None, now, now),
+    )
+    conn.execute(
+        "INSERT INTO ctl_contract_revision (task_id,version,change_class,fields,supersedes,agreed_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (tid, 1, "MATERIAL",
+         json.dumps(_empty_contract(goal, priority=0.0), ensure_ascii=False),
+         None, None),
+    )
+    return tid
+
+
+def todo_drop(conn, todo_id: str) -> None:
+    """Mark a to-do as dropped (soft delete; the row is kept for audit)."""
+    row = conn.execute("SELECT status FROM ctl_todo WHERE todo_id=?", (todo_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"no such todo: {todo_id}")
+    if row["status"] == "materialized":
+        raise ValueError("cannot drop a materialized todo; cancel the task instead")
+    conn.execute("UPDATE ctl_todo SET status='dropped' WHERE todo_id=?", (todo_id,))
+    conn.commit()
