@@ -24,8 +24,12 @@ OUTBOUND = {
     "registry-push": re.compile(r"\b(?:docker|podman)\s+push\b|\btwine\s+upload\b|\bnpm\s+publish\b"),
     "rm-recursive": re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|-r\s+-f|-f\s+-r|--recursive)\b"),
 }
-DELEGATION_ASK = re.compile(r"\b(?:sub-?agents?|parallel agents?|delegate|delegation)\b", re.IGNORECASE)
-DELEGATION_NEG = re.compile(r"\b(?:don'?t|do not|no|never|without)\s+(?:\w+\s+){0,2}(?:sub-?agents?|delegat\w*)", re.IGNORECASE)
+DELEGATION_ASK = re.compile(r"\b(?:sub-?agents?|parallel agents?|delegate|delegation)\b"
+                            r"|(?:субагент\w*|суб-агент\w*|делегат\w*|делегироват\w*)",
+                            re.IGNORECASE)
+DELEGATION_NEG = re.compile(r"\b(?:don'?t|do not|no|never|without)\s+(?:\w+\s+){0,2}(?:sub-?agents?|delegat\w*)"
+                            r"|\b(?:без|никаких|не)\s+(?:\w+\s+){0,2}(?:субагент\w*|делегат\w*)",
+                            re.IGNORECASE)
 
 _lock = threading.Lock()                     # tool batches run on a thread pool
 _failures: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))

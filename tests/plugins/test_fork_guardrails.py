@@ -107,6 +107,19 @@ def test_delegation_requires_ask(hooks):
     assert directive(hooks, "delegate_task", {"goal": "x"}) == (None, None)
 
 
+def test_delegation_ru_ask_and_negation(hooks):
+    """RU fleet: 'го субагенты' authorizes; 'никаких делегатов' revokes."""
+    assert directive(hooks, "delegate_task", {"goal": "x"}) == ("block", None)
+    invoke(hooks, "pre_llm_call", session_id="s1", user_message="го субагенты",
+           conversation_history=[], is_first_turn=False, model="m", platform="matrix")
+    assert directive(hooks, "delegate_task", {"goal": "x"}) == (None, None)
+    invoke(hooks, "post_tool_call", tool_name="delegate_task", args={"goal": "x"},
+           result={"status": "ok"}, session_id="s1", duration=1.0)
+    invoke(hooks, "pre_llm_call", session_id="s1", user_message="никаких делегатов",
+           conversation_history=[], is_first_turn=False, model="m", platform="matrix")
+    assert directive(hooks, "delegate_task", {"goal": "y"}) == ("block", None)
+
+
 def test_delegation_flag_one_shot_per_round(hooks):
     """Author's fix under review: 'delegate' authorises ONE dispatch, not the session."""
     invoke(hooks, "pre_llm_call", session_id="s1", user_message="delegate this",
