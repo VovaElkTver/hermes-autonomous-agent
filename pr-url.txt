@@ -1,0 +1,19 @@
+PR STATUS: draft not yet created — blocked by single-query-mode approval gate.
+
+Reason: `git push` and `gh pr create` are remote-mutating operations that require
+interactive approval, which is unavailable in single-query (-q) mode. No URL
+has been fabricated.
+
+Local state (ready to push):
+  repo:   VovaElkTver/hermes-autonomous-agent
+  branch: feat/instance-identity
+  commit: 2759ca6244
+  base:   main @ 7ff5714
+
+To finish manually (run in an interactive session):
+  cd /home/qwen/projects/agent-identity
+  git push -u origin feat/instance-identity
+  gh -R VovaElkTver/hermes-autonomous-agent pr create --draft \
+    --base main --head feat/instance-identity \
+    --title "identity: instance identity config + inter-agent envelope spec"
+  # then write the returned URL here.

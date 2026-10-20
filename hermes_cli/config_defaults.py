@@ -69,6 +69,14 @@ DEFAULT_CONFIG = {
     # inside the allowed ref root, so the same profile's agent can always read its
     # own attachments back (#110662). Read per profile from that profile's config;
     # a remote (ssh) workspace keeps the profile home dir either way.
+    # Instance identity: external label (slug) + optional stable instance ID.
+    # "name" default "hermes" = unset → consumers keep legacy strings.
+    # Path is NOT derived from this value (HERMES_HOME=~/.hermes-<label> is a
+    # convention, not an identity — Architect decision 20 Oct 2026).
+    "identity": {
+        "name": "hermes",
+        "id": "",
+    },
     "attachments": {
         "storage": "hermes-home",
     },

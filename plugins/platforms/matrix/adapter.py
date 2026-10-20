@@ -1172,8 +1172,14 @@ class MatrixAdapter(BasePlatformAdapter):
                 return await self._abort_connect(api)
         elif self._password and self._user_id:
             try:
+                _dev_name = "Hermes Agent"
+                try:
+                    from hermes_cli.identity import instance_label
+                    _dev_name = instance_label() or _dev_name
+                except Exception:
+                    pass
                 resp = await client.login(
-                    identifier=self._user_id, password=self._password, device_name="Hermes Agent",
+                    identifier=self._user_id, password=self._password, device_name=_dev_name,
                     device_id=self._device_id or None)
                 if resp and hasattr(resp, "device_id"):
                     client.device_id = resp.device_id
@@ -1216,6 +1222,12 @@ class MatrixAdapter(BasePlatformAdapter):
             await crypto_db.start()
             self._crypto_db = crypto_db
             _acct_id = self._user_id or "hermes"
+            if not self._user_id:
+                try:
+                    from hermes_cli.identity import instance_label
+                    _acct_id = instance_label() or _acct_id
+                except Exception:
+                    pass
             # Key on the RESOLVED client.device_id (token's real device), not the configured
             # one, or the Olm account is stored under a key that can never be looked up.
             _pickle_key = f"{_acct_id}:{client.device_id or self._device_id or 'default'}"

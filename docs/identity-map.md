@@ -1,9 +1,9 @@
 # Instance Identity Map
 
-**Fork:** `VovaElkTver/hermes-autonomous-agent` · **Branch:** `main` @ 7ff5714
+**Fork:** `VovaElkTver/hermes-autonomous-agent` · **Audited on:** `main` @ 7ff5714 · **Implemented on:** `feat/instance-identity`
 **Audit date:** 2026-10-20
 
-## Decision (Architect, 20 Oct 2025)
+## Decision (Architect, 20 Oct 2026)
 
 - `identity.name` and `identity.id` are new top-level keys in `config.yaml`.
 - `identity.name` is a **slug** (1-32 chars, `[a-z0-9._-]`, starts/ends with alnum).
@@ -63,10 +63,28 @@ identity:
 | `identity_id()` | `str \| None` |
 | `validate_instance_slug(s)` | `bool` |
 
+`hermes_cli/identity_resolver.py` — Part 2 (envelope) helpers:
+
+| Function / class | Returns |
+|---|---|
+| `IdentityResolver.resolve(transport)` | `position_id` or the explicit literal `"unregistered"` (never a silent `"hermes"` fallback) |
+| `IdentityResolver.from_registry(path)` | resolver from a JSON bindings file |
+| `format_envelope(...)` | one pipe-delimited event line, see `docs/envelope-spec.md` |
+| `append_event(path, line)` | appends one event line to a log file |
+
+## Part 2: inter-agent envelope (added 2026-10-20, Architect directive)
+
+- **Spec:** `docs/envelope-spec.md` — event format `ts \| from_id -> to_id \| about=... \| kind=... \| msg_id \| transport \| correlation_id`; canonical name is the registry `position_id`; transport names (matrix localpart, A2A name, mq subject, origin_json sender) are registry bindings resolved by `hermes_cli.identity_resolver`, never substituted as canonical identity.
+- **Log projection:** `ctl_event`, journal and text logs project these envelope fields — no identity guessing from free text.
+- **Demo log:** `docs/envelope-demo.log` (5 lines, three distinct `about` objects, `from`/`to` across three positions).
+- **Out of scope here:** transport delivery (MQ/Matrix courier) is a separate task — this step only covers identity inside the envelope and its log projection.
+
 ## Installer changes
 
 - `scripts/install.sh` — `stage_config()` prompts for instance name (interactive
   only), validates slug, appends `identity:` block to `config.yaml`.
 - `scripts/install.ps1` — `Stage-Config` does the same via `Read-Host`.
 - `scripts/install.cmd` — thin wrapper, no change needed.
-- `hermes_cli/setup.py` — new wizard step `setup_instance_identity`.
+- `hermes_cli/setup.py` — deferred (out of scope for this step): the interactive
+  `hermes setup` wizard does not yet prompt for the instance name; the installers
+  above are the only onboarding surface that writes `identity.*` today.

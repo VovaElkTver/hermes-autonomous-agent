@@ -1216,7 +1216,44 @@ function Stage-Config {
     $cfg = Join-Path $HermesHome "config.yaml"
     $cfgExample = Join-Path $InstallDir "cli-config.yaml.example"
     if (-not (Test-Path $cfg) -and (Test-Path $cfgExample)) { Copy-Item $cfgExample $cfg }
+    Invoke-Stage-Identity
     Write-Ok "config prepared in $HermesHome"
+}
+
+# Instance identity: prompt for the external label of this instance (default
+# "hermes"), validate it as a slug, and record identity.name in config.yaml.
+# Paths are NOT renamed from it -- HERMES_HOME=~/.hermes-<label> is a
+# convention, not an identity. Non-interactive installs keep the default.
+function Invoke-Stage-Identity {
+    $name = "hermes"
+    if (-not $Script:NonInteractive) {
+        try {
+            $reply = Read-Host "Instance name [hermes]"
+            if ($reply) { $name = $reply }
+        } catch { }
+    }
+    if ($name -cnotmatch '^[a-z0-9][a-z0-9._-]{0,30}[a-z0-9]$') {
+        Write-Note "instance name '$name' rejected (need 1-32 chars of [a-z0-9._-], start/end alnum); keeping 'hermes'"
+        $name = "hermes"
+    }
+    $cfg = Join-Path $HermesHome "config.yaml"
+    if (-not (Test-Path $cfg)) { return }
+    if ((Get-Content $cfg) -match '^identity:') {
+        Write-Note "identity block already present in config.yaml; leaving it untouched"
+        return
+    }
+    Add-Content $cfg @"
+
+# Instance identity (set by the installer). name = external label of this
+# instance (default "hermes" = unset, keeps legacy behaviour everywhere);
+# id = optional stable instance ID for the inter-agent registry.
+identity:
+  name: $name
+  id: ""
+"@
+    if ($name -ne "hermes") {
+        Write-Ok "instance name '$name' written to $cfg (identity.name)"
+    }
 }
 
 function Invoke-InstalledHermes([string[]]$CommandArgs) {
