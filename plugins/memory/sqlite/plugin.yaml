@@ -1,0 +1,5 @@
+name: sqlite
+version: 0.2.0
+description: "Local SQLite semantic memory — temporal facts with vector recall (qwen3-vl-embedding), entity graph, and durable pre-compress checkpoints (checkpoint API v2). Successor of the memgraph provider; no server dependency."
+hooks:
+  - on_memory_write
