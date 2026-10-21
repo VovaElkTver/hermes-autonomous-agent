@@ -33,7 +33,8 @@
 >   mandatory `from` / `to` / `about` envelope, so "who speaks about whom" is a resolved
 >   field, not a guess from text.
 >
-> Mechanics: [`docs/controller.md`](docs/controller.md).
+> Mechanics: [`docs/controller.md`](docs/controller.md) · fork-only slash commands
+> (`/for`, `/fork`, `/join`, `/att`, `/initiate-setup`): [`docs/controller.md#слэш-команды-этого-форка`](docs/controller.md#слэш-команды-этого-форка).
 
 <p align="center">
   <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> | <a href="https://hermes-agent.nousresearch.com/">Hermes Desktop</a>
