@@ -25,6 +25,14 @@
 >   `bash <(curl -fsSL https://raw.githubusercontent.com/VovaElkTver/hermes-autonomous-agent/main/fork-install.sh)`
 >   Windows: `iwr -useb https://raw.githubusercontent.com/VovaElkTver/hermes-autonomous-agent/main/fork-install.ps1 | iex`
 >
+> - **To-do intent layer** — `ctl_todo` holds intention-notes ("don't forget to pick this
+>   up") above the obligations queue: no contract, invisible to step claims, and one
+>   *materialize* operation turns an intention into a drafted contract (`controller.pump_cli todo …`).
+> - **Instance identity & envelope** — each install carries `identity.name` / `identity.id`
+>   in config (an external label, never a path); inter-agent messages and logs carry a
+>   mandatory `from` / `to` / `about` envelope, so "who speaks about whom" is a resolved
+>   field, not a guess from text.
+>
 > Mechanics: [`docs/controller.md`](docs/controller.md).
 
 <p align="center">
