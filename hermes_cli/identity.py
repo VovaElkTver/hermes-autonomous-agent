@@ -19,10 +19,10 @@ import re
 
 __all__ = [
     "DEFAULT_INSTANCE_NAME",
-    "validate_instance_slug",
+    "identity_id",
     "identity_name",
     "instance_label",
-    "identity_id",
+    "validate_instance_slug",
 ]
 
 DEFAULT_INSTANCE_NAME: str = "hermes"

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,8 +25,8 @@ __all__ = [
     "VALID_KINDS",
     "Binding",
     "IdentityResolver",
-    "format_envelope",
     "append_event",
+    "format_envelope",
 ]
 
 #: Returned when a transport name has no registry binding.
@@ -76,7 +76,7 @@ class IdentityResolver:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_registry(cls, path: str | Path) -> "IdentityResolver":
+    def from_registry(cls, path: str | Path) -> IdentityResolver:
         """Load bindings from a JSON registry file.
 
         Expected schema::
@@ -114,7 +114,7 @@ class IdentityResolver:
         return cls(out)
 
     @classmethod
-    def from_dict(cls, bindings: dict[str, Binding]) -> "IdentityResolver":
+    def from_dict(cls, bindings: dict[str, Binding]) -> IdentityResolver:
         """Create from an in-memory mapping (useful in tests)."""
         return cls(bindings)
 
@@ -181,10 +181,10 @@ def _iso(ts: Any) -> str:
     """Normalise a timestamp to an ISO-8601 string."""
     if isinstance(ts, datetime):
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         return ts.isoformat()
     if ts is None:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
     return str(ts)
 
 
