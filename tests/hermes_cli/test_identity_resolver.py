@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 import pytest
@@ -137,7 +137,7 @@ def test_from_registry_malformed(tmp_path: Path) -> None:
 # ------------------------------------------------------------------
 
 def test_format_envelope_fields() -> None:
-    ts = datetime(2025, 10, 20, 12, 0, 0, tzinfo=timezone.utc)
+    ts = datetime(2025, 10, 20, 12, 0, 0, tzinfo=UTC)
     line = format_envelope(
         ts=ts,
         from_id="architect-001",
