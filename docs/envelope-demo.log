@@ -1,0 +1,5 @@
+2025-10-20T10:00:00+00:00 | architect-001 -> worker-rtx5090 | about=task-9d0d38a24b | kind=просьба | msg-demo-001 | matrix | corr-task-9d0d38a24b
+2025-10-20T10:05:32+00:00 | worker-rtx5090 -> architect-001 | about=task-9d0d38a24b | kind=информирование | msg-demo-002 | matrix | corr-task-9d0d38a24b
+2025-10-20T10:12:10+00:00 | architect-001 -> worker-win11 | about=task-4f8e1a7c2d | kind=передача | msg-demo-003 | a2a | corr-task-4f8e1a7c2d
+2025-10-20T10:15:44+00:00 | worker-win11 -> worker-rtx5090 | about=repo:hermes-autonomous-agent | kind=консультация | msg-demo-004 | mq | corr-task-4f8e1a7c2d
+2025-10-20T10:18:00+00:00 | worker-rtx5090 -> architect-001 | about=task-9d0d38a24b | kind=возражение | msg-demo-005 | matrix | corr-task-9d0d38a24b

@@ -918,6 +918,7 @@ stage_config() {
     if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$INSTALL_DIR/cli-config.yaml.example" ]; then
         cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
     fi
+    _identity_stage
     log_success "config prepared in $HERMES_HOME"
 }
 
@@ -925,6 +926,47 @@ stage_config() {
 # IS the script. Probe by opening /dev/tty -- a Docker build has the device
 # node in its mount namespace but opening it fails (ENXIO).
 has_terminal() { (: </dev/tty) 2>/dev/null; }
+
+# Instance identity: prompt for the external label of this instance (default
+# "hermes"), validate it as a slug, and record identity.name in config.yaml.
+# Paths are NOT renamed from it -- HERMES_HOME=~/.hermes-<label> is a
+# convention, not an identity. Non-interactive installs keep the default.
+_identity_stage() {
+    local name="hermes"
+    if [ "$NON_INTERACTIVE" != true ] && has_terminal; then
+        local reply=""
+        read -r -e -p "Instance name [hermes]: " reply </dev/tty || true
+        name="${reply:-hermes}"
+        # slug: 1-32 chars, [a-z0-9._-], must start/end alphanumeric
+        if ! printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,30}[a-z0-9]$'; then
+            log "instance name '$name' rejected (need 1-32 chars of [a-z0-9._-], start/end alnum); keeping 'hermes'"
+            name="hermes"
+        fi
+    fi
+    _identity_write_config "$name"
+}
+
+_identity_write_config() {
+    local cfg="$HERMES_HOME/config.yaml"
+    local name="${1:-hermes}"
+    [ -f "$cfg" ] || return 0
+    if grep -Eq '^identity:' "$cfg"; then
+        log "identity block already present in config.yaml; leaving it untouched"
+        return 0
+    fi
+    cat >> "$cfg" <<EOF
+
+# Instance identity (set by the installer). name = external label of this
+# instance (default "hermes" = unset, keeps legacy behaviour everywhere);
+# id = optional stable instance ID for the inter-agent registry.
+identity:
+  name: $name
+  id: ""
+EOF
+    if [ "$name" != "hermes" ]; then
+        log_success "instance name '$name' written to $cfg (identity.name)"
+    fi
+}
 
 stage_setup() {
     if [ "$NON_INTERACTIVE" = true ]; then return 0; fi

@@ -76,8 +76,26 @@ def _orphan_timeout() -> float:
     return min(float(_MAX_ORPHAN_TIMEOUT), max(float(_MIN_ORPHAN_TIMEOUT), _reply_timeout()))
 
 
+def _profile_agent_brand(slug: str) -> str:
+    """Display name for a per-profile served agent: identity.name if set, else "Hermes"."""
+    try:
+        from hermes_cli.identity import instance_label
+
+        return instance_label() or "Hermes"
+    except Exception:
+        return "Hermes"
+
+
 def _default_agent_name() -> str:
     # Scope-aware: a secondary multiplex profile must not borrow the default profile's A2A_AGENT_NAME.
+    # Precedence: identity.name (explicit) > A2A_AGENT_NAME > hermes-<hostname> > "hermes-agent"
+    try:
+        from hermes_cli.identity import instance_label
+        _ident = instance_label()
+    except Exception:
+        _ident = None
+    if _ident:
+        return _ident
     name = _get_scoped_secret("A2A_AGENT_NAME", "").strip()
     if name:
         return name
@@ -417,7 +435,7 @@ class A2AAdapter(BasePlatformAdapter):
             agents[slug] = {
                 "slug": slug, "path": "/" + path_segment, "tenant": tenant, "profile": profile or slug,
                 "local": bool(val.get("local")) or profile in ("", "default", self._active_profile),
-                "name": str(val.get("name") or f"Hermes {slug}"),
+                "name": str(val.get("name") or _profile_agent_brand(slug)),
                 "description": str(val.get("description") or f"Hermes profile '{profile or slug}' exposed over A2A."),
                 "advertised_toolsets": list(toolsets or []),
                 "timeout": int(val.get("timeout") or _reply_timeout()),
