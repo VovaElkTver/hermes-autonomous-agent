@@ -728,8 +728,19 @@ CREATE TABLE IF NOT EXISTS ctl_budget_counter (
   limit_value REAL, PRIMARY KEY (task_id, metric)
 );
 CREATE TABLE IF NOT EXISTS ctl_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ctl_todo (
+  todo_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  text TEXT NOT NULL,
+  origin_ref TEXT,
+  deadline_hint TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at REAL NOT NULL,
+  materialized_task_id TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_ctl_run_task_status ON ctl_run(task_id, run_status);
 CREATE INDEX IF NOT EXISTS idx_ctl_event_task ON ctl_event(task_id, ts);
+CREATE INDEX IF NOT EXISTS idx_ctl_todo_status ON ctl_todo(status, owner);
 -- ---- end controller ----
 """
 
