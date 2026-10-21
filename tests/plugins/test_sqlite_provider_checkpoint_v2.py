@@ -82,7 +82,7 @@ def test_best_effort_mode_swallows_store_failure(provider, monkeypatch):
 def test_retention_bounds_checkpoint_history(provider, monkeypatch):
     monkeypatch.setitem(provider._config, "checkpoint_keep", 3)
     for i in range(6):
-        provider.on_pre_compress([{"role": "user", "content": "turn %d" % i}], require_checkpoint=True)
+        provider.on_pre_compress([{"role": "user", "content": f"turn {i}"}], require_checkpoint=True)
     rows = provider.checkpoint_list(limit=50)
     assert len(rows) == 3
     newest = provider.checkpoint_payload(rows[0]["id"])
