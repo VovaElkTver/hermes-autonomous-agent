@@ -28,6 +28,17 @@ def test_parse_args_basic_limit_and_instruction():
     assert parsed["limit"] == 5
 
 
+def test_parse_args_go_flag():
+    parsed = parse_for_args("/data/corpus индексировать --go")
+    assert parsed["go"] is True
+    assert parsed["path"] == "/data/corpus"
+    assert parsed["instruction"] == "индексировать"
+    assert parse_for_args("/data/corpus")["go"] is False
+    assert parse_for_args("/x a --limit 3 --go")["limit"] == 3
+    with pytest.raises(ValueError, match="before any flags"):
+        parse_for_args("--go")
+
+
 def test_parse_args_requires_path():
     with pytest.raises(ValueError):
         parse_for_args("   ")

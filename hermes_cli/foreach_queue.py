@@ -33,10 +33,11 @@ class ForPlan:
 
 
 def parse_for_args(arg: str) -> dict:
-    """Split ``<path|glob> [instruction...] [--limit N]`` into its parts."""
+    """Split ``<path|glob> [instruction...] [--limit N] [--go]``."""
     tokens = arg.strip().split()
     if not tokens:
-        raise ValueError("usage: /for <path|glob> [instruction...] [--limit N]")
+        raise ValueError(
+            "usage: /for <path|glob> [instruction...] [--limit N] [--go]")
     limit = DEFAULT_LIMIT
     if "--limit" in tokens:
         i = tokens.index("--limit")
@@ -47,9 +48,15 @@ def parse_for_args(arg: str) -> dict:
         del tokens[i:i + 2]
         if limit < 1 or limit > HARD_MAX:
             raise ValueError(f"--limit must be 1..{HARD_MAX}")
+    go = False
+    if "--go" in tokens:
+        go = True
+        tokens.remove("--go")
+    if not tokens:
+        raise ValueError("/for needs a path or glob before any flags")
     path = tokens[0]
     instruction = " ".join(tokens[1:]).strip()
-    return {"path": path, "instruction": instruction, "limit": limit}
+    return {"path": path, "instruction": instruction, "limit": limit, "go": go}
 
 
 def expand_items(path_expr: str, limit: int = DEFAULT_LIMIT) -> tuple[str, list[str], int]:
