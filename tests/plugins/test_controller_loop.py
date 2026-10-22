@@ -409,3 +409,73 @@ def test_task_with_open_run_never_dispatched_twice(env):
     loop.run_cycle(c, scope=wd, worker_fn=counting_worker, review_fn=pass_review)
     assert calls == ["s1"], calls
 
+
+# --- review backfill on verify (dogfood 22.10: verifying<->needs_human park loop) ---
+
+def _verifying_no_review(env, goal):
+    """Same as _mk_verifying plus a step_output artifact (the live path always
+    adds one); zero ctl_review rows — the exact shape of the parking tasks."""
+    from controller import loop as _l
+    c, wd, tid, sid, rid = _mk_verifying(env, goal=goal)
+    model.add_artifact(c, tid, rid, "step_output",
+                       {"hash": _l._artifact_hash([]), "items": []})
+    return c, wd, tid, sid, rid
+
+
+def test_finish_verifying_backfills_missing_review(env):
+    c, _wd, tid, sid, _rid = _verifying_no_review(env, "backfill pass")
+    assert loop.finish_verifying(c, tid, review_fn=pass_review) == "completed"
+    rows = c.execute("SELECT verdict, reviewer FROM ctl_review WHERE step_id=?",
+                     (sid,)).fetchall()
+    assert [tuple(r) for r in rows] == [("pass", "review-backfill")]
+    # re-review is exactly once: the backfill row satisfies the guard
+    assert c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()[0] \
+        == "completed"
+
+
+def test_backfill_revise_parks_on_real_verdict(env):
+    c, _wd, tid, sid, _rid = _verifying_no_review(env, "backfill revise")
+
+    def revise(run, step, arts):
+        return {"verdict": "revise", "detail": "artifact has no evidence"}
+
+    assert loop.finish_verifying(c, tid, review_fn=revise) == "needs_human"
+    v = c.execute("SELECT verdict FROM ctl_review WHERE step_id=?", (sid,)).fetchone()[0]
+    assert v == "revise"  # honest row persisted; park is content-based, not absence-based
+
+
+def test_backfill_without_run_leaves_human_park(env):
+    """Step closed with no run at all (human/legacy close): backfill cannot invent
+    evidence — the task parks for a human with the explicit basis."""
+    from controller import transitions
+    c, wd, tid, sid, rid = _mk_verifying(env, goal="no-run close")
+    c.execute("DELETE FROM ctl_run WHERE run_id=?", (rid,))
+    c.execute("DELETE FROM ctl_review WHERE step_id=?", (sid,))
+    c.commit()
+    transitions.transition(c, tid, "needs_human", basis="test reset")
+    transitions.transition(c, tid, "ready", basis="test reset 2")
+    transitions.transition(c, tid, "running", basis="t",
+                           permission=model.get_permission(c, wd))
+    transitions.transition(c, tid, "verifying", basis="t")
+    assert loop.finish_verifying(c, tid, review_fn=pass_review) == "needs_human"
+
+
+def test_orphan_in_progress_step_released_before_verifying(env):
+    """Claim whose run already closed is unfinished work: re-dispatch, never verify."""
+    c, wd = env
+    tid = model.create_task(c, owner="o", workdir=wd, goal="orphan")
+    model.agree_contract(c, tid)
+    sid = model.add_step(c, tid, "impl", "s", checkpoint=True)
+    model.set_permission(c, wd, enabled=True, granted_via="user-command")
+    c.execute("UPDATE ctl_task SET state='ready' WHERE task_id=?", (tid,))
+    c.commit()
+    rid = model.start_run(c, task_id=tid, step_id=sid, contract_version=1,
+                          execution_epoch=1, worker_id="x")
+    c.execute("UPDATE ctl_task SET state='running' WHERE task_id=?", (tid,))
+    model.set_run_status(c, rid, "finished")  # run closed, crash before finish_step
+    log = loop.run_cycle(c, scope=wd, worker_fn=ok_worker, review_fn=pass_review)
+    assert log
+    # the crashed claim was re-dispatched (a fresh run + pass review) and completed
+    assert len(c.execute("SELECT 1 FROM ctl_run WHERE step_id=?", (sid,)).fetchall()) == 2
+    assert c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()[0] \
+        == "completed"

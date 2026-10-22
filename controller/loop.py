@@ -96,6 +96,17 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
         if step is None:
             total = conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=?",
                                  (task["task_id"],)).fetchone()["c"]
+            # An in_progress step whose run is closed (crash between artifact and
+            # finish_step, dogfood 22.10 task-f394af6891) is unfinished work: the
+            # claim is released instead of marching into verifying with it.
+            if conn.execute("SELECT 1 FROM ctl_step WHERE task_id=? AND status='in_progress' LIMIT 1",
+                            (task["task_id"],)).fetchone() is not None \
+                    and not Q.has_open_run(conn, task_id=task["task_id"]):
+                for o in conn.execute("SELECT step_id FROM ctl_step WHERE task_id=? AND status='in_progress'",
+                                      (task["task_id"],)).fetchall():
+                    model.unstick_step(conn, o["step_id"])
+                log.append({"task": task["task_id"], "orphan_steps_released": True})
+                continue
             if total == 0:
                 transitions.transition(conn, task["task_id"], "blocked",
                                        basis="empty plan: add steps before running")
@@ -113,7 +124,7 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
                 return log
             transitions.transition(conn, task["task_id"], "verifying",
                                    basis="all steps done")
-            outcome = finish_verifying(conn, task["task_id"])
+            outcome = finish_verifying(conn, task["task_id"], review_fn=review_fn)
             log.append({"task": task["task_id"], "to": outcome})
             continue
         # dispatch-time barrier: pause arriving after selection is caught here (§7 race)
@@ -185,7 +196,40 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
     return log
 
 
-def finish_verifying(conn, task_id: str) -> str:
+def _backfill_missing_reviews(conn, task_id: str, review_fn) -> int:
+    """Checkpoint steps closed in past cycles — or by paths that never write
+    ctl_review — were refused by the currency guard forever (dogfood 22.10:
+    task-b78849c10d parked verifying<->needs_human on '3/5 checkpoint steps').
+    Re-review them with the SAME review_fn the live cycle uses, bound to the
+    step's latest artifact; a non-pass verdict is persisted honestly (the
+    guard then parks on its real content, not on an absent row)."""
+    import hashlib
+    import json
+    n = 0
+    rows = conn.execute(
+        "SELECT s.* FROM ctl_step s WHERE s.task_id=? AND s.checkpoint=1 AND s.status='done'"
+        " AND NOT EXISTS (SELECT 1 FROM ctl_review r WHERE r.step_id=s.step_id)",
+        (task_id,)).fetchall()
+    for s in rows:
+        run = conn.execute("SELECT * FROM ctl_run WHERE step_id=? ORDER BY rowid DESC LIMIT 1",
+                           (s["step_id"],)).fetchone()
+        if run is None:
+            continue  # step closed without any run: no artifact to review — human decides
+        art = conn.execute(
+            "SELECT payload FROM ctl_artifact_revision WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+            (run["run_id"],)).fetchone()
+        items = json.loads(art["payload"]).get("items", []) if art else []
+        ah = (json.loads(art["payload"]).get("hash") if art else None) or hashlib.sha256(
+            json.dumps(items, sort_keys=True).encode()).hexdigest()
+        v = review_fn({"status": "finished", "artifacts": items}, dict(s), items)
+        model.add_review(conn, step_id=s["step_id"], run_id=run["run_id"], artifact_hash=ah,
+                         verdict=v.get("verdict", "needs_human"),
+                         detail=str(v.get("detail", ""))[:4000], reviewer="review-backfill")
+        n += 1
+    return n
+
+
+def finish_verifying(conn, task_id: str, review_fn=None) -> str:
     """verifying -> completed|ready|needs_human by the review-currency guard outcome."""
     # Transient-review race, prod-verified 19.10 (x3): the last checkpoint review
     # can commit AFTER this guard's first SELECT (the judge LLM call inside
@@ -198,6 +242,14 @@ def finish_verifying(conn, task_id: str) -> str:
     if outcome == "retry":
         time.sleep(5)
         outcome = _finish_verifying_once(conn, task_id, allow_retry=False)
+    if outcome == "needs_human-backfill":
+        if review_fn is not None and _backfill_missing_reviews(conn, task_id, review_fn):
+            outcome = _finish_verifying_once(conn, task_id, allow_retry=False)
+        if outcome == "needs_human-backfill":
+            transitions.transition(
+                conn, task_id, "needs_human",
+                basis="verify: missing reviews (no runnable artifact to backfill)")
+            outcome = "needs_human"
     return outcome
 
 
@@ -211,6 +263,10 @@ def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
         msg = str(e)
         if "missing reviews" in msg and allow_retry:
             return "retry"
+        if "missing reviews" in msg:
+            # allow_retry=False: caller may remediate via review backfill before
+            # parking (finish_verifying handles it); parking stays the fallback.
+            return "needs_human-backfill"
         if "review" in msg:
             transitions.transition(conn, task_id, "needs_human", basis=f"verify: {msg}")
             return "needs_human"
