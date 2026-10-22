@@ -56,15 +56,20 @@ def _reviews_current(conn, task, kw) -> str | None:
         " LEFT JOIN ctl_artifact_revision a ON a.artifact_rev_id=("
         "   SELECT artifact_rev_id FROM ctl_artifact_revision a2"
         "   WHERE a2.run_id=r.run_id ORDER BY a2.created_at DESC LIMIT 1)"
-        " WHERE s.task_id=? AND s.checkpoint=1 AND s.status='done'"
+        " WHERE s.task_id=? AND s.checkpoint IS NOT 0 AND s.status='done'"
         # latest review per step WINS: retries append (needs_human from a dead attempt"
         # must not poison the fresh pass) — dogfood 12.10 verified: a step carried two"
         # stale needs_human rows plus a real pass, guard scanned all three and refused.
         " AND r.created_at=(SELECT MAX(r2.created_at) FROM ctl_review r2"
         "                  WHERE r2.step_id=r.step_id)",
         (task["task_id"],)).fetchall()
-    steps = conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=? AND checkpoint=1",
-                         (task["task_id"],)).fetchone()["c"]
+    steps = conn.execute(
+        # A step is a checkpoint UNLESS explicitly cleared (0). Legacy hand-seeded
+        # rows stored acceptance-JSON in this column (20.10 enqueue scripts) — raw
+        # `=1` ignored them, so finished tasks parked on vacuous "empty plan"
+        # (ea4a988cb5, 22.10). `IS NOT 0` is NULL/type-safe.
+        "SELECT COUNT(*) c FROM ctl_step WHERE task_id=? AND checkpoint IS NOT 0",
+        (task["task_id"],)).fetchone()["c"]
     if steps == 0:
         # §46: completion needs worker-done AND review — an empty plan has neither.
         # (ready->verifying->completed used to vacuously pass with 0<0 in 11ms.)
