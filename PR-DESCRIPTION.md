@@ -41,14 +41,7 @@ python3 examples/donor_coverage/demo.py
 Draft. Этап 1. След. шаг: врезка предикатов в `ctl_review`/`ctl_artifact_revision`,
 затем этап 2 — GEPA за замороженным харнесом.
 
-## Push (готово, ожидает одобрения)
-Сделано локально (22.10): remote `origin` → https://github.com/VovaElkTver/hermes-autonomous-agent.git,
-ветка `claims-harness-stage1` готова (2 коммита: 61824af + docs-фикс).
-Осталось (требует approval на хосте, single-query mode гейтит внешние write):
-```
-git push -u origin claims-harness-stage1
-gh pr create --repo VovaElkTver/hermes-autonomous-agent --base main \
-  --head claims-harness-stage1 --draft \
-  --title "claims-harness: внешняя оракульская проверка аналитики (этап 1)" \
-  --body "$(cat PR-DESCRIPTION.md)"
-```
+## Push / PR
+Бранч `claims-harness-stage1` перебазован на `main` fork (single commit — история
+клона была несвязной). Draft PR #61: https://github.com/VovaElkTver/hermes-autonomous-agent/pull/61
+(README клона перенесён в docs/claims-harness.md, корневой README fork не тронут).
