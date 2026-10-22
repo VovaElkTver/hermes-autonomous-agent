@@ -64,6 +64,21 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
     return None
 
 
+def _release_orphan_claims(conn, task_id: str) -> bool:
+    """An in_progress step whose run is closed (crash between artifact and
+    finish_step, dogfood 22.10 task-f394af6891) is unfinished work: release the
+    claim for re-dispatch instead of marching into verifying with it."""
+    if conn.execute("SELECT 1 FROM ctl_step WHERE task_id=? AND status='in_progress' LIMIT 1",
+                    (task_id,)).fetchone() is None:
+        return False
+    if Q.has_open_run(conn, task_id=task_id):
+        return False
+    for o in conn.execute("SELECT step_id FROM ctl_step WHERE task_id=? AND status='in_progress'",
+                          (task_id,)).fetchall():
+        model.unstick_step(conn, o["step_id"])
+    return True
+
+
 def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) -> list[dict]:
     log = []
     for _ in range(max_steps):
@@ -96,15 +111,9 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
         if step is None:
             total = conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=?",
                                  (task["task_id"],)).fetchone()["c"]
-            # An in_progress step whose run is closed (crash between artifact and
-            # finish_step, dogfood 22.10 task-f394af6891) is unfinished work: the
-            # claim is released instead of marching into verifying with it.
-            if conn.execute("SELECT 1 FROM ctl_step WHERE task_id=? AND status='in_progress' LIMIT 1",
-                            (task["task_id"],)).fetchone() is not None \
-                    and not Q.has_open_run(conn, task_id=task["task_id"]):
-                for o in conn.execute("SELECT step_id FROM ctl_step WHERE task_id=? AND status='in_progress'",
-                                      (task["task_id"],)).fetchall():
-                    model.unstick_step(conn, o["step_id"])
+            # An in_progress step whose run is closed is unfinished work —
+            # release the claim for re-dispatch, never verify over it.
+            if _release_orphan_claims(conn, task["task_id"]):
                 log.append({"task": task["task_id"], "orphan_steps_released": True})
                 continue
             if total == 0:
