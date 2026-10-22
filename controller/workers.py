@@ -81,22 +81,24 @@ def _preempt_signal(conn, *, run_id: str, step_id: str | None) -> bool:
 
 
 def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
-                  timeout_s: int, poll_s: float, grace_s: float = 60.0):
+                  timeout_s: float | None, poll_s: float, grace_s: float = 60.0):
     """Bounded wait for the worker with out-of-band preempt polling.
+
+    ``timeout_s=None`` removes the wall-clock bound entirely: the wait is only
+    interrupted by completion or a preempt. When a budget IS set and spent with
+    no preempt, raises ``subprocess.TimeoutExpired`` (the caller converts it to
+    the same graceful pause a preempt gets — see make_worker).
 
     Returns ``(stdout, stderr, preempted)``. Repeated ``communicate()`` calls are
     safe since bpo-39531: partial pipe data is kept in the Popen buffers between
-    calls, so the final call still returns everything the worker printed. Raises
-    ``subprocess.TimeoutExpired`` when the hard budget (timeout_s + grace) is
-    spent with no preempt — the caller keeps its legacy tree-kill/failed path."""
-    deadline = time.monotonic() + timeout_s + grace_s
+    calls, so the final call still returns everything the worker printed."""
+    deadline = None if timeout_s is None else time.monotonic() + timeout_s + grace_s
     while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(getattr(proc, "args", ""),
-                                            timeout_s + grace_s)
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(getattr(proc, "args", ""), timeout_s or 0)
         try:
-            out, err = proc.communicate(timeout=min(poll_s, remaining))
+            out, err = proc.communicate(timeout=poll_s if remaining is None else min(poll_s, remaining))
             return out, err, False
         except subprocess.TimeoutExpired:
             if _preempt_signal(conn, run_id=run_id, step_id=step_id):
@@ -107,7 +109,7 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
                 return out, err, True
 
 
-def make_worker(conn, *, timeout_s: int = 1800,
+def make_worker(conn, *, timeout_s: float | None = None,
                 hermes_bin: str | None = None, extra_env: dict | None = None,
                 preempt_poll_s: float = 2.0, grace_s: float = 60.0,
                 model_id: str | None = None, provider: str | None = None):
@@ -132,8 +134,12 @@ def make_worker(conn, *, timeout_s: int = 1800,
             if extra_env:
                 env.update(extra_env)
             argv = [exe, "chat", "--query-file", qf.name, "--oneshot", "-Q",
-                    "--in", task["workdir"],
-                    "--run-budget", str(timeout_s)]
+                    "--in", task["workdir"]]
+            if timeout_s is not None:
+                # None = no wall-clock cap: the step runs to completion unless an
+                # out-of-band preempt lands. A budget is opt-in (per-binding), not
+                # a habit-default (22.10: 12 healthy runs tree-killed at 31 min).
+                argv += ["--run-budget", str(timeout_s)]
             if provider:
                 argv += ["--provider", provider]
             if model_id:
@@ -159,12 +165,24 @@ def make_worker(conn, *, timeout_s: int = 1800,
                     poll_s=preempt_poll_s, grace_s=grace_s)
                 returncode = proc.returncode
             except subprocess.TimeoutExpired:
-                # direct child + every tool grandchild share this detached group:
-                # tree-kill guarantees nothing keeps writing into the workdir after
-                # failure (killpg on POSIX, taskkill /T /F on Windows)
+                # Budget (explicitly configured) exhausted: take the SAME graceful
+                # path an out-of-band preempt takes — pause the step, keep the
+                # partial output as the artifact, hand off. The legacy behavior
+                # (tree-kill, empty artifacts, status failed) made the judge
+                # review an emptiness and the redispatch start with amnesia.
+                from controller import model
                 _kill_tree(proc)
-                proc.communicate()
-                return {"status": "failed", "artifacts": [], "error": "worker timeout"}
+                out, err = proc.communicate()  # health: allow HX006 -- after killpg every pipe is at EOF; this call only drains the bpo-39531 buffers, same contract as the preempt branch above
+                handoff = ""
+                sid = step.get("step_id")
+                if sid:
+                    model.pause_step(conn, sid, task_id=task["task_id"],
+                                     note=f"budget {timeout_s}s exhausted; partial work preserved")
+                    handoff = model.paused_handoff_note(conn, sid) or "budget exhausted (note not stored)"
+                return {"status": "interrupted",
+                        "artifacts": [{"stdout_tail": (out or "")[-2000:],
+                                       "returncode": proc.returncode}],
+                        "handoff": handoff, "detail": (err or "")[-500:]}
             if preempted:
                 from controller import model
                 handoff = ""
