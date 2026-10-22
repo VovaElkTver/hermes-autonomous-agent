@@ -48,18 +48,20 @@ function Assert-True {
 # `&` inherits this process's environment on every host, and stderr is merged
 # so Windows PowerShell 5.1's NativeCommandError records cannot fail the lane.
 function Invoke-ResolvedPaths {
-    param([string[]]$ExtraArgs = @())
+    param([string[]]$ExtraArgs = @(), [string]$RuntimeDir = $null)
 
     $psExe = (Get-Process -Id $PID).Path
     $outFile = [System.IO.Path]::GetTempFileName()
     $savedRuntimeDir = [Environment]::GetEnvironmentVariable('HERMES_RUNTIME_DIR')
     $savedHermesHome = [Environment]::GetEnvironmentVariable('HERMES_HOME')
     try {
-        if ($null -eq $savedRuntimeDir) {
-            Remove-Item Env:HERMES_RUNTIME_DIR -ErrorAction SilentlyContinue
-        } else {
-            $env:HERMES_RUNTIME_DIR = $savedRuntimeDir
-        }
+        # The child must see a deterministic store env: an ambient
+        # HERMES_RUNTIME_DIR (normal on developer/operator workstations where a
+        # Hermes stack is installed) would silently lift the refusal and the
+        # baseline assertions would "pass" for the wrong reason — or refuse to
+        # fire at all. The store dir is set ONLY via -RuntimeDir.
+        Remove-Item Env:HERMES_RUNTIME_DIR -ErrorAction SilentlyContinue
+        if ($RuntimeDir) { $env:HERMES_RUNTIME_DIR = $RuntimeDir }
         if ($null -eq $savedHermesHome) {
             Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue
         } else {
@@ -76,9 +78,14 @@ function Invoke-ResolvedPaths {
         }
         $exitCode = $LASTEXITCODE
         $raw = @(Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue)
-        $stdout = ($raw | Where-Object { $_ -notlike '`[hermes`]*' }) -join "`n"
-        $stderr = ($raw | Where-Object { $_ -like '`[hermes`]*' -or $_ -match 'HermesHome|install directory|tool store' }) -join "`n"
-        return @{ ExitCode = $exitCode; Stdout = $stdout; All = ($raw -join "`n") }
+        # pwsh 7.4+ renders uncaught exceptions with ANSI SGR escapes and wraps
+        # them at terminal width (width differs per CI runner), which can split an
+        # asserted phrase across styled lines. Normalize before matching: strip
+        # color escapes, and expose All as one plain space-joined stream.
+        $clean = @($raw | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' })
+        $stdout = ($clean | Where-Object { $_ -notlike '`[hermes`]*' }) -join "`n"
+        $stderr = ($clean | Where-Object { $_ -like '`[hermes`]*' -or $_ -match 'HermesHome|install directory|tool store' }) -join "`n"
+        return @{ ExitCode = $exitCode; Stdout = $stdout; All = ($clean -join " ") }
     } finally {
         if ($null -eq $savedRuntimeDir) {
             Remove-Item Env:HERMES_RUNTIME_DIR -ErrorAction SilentlyContinue
@@ -124,18 +131,9 @@ try {
     # 4. HERMES_RUNTIME_DIR outside the checkout lifts the refusal: the store
     #    no longer lands inside InstallDir, so the configuration is legitimate.
     $storeElsewhere = Join-Path $base 'store'
-    $saved = $env:HERMES_RUNTIME_DIR
-    try {
-        $env:HERMES_RUNTIME_DIR = $storeElsewhere
-        $r = Invoke-ResolvedPaths @('-HermesHome', $home1, '-InstallDir', $home1)
-        Assert-True ($r.ExitCode -eq 0) "HERMES_RUNTIME_DIR outside lifts the refusal (exit $($r.ExitCode))"
-    } finally {
-        if ($null -eq $saved) {
-            Remove-Item Env:HERMES_RUNTIME_DIR -ErrorAction SilentlyContinue
-        } else {
-            $env:HERMES_RUNTIME_DIR = $saved
-        }
-    }
+    $r = Invoke-ResolvedPaths -RuntimeDir $storeElsewhere `
+        -ExtraArgs @('-HermesHome', $home1, '-InstallDir', $home1)
+    Assert-True ($r.ExitCode -eq 0) "HERMES_RUNTIME_DIR outside lifts the refusal (exit $($r.ExitCode))"
 
     # 5. Default derivation never trips the guard: InstallDir defaults to
     #    <HermesHome>\hermes-agent, which is a child, not a parent.
