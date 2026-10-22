@@ -1440,7 +1440,20 @@ if ($script:IsDotSourced) {
 
 # The normalization prologue runs exactly once per real entry, before any
 # switch is honored, so every contract below sees long-form paths.
-Initialize-ResolvedPaths
+# Under -ShowResolvedPaths (machine-readable query) an uncaught Fail must NOT
+# reach the host's exception renderer: pwsh 7.4+ paints ANSI escapes into it and
+# wraps the text at terminal width, so a caller grepping the refusal reason
+# catches only whatever survived the wrap (store-guard CI failure, 22.10). Emit
+# the raw message as one untouched line on stderr instead.
+try {
+    Initialize-ResolvedPaths
+} catch {
+    if ($ShowResolvedPaths) {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+    throw
+}
 
 # Keep uv from discovering uv.toml / pyproject.toml config from whatever
 # directory or user profile the installer runs under (mirrors install.sh).

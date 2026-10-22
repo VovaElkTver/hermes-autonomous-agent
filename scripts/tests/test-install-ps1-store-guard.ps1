@@ -76,9 +76,14 @@ function Invoke-ResolvedPaths {
         }
         $exitCode = $LASTEXITCODE
         $raw = @(Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue)
-        $stdout = ($raw | Where-Object { $_ -notlike '`[hermes`]*' }) -join "`n"
-        $stderr = ($raw | Where-Object { $_ -like '`[hermes`]*' -or $_ -match 'HermesHome|install directory|tool store' }) -join "`n"
-        return @{ ExitCode = $exitCode; Stdout = $stdout; All = ($raw -join "`n") }
+        # pwsh 7.4+ renders uncaught exceptions with ANSI SGR escapes and wraps
+        # them at terminal width (width differs per CI runner), which can split an
+        # asserted phrase across styled lines. Normalize before matching: strip
+        # color escapes, and expose All as one plain space-joined stream.
+        $clean = @($raw | ForEach-Object { $_ -replace '\x1b\[[0-9;]*m', '' })
+        $stdout = ($clean | Where-Object { $_ -notlike '`[hermes`]*' }) -join "`n"
+        $stderr = ($clean | Where-Object { $_ -like '`[hermes`]*' -or $_ -match 'HermesHome|install directory|tool store' }) -join "`n"
+        return @{ ExitCode = $exitCode; Stdout = $stdout; All = ($clean -join " ") }
     } finally {
         if ($null -eq $savedRuntimeDir) {
             Remove-Item Env:HERMES_RUNTIME_DIR -ErrorAction SilentlyContinue
