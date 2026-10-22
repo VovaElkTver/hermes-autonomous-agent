@@ -520,78 +520,11 @@ def _extra_csv_set(config, key: str, env_name: str) -> set[str]:
     return _csv_set(_extra_or_secret(config.extra, key, env_name, "", blank_is_unset=False))
 
 
-def _recovery_key_output_path() -> Optional[Path]:
-    """MATRIX_RECOVERY_KEY_OUTPUT_FILE via the profile-scoped reader: a bare os.getenv under
-    multiplex resolves the default profile's path, writing/finding the wrong profile's file."""
-    output_file = _get_scoped_secret("MATRIX_RECOVERY_KEY_OUTPUT_FILE", "").strip()
-    return Path(output_file).expanduser() if output_file else None
-
-
-def _write_matrix_recovery_key_output_file(recovery_key: str) -> Optional[Path]:
-    """Write a generated recovery key to MATRIX_RECOVERY_KEY_OUTPUT_FILE (0600, never overwritten)."""
-    path = _recovery_key_output_path()
-    if path is None:
-        return None
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(recovery_key)
-            fh.write("\n")
-    except Exception:
-        with suppress(OSError):
-            os.close(fd)
-        raise
-    return path
-
-
-def _get_matrix_recovery_key_output_target() -> tuple[Optional[Path], str]:
-    """Return a usable one-time recovery-key output path, or a redacted reason."""
-    path = _recovery_key_output_path()
-    if path is None:
-        return None, "not_configured"
-    if path.exists():
-        return None, "exists"
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        return None, f"unusable: {exc}"
-    return path, ""
-
-
-def _handle_generated_matrix_recovery_key(mxid: str, recovery_key: str) -> None:
-    """Handle a freshly generated Matrix recovery key without logging it."""
-    try:
-        output_path = _write_matrix_recovery_key_output_file(recovery_key)
-    except FileExistsError:
-        logger.warning(
-            "Matrix: bootstrapped cross-signing for %s. Recovery key output file "
-            "already exists; refusing to overwrite. Store the generated key "
-            "securely and set MATRIX_RECOVERY_KEY for future restarts.", mxid)
-        return
-    except Exception as exc:
-        logger.warning(
-            "Matrix: bootstrapped cross-signing for %s, but failed to write "
-            "MATRIX_RECOVERY_KEY_OUTPUT_FILE: %s. Store the generated key "
-            "securely and set MATRIX_RECOVERY_KEY for future restarts.", mxid, exc)
-        return
-    if output_path:
-        logger.warning(
-            "Matrix: bootstrapped cross-signing for %s. A new recovery key was written to %s with mode 0600. Move it "
-            "to your secret store and set MATRIX_RECOVERY_KEY for future restarts.",
-            mxid, output_path)
-    else:
-        logger.warning(
-            "Matrix: bootstrapped cross-signing for %s. A new recovery key was generated but will "
-            "not be logged. Set MATRIX_RECOVERY_KEY_OUTPUT_FILE to write it once with mode 0600, "
-            "or configure MATRIX_RECOVERY_KEY from your Matrix client before future restarts.",
-            mxid)
-
-
-def _scoped_recovery_key() -> str:
-    """MATRIX_RECOVERY_KEY via the profile-scoped reader: a bare os.getenv under multiplex resolves
-    the default profile's key and verification fails with "Key MAC does not match"."""
-    return _get_scoped_secret("MATRIX_RECOVERY_KEY", "").strip()
+from plugins.platforms.matrix.recovery_key import (
+    _get_matrix_recovery_key_output_target, _handle_generated_matrix_recovery_key,
+    _recovery_key_output_path, _scoped_recovery_key,
+    _write_matrix_recovery_key_output_file,
+)
 
 
 # --- LaTeX math ($...$, $$...$$) -> Element data-mx-maths markup ---
@@ -2931,6 +2864,12 @@ class MatrixAdapter(BasePlatformAdapter):
         return await self._client_op(
             lambda: self._client.redact(RoomID(room_id), EventID(event_id), reason=reason or None),
             ("Matrix: redacted %s in %s", event_id, room_id), "Matrix: redact error: %s")
+
+    async def delete_message(self, chat_id: str, message_id: str) -> bool:
+        """Redaction is Matrix's delete: the event leaves every client's view (server keeps the
+        tombstone). Enables ``display.*.cleanup_progress`` to erase tool-progress/heartbeat bubbles
+        after a successful final response; failed runs keep them as breadcrumbs (run_turn gates)."""
+        return await self.redact_message(chat_id, message_id, reason="progress cleanup")
 
     async def create_room(
         self, name: str = "", topic: str = "", invite: Optional[list] = None, is_direct: bool = False,
