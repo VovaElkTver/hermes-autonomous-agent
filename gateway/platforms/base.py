@@ -4586,9 +4586,9 @@ class BasePlatformAdapter(ABC):
             # Unwrap EphemeralReply for downstream text processing; TTL applies after send.
             response, _ephemeral_ttl = self._unwrap_ephemeral(response)
             # None/empty is normal (streamed/queued). Suppress a stale response after an interrupt.
-            if response and interrupt_event.is_set() and session_key in self._pending_messages:
-                logger.info("[%s] Suppressing stale response for interrupted session %s", self.name,
-                            session_key)
+            att_frozen = getattr(interrupt_event, "_hermes_att_frozen", False)
+            if response and interrupt_event.is_set() and (
+                    att_frozen or session_key in self._pending_messages):
                 response = None
             if not response:
                 logger.debug("[%s] Handler returned empty/None response for %s", self.name, event.source.chat_id)

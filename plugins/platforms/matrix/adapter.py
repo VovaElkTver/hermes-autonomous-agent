@@ -12,7 +12,7 @@ Env vars (config.yaml ``matrix:`` keys alias several — env wins):
   MATRIX_AUTO_THREAD (default true), MATRIX_DM_AUTO_THREAD, MATRIX_DM_MENTION_THREADS,
   MATRIX_SESSION_SCOPE auto|room|thread; MATRIX_MAX_MESSAGE_LENGTH (UTF-8 bytes, default/max 15000),
   MATRIX_MAX_MEDIA_BYTES, MATRIX_ROOM_IDENTITY_TTL_SECONDS; MATRIX_APPROVAL_REQUIRE_SENDER (default
-  true), MATRIX_APPROVAL_TIMEOUT_SECONDS (default 300).
+  true), MATRIX_APPROVAL_TIMEOUT_SECONDS (default: the shared ``approvals.timeout`` config value; 300 when unreadable).
 
 Note: any room with <=2 joined members is auto-classified as a DM (see
 ``_resolve_room_identity``), regardless of ``m.direct`` account data or an explicit room name —
@@ -52,6 +52,9 @@ from agent.secret_scope import get_secret
 from gateway.platforms._shared import (
     apply_yaml_bridge as _apply_yaml_bridge, extra_or_secret as _extra_or_secret,
     get_scoped_secret as _get_scoped_secret, send_error
+)
+from plugins.platforms.matrix.env_config import (
+    _csv_set, _default_approval_timeout_seconds, _env_number
 )
 
 try:
@@ -507,21 +510,6 @@ def _env_truthy(name: str, default: str = "") -> bool:
     return str(_get_scoped_secret(name, default)).lower() in ("true", "1", "yes")
 
 
-def _env_number(name: str, default, cast):
-    """Parse a numeric env var, falling back to *default* on ValueError."""
-    try:
-        return cast(_get_scoped_secret(name, str(default)))
-    except ValueError:
-        return default
-
-
-def _csv_set(raw: Any) -> set[str]:
-    """Normalize a comma-separated string or list into a set of stripped tokens."""
-    if isinstance(raw, list):
-        return {str(r).strip() for r in raw if str(r).strip()}
-    return {r.strip() for r in str(raw).split(",") if r.strip()}
-
-
 def _thread_root(relates_to: dict) -> Optional[str]:
     """The m.thread root event_id an event belongs to, else None."""
     return relates_to.get("event_id") if relates_to.get("rel_type") == "m.thread" else None
@@ -896,7 +884,8 @@ class MatrixAdapter(BasePlatformAdapter):
         self._approval_prompts_by_event: dict[str, _MatrixApprovalPrompt] = {}
         self._approval_prompt_by_session: dict[str, str] = {}
         self._approval_require_sender: bool = _env_truthy("MATRIX_APPROVAL_REQUIRE_SENDER", "true")
-        self._approval_timeout_seconds = _env_number("MATRIX_APPROVAL_TIMEOUT_SECONDS", 300, int)
+        self._approval_timeout_seconds = _env_number(
+            "MATRIX_APPROVAL_TIMEOUT_SECONDS", _default_approval_timeout_seconds(), int)
         self._model_picker_prompts_by_event: dict[str, _MatrixPickerPrompt] = {}
         self._choice_picker_prompts_by_event: dict[str, _MatrixPickerPrompt] = {}
         # Authz lists: scoped env → this profile's YAML (``allowed_users`` / ``ignore_user_patterns``,
