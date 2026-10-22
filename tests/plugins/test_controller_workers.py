@@ -300,11 +300,13 @@ def test_kill_tree_posix_missing_killpg_is_swallowed(monkeypatch):
     workers._kill_tree(FakeProc())  # must not raise
 
 
-def test_worker_timeout_path_routes_through_kill_tree(env, monkeypatch):
+def test_worker_timeout_path_pauses_with_partial_artifact(env, monkeypatch):
     """Offline: Popen mock whose communicate() raises TimeoutExpired proves the
-    timeout arm returns 'failed' AND tree-kills the detached group."""
+    budget arm takes the graceful preempt route: tree-kill, partial stdout kept
+    as the artifact, step CAS-paused, status 'interrupted' (22.10: the legacy
+    'failed + empty artifacts' arm made judges review emptiness)."""
     import subprocess as _sp
-    from controller import workers
+    from controller import workers, model
 
     class FakeProc:
         pid = 9999
@@ -312,20 +314,55 @@ def test_worker_timeout_path_routes_through_kill_tree(env, monkeypatch):
         def communicate(self, timeout=None):
             if timeout is not None:
                 raise _sp.TimeoutExpired("hermes", timeout)
-            return ("", "")
+            return ("partial progress", "")
 
     killed = []
     monkeypatch.setattr(workers, "_kill_tree", lambda proc: killed.append(proc.pid))
     monkeypatch.setattr(workers.subprocess, "Popen", lambda *a, **k: FakeProc())
     c, wd, fake = env
     tid, st = _task(c, wd)
-    # grace_s=0: the fake communicate never blocks, so the hard budget is exactly
-    # timeout_s (production default keeps the legacy timeout_s+60 grace).
+    model.mark_step_in_progress(c, st)  # dispatch claims the step before the worker runs
     res = workers.make_worker(c, hermes_bin=fake, timeout_s=1, grace_s=0)(
         {"run_id": "r"}, {"task_id": tid, "workdir": wd, "goal": "X"},
         {"step_id": st, "kind": "impl", "title": "x"})
-    assert res["status"] == "failed" and res["error"] == "worker timeout"
+    assert res["status"] == "interrupted"
+    assert res["artifacts"][0]["stdout_tail"] == "partial progress"
+    assert "budget" in res["handoff"]
     assert killed == [9999]
+    assert c.execute("select status from ctl_step where step_id=?", (st,)).fetchone()["status"] == "paused"
+
+
+def test_worker_default_has_no_wall_clock_cap(env, monkeypatch):
+    """timeout_s defaults to None: no --run-budget reaches the headless argv and
+    a busy worker (communicate keeps timing out) is never killed — it runs until
+    it actually returns. The wall clock is opt-in, not habit."""
+    import subprocess as _sp
+    from controller import workers
+
+    seen = {"argv": None, "calls": 0}
+
+    class FakeProc:
+        pid = 1
+        returncode = 0
+        def communicate(self, timeout=None):
+            seen["calls"] += 1
+            if timeout is not None and seen["calls"] < 3:
+                raise _sp.TimeoutExpired("hermes", timeout)
+            return ("done", "")
+
+    def fake_popen(a, **k):
+        seen["argv"] = list(a)
+        return FakeProc()
+
+    monkeypatch.setattr(workers.subprocess, "Popen", fake_popen)
+    c, wd, fake = env
+    tid, st = _task(c, wd)
+    res = workers.make_worker(c, hermes_bin=fake)(
+        {"run_id": "r"}, {"task_id": tid, "workdir": wd, "goal": "X"},
+        {"step_id": st, "kind": "impl", "title": "x"})
+    assert res["status"] == "finished"
+    assert "--run-budget" not in seen["argv"]
+    assert seen["calls"] >= 3  # survived repeated poll timeouts
 
 
 def test_worker_spawn_receives_os_appropriate_flags(env, monkeypatch):
