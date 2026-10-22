@@ -1048,6 +1048,15 @@ class GatewayBusySessionMixin:
         if not accepted:
             return EphemeralReply(t("gateway.att.none"))
         logger.info("ATT for session %s — soft pause requested at next safe boundary", quick_key)
+        # The freeze must be silent: the operator's next message decides the fork, so the agent
+        # may not answer its own /att. Mark the adapter's live-session guard; base.py withholds the
+        # turn's final response on this flag even when no follow-up message is queued.
+        with contextlib.suppress(Exception):
+            _adapter = self._delivery_adapter_for(source)
+            _evt = getattr(_adapter, "_active_sessions", {}).get(quick_key) if _adapter else None
+            if _evt is not None:
+                _evt._hermes_att_frozen = True
+                _evt.set()
         return EphemeralReply(t("gateway.att.paused"))
 
     async def _busy_new_command(self, event: MessageEvent, quick_key: str, source):
