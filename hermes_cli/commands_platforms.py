@@ -384,6 +384,10 @@ _SLACK_RESERVED_COMMANDS = frozenset({
 _SLACK_VIA_HERMES_ONLY = frozenset({
     "topup", "moa", "debug", "egress", "init", "version", "diff", "update", "heartbeat",
     "refine", "review", "pause", "whoami", "platform", "insights", "login", "initiate-setup",
+    # Gateway-admin verbs travel as `/hermes restart` on Slack: the registry grew
+    # past the 50 native-slash cap with /for (22.10); admin verbs are the rarest
+    # interactive surface on the busiest chat platform (same class as update/debug).
+    "restart",
     # Fork /fork + /join tipped the registry past the 50-cap; demote the rarer
     # one-off lookup (rule: one-off lookups before recurring interactive surfaces).
     "usage",
