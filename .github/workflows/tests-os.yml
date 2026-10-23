@@ -97,7 +97,7 @@ jobs:
           - name: Windows-only tests (arm64)
             runner: windows-11-arm
             marker: windows
-            timeout: 60
+            timeout: 90
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -190,7 +190,20 @@ jobs:
         env:
           # These files spawn nested PowerShell trees. CPU-count parallelism
           # starves cold child startup before the fixture's idle deadline.
-          HERMES_TEST_WORKERS: ${{ matrix.marker == 'windows' && (runner.arch == 'ARM64' && '16' || '16') || '' }}
+          # The arm64 hosted runner is 4 vCPU with slow cold starts: fewer
+          # workers (the e2e-windows row precedent) plus 3x subprocess
+          # deadlines (HERMES_TEST_TIMEOUT_SCALE, tests/ci_timeouts.py) and a
+          # 900 s per-file cap instead of the 300 s default. X64 keeps 16
+          # workers and every original deadline.
+          HERMES_TEST_WORKERS: ${{ matrix.marker == 'windows' && (runner.arch == 'ARM64' && '6' || '16') || '' }}
+          HERMES_TEST_FILE_TIMEOUT: ${{ matrix.marker == 'windows' && (runner.arch == 'ARM64' && '900' || '300') || '' }}
+          # Marker-guarded: macos-latest is also ARM64, and the widened
+          # deadlines must stay on the Windows arm64 lane only.
+          HERMES_TEST_TIMEOUT_SCALE: ${{ matrix.marker == 'windows' && runner.arch == 'ARM64' && '3' || '' }}
+          # -SelfTestPipeDrain flood-arm budget (windows.ps1): 45 s measured on
+          # the loaded arm64 runner vs the 25 s default; still ~5x under the
+          # metered-drain ~76 s this budget exists to catch.
+          HERMES_SELFTEST_FLOOD_BUDGET_SECONDS: ${{ matrix.marker == 'windows' && runner.arch == 'ARM64' && '60' || '' }}
           HERMES_TEST_SLICE: ${{ matrix.slice || '' }}
           # Belt-and-suspenders with tests/conftest.py's env blanking: no
           # test may reach a real provider API.

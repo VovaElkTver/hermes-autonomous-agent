@@ -8,6 +8,7 @@ import subprocess
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
 from tests.installation_launcher_fixture import publish_fixture_launcher
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -57,7 +58,7 @@ def test_pm_handoff_reports_update_and_gateway_results(
                           'HERMES_RUNTIME_DIR': str(tmp_path / 'empty-store'),
                           'HANDOFF_CALLS': str(calls), 'HANDOFF_EXIT': str(code),
                           'GATEWAY_EXIT': str(gateway_code)},
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=scaled_timeout(120),
         check=False,
     )
     assert result.returncode == code, result.stdout + result.stderr
@@ -96,7 +97,7 @@ def test_update_killed_by_idle_watchdog_after_completing_is_a_success(
                           'HERMES_RUNTIME_DIR': str(tmp_path / 'empty-store'),
                           'HANDOFF_CALLS': str(calls), 'HANDOFF_EXIT': '0', 'HANDOFF_HANG': output,
                           'HERMES_UPDATE_STEP_IDLE_SECONDS': '3', 'PYTHONIOENCODING': 'utf-8'},
-        capture_output=True, text=True, timeout=180,
+        capture_output=True, text=True, timeout=scaled_timeout(180),
         check=False,
     )
     assert result.returncode == code, result.stdout + result.stderr
@@ -123,7 +124,7 @@ def test_earlier_pm_userbin_launcher_is_identity_checked(tmp_path: Path) -> None
         script = f". '{helper}'; try {{ @(Get-HermesRuntimeCommand -InstallRoot '{target}') | ConvertTo-Json -Compress }} catch {{ exit 1 }}"
         result = subprocess.run(['powershell', '-NoProfile', '-Command', script],
                                 env={**os.environ, 'HERMES_HOME': str(home)},
-                                capture_output=True, text=True, timeout=45, check=False)
+                                capture_output=True, text=True, timeout=scaled_timeout(45), check=False)
         assert result.returncode == expected_code, result.stdout + result.stderr
         if expected_code == 0:
             assert json.loads(result.stdout) == str(external)
@@ -143,7 +144,7 @@ def test_command_file_launcher_probe_runs_through_cmd_exe_explicitly(tmp_path: P
         script = (f". '{helper}'; try {{ $r = Invoke-HermesProbe '{target}' @('--version', '{argument}'); "
                   "[Console]::Out.Write(\"code=$($r.Code)`n$($r.Output)\") } catch { [Console]::Out.Write('refused'); exit 3 }")
         return subprocess.run(['powershell', '-NoProfile', '-Command', script],
-                              capture_output=True, text=True, timeout=60, check=False)
+                              capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
 
     ok = probe('two words')
     assert ok.returncode == 0, ok.stdout + ok.stderr

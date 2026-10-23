@@ -17,6 +17,7 @@ import time
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
 from tests.installation_launcher_fixture import publish_fixture_launcher
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -74,7 +75,8 @@ if __name__ == '__main__':
 """
 
 
-def _handoff(tmp_path: Path, *args: str, verify: str = 'pass\n', timeout: int = 150, prepare=None, **env: str):
+def _handoff(tmp_path: Path, *args: str, verify: str = 'pass\n', timeout: float = 150, prepare=None, **env: str):
+    timeout = scaled_timeout(timeout)
     install = tmp_path / 'checkout'
     publish_fixture_launcher(install, CLI)
     (install / 'hermes_cli/desktop_update_verify.py').write_text(verify, encoding='utf-8')
@@ -220,7 +222,7 @@ def test_cpu_busy_pipe_silent_update_is_not_killed_by_the_idle_watchdog(tmp_path
 @pytest.mark.platforms('windows')
 def test_hanging_update_help_probe_is_bounded(tmp_path: Path) -> None:
     code, out, argv, _result, _ = _handoff(
-        tmp_path, '-NoGateway', '-ProbeTimeoutSeconds', '10', timeout=120, HANDOFF_HELP_HANG='1',
+        tmp_path, '-NoGateway', '-ProbeTimeoutSeconds', '10', timeout=scaled_timeout(120), HANDOFF_HELP_HANG='1',
     )
     assert code == 0, out
     assert argv[0][:2] == ['update', '--yes'] and '--keep-stash' not in argv[0], argv

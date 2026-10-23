@@ -9,6 +9,8 @@ import subprocess
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 
 ROOT = Path(__file__).resolve().parents[3]
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
@@ -53,7 +55,7 @@ Remove-PSBreakpoint $breakpoint
          "-Install", str(install), "-Run", run_id],
         env={**os.environ, "HOME": str(home), "HERMES_HOME": str(home),
              "TEMP": str(tmp_path), "TMP": str(tmp_path)},
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=scaled_timeout(60),
         check=False,
     )
     receipt = json.loads((home / ".hermes-update-result.json").read_text(encoding="utf-8"))

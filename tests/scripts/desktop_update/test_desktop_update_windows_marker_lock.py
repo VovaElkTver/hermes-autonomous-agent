@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
 from tests.installation_launcher_fixture import publish_fixture_launcher
 from tests.scripts.desktop_update.windows_handoff_support import (
     MARKER,
@@ -72,7 +73,7 @@ def test_a7_concurrent_claimants_over_a_dead_marker_yield_one_owner(tmp_path: Pa
     try:
         time.sleep(6)
         lock.release()
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + scaled_timeout(120)
         while not Path(str(hold) + '.pid').exists():
             assert time.monotonic() < deadline, 'no claimant reached the update'
             time.sleep(0.05)
@@ -88,7 +89,7 @@ def test_a7_concurrent_claimants_over_a_dead_marker_yield_one_owner(tmp_path: Pa
         for c in claimants:
             if c.poll() is None:
                 try:
-                    c.wait(timeout=120)
+                    c.wait(timeout=scaled_timeout(120))
                 except subprocess.TimeoutExpired:
                     subprocess.run(['taskkill', '/T', '/F', '/PID', str(c.pid)], capture_output=True, check=False)
     assert running[0].returncode == 0
@@ -135,7 +136,7 @@ def test_script_killed_before_publishing_the_delegate_runs_no_update(tmp_path: P
         lock = _HeldLock(home)   # after the claim, before the delegate publication
         child = subprocess.run([POWERSHELL, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(finder),
                                 '-Parent', str(script.pid), '-Seconds', '60'],
-                               capture_output=True, text=True, timeout=90, check=False)
+                               capture_output=True, text=True, timeout=scaled_timeout(90), check=False)
         assert child.returncode == 0, 'the update child never appeared'
         child_pid = int(child.stdout)
         subprocess.run(['taskkill', '/F', '/PID', str(script.pid)], capture_output=True, check=True)
@@ -153,7 +154,7 @@ def test_script_killed_before_publishing_the_delegate_runs_no_update(tmp_path: P
         if script.poll() is None:
             subprocess.run(['taskkill', '/T', '/F', '/PID', str(script.pid)], capture_output=True, check=False)
             script.wait()
-    deadline = time.monotonic() + 60   # the custodian releases the marker once the lock is free
+    deadline = time.monotonic() + scaled_timeout(60)   # the custodian releases the marker once the lock is free
     while (verdict := _op(home, '-MarkerOp', 'reclaim')[1]).startswith('live '):
         assert time.monotonic() < deadline
         time.sleep(0.2)

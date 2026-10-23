@@ -51,6 +51,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 WINDOWS_PS1 = REPO_ROOT / "scripts" / "desktop-update" / "windows.ps1"
@@ -130,7 +132,7 @@ def test_update_step_survives_pipe_leak_flood_and_live_child_stall(
         # Comfortably past both arms' worst cases (the 45s hold, and a metered
         # flood) so a regression fails with the fixture's own diagnosis instead
         # of an opaque timeout.
-        timeout=300,
+        timeout=scaled_timeout(300),
         env=env,
         cwd=str(REPO_ROOT),
         check=False,

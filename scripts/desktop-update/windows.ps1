@@ -1446,7 +1446,10 @@ exit 3
     $budget = $script:StepDrainGraceSeconds + 30
     # A sleep-per-chunk drain moves 16 KiB/150ms ~ 107 KB/s, so 8 MiB takes
     # ~76s. Generous enough for a loaded CI runner, far under the trickle.
+    # HERMES_SELFTEST_FLOOD_BUDGET_SECONDS widens it on the slow arm64 lane
+    # (the arm64 CI row sets it); the check itself is unchanged elsewhere.
     $floodBudget = 25
+    if ($env:HERMES_SELFTEST_FLOOD_BUDGET_SECONDS) { $floodBudget = [int]$env:HERMES_SELFTEST_FLOOD_BUDGET_SECONDS }
     $problems = @()
     if (-not $leakAlive) { $problems += "handle-holding grandchild was not alive on return (fixture did not reproduce the leak)" }
     if ($elapsed -ge $budget) { $problems += "leak arm returned in ${elapsed}s, over the ${budget}s budget" }

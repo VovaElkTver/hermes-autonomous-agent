@@ -10,6 +10,8 @@ import subprocess
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 pytestmark = pytest.mark.platforms("windows")
 INSTALLER = Path(__file__).resolve().parents[3] / "scripts" / "install.ps1"
 REFUSAL = "exists and is not a Hermes git checkout"
@@ -39,7 +41,7 @@ def test_failed_iex_install_reports_and_returns_to_the_callers_session(tmp_path)
     command = (f"iex (Get-Content -Raw -LiteralPath '{INSTALLER}'); "
                "Write-Output \"session alive: $LASTEXITCODE\"")
     result = subprocess.run([_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-                            env=_failing_install_env(tmp_path), capture_output=True, text=True, timeout=60, check=False)
+                            env=_failing_install_env(tmp_path), capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     assert REFUSAL in result.stdout
     assert "session alive: 1" in result.stdout, result.stdout + result.stderr
     assert (tmp_path / "home" / "hermes-agent" / "user-file").read_text(encoding="utf-8") == "preserve me"
@@ -47,6 +49,6 @@ def test_failed_iex_install_reports_and_returns_to_the_callers_session(tmp_path)
 
 def test_failed_file_install_still_exits_nonzero(tmp_path):
     result = subprocess.run([_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INSTALLER)],
-                            env=_failing_install_env(tmp_path), capture_output=True, text=True, timeout=60, check=False)
+                            env=_failing_install_env(tmp_path), capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     assert REFUSAL in result.stdout
     assert result.returncode == 1

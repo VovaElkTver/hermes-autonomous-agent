@@ -13,6 +13,7 @@ import time
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
 from tests.scripts.desktop_update.lineage_rule_cases import ENV_CASES, RULE_CASES
 from tests.scripts.desktop_update.windows_handoff_support import (
     SCRIPT,
@@ -170,7 +171,7 @@ def test_launcher_lineage_rule_matches_the_shared_table(tmp_path: Path) -> None:
     harness.write_text(_RULE_HARNESS, encoding='utf-8')
     proc = subprocess.run([POWERSHELL, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(harness),
                            '-MarkerPs1', str(MARKER_PS1), '-Marker', str(tmp_path / MARKER), '-Cases', str(cases)],
-                          capture_output=True, text=True, timeout=120, check=False)
+                          capture_output=True, text=True, timeout=scaled_timeout(120), check=False)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     got = dict(line.split('=') for line in proc.stdout.split())
     want = {c['id']: '1' if c['expect'] else '0' for c in RULE_CASES}

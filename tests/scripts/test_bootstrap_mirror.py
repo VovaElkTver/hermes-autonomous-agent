@@ -12,6 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -64,7 +66,7 @@ def test_windows_download_uses_only_verified_candidates(tmp_path, server, mode):
         encoding="utf-8",
     )
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                            capture_output=True, text=True, timeout=60, check=False)
+                            capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     if mode in ("primary", "missing"):
         assert result.returncode == 0, result.stdout + result.stderr
         assert destination.read_bytes() == body
@@ -91,7 +93,7 @@ def test_windows_bootstrap_rejects_corrupt_bytes_before_extract(tmp_path, server
         encoding="utf-8",
     )
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                            capture_output=True, text=True, timeout=60, check=False)
+                            capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     assert result.returncode != 0
     assert "digest mismatch" in result.stdout + result.stderr
     assert server[0].requests == ["/primary"]
@@ -139,7 +141,7 @@ def test_generated_windows_pins_match_the_shared_authority(tmp_path):
         "@{uv=$script:UvPinFiles; git=$script:GitPinFiles} | ConvertTo-Json -Depth 5 -Compress\n",
         encoding="utf-8",
     )
-    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-File", str(script)], capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-File", str(script)], capture_output=True, text=True, timeout=scaled_timeout(30), check=False)
     assert result.returncode == 0, result.stderr
     emitted = json.loads(result.stdout)
     lock = json.loads((ROOT / "pm/lock.json").read_text(encoding="utf-8"))["packages"]

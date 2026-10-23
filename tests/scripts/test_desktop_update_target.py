@@ -11,6 +11,7 @@ import sys
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
 from tests.installation_launcher_fixture import publish_fixture_launcher
 
 
@@ -48,7 +49,7 @@ def _run_handoff(tmp_path, target, *, windows=False, inherited_home=True, modern
             [sys.executable, "-m", "venv", "--without-pip", str(install / "venv")],
             check=True,
             capture_output=True,
-            timeout=60,
+            timeout=scaled_timeout(60),
         )
     package = (
         install / "venv" / "Lib" / "site-packages" if windows and not modern else install
@@ -126,7 +127,7 @@ def _run_handoff(tmp_path, target, *, windows=False, inherited_home=True, modern
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=90,
+        timeout=scaled_timeout(90),
         check=False,
     )
     calls = (
