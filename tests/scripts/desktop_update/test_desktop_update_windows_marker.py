@@ -16,6 +16,7 @@ import time
 import pytest
 
 from tests.installation_launcher_fixture import publish_fixture_launcher
+from tests.ci_timeouts import scaled_timeout
 from tests.scripts.desktop_update.legacy_desktop_reader import legacy_read
 from tests.scripts.desktop_update.windows_handoff_support import _HeldLock
 
@@ -50,7 +51,7 @@ def _creation_time(pid: int) -> str:
         ['powershell', '-NoProfile', '-Command',
          f"$c = (Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CreationDate; "
          "[DateTimeOffset]::new($c.ToUniversalTime()).ToUnixTimeMilliseconds().ToString()"],
-        capture_output=True, text=True, timeout=60, check=True,
+        capture_output=True, text=True, timeout=scaled_timeout(60), check=True,
     ).stdout.strip()
     return f'{int(out) / 1000:.3f}'
 
@@ -65,7 +66,7 @@ def _protected_pid() -> int:
     rows = subprocess.run(
         ['powershell', '-NoProfile', '-Command',
          'Get-CimInstance Win32_Process | ForEach-Object { \'{0} {1}\' -f $_.ProcessId, $_.Name }'],
-        capture_output=True, text=True, timeout=60, check=True,
+        capture_output=True, text=True, timeout=scaled_timeout(60), check=True,
     ).stdout.splitlines()
     for row in rows:
         pid, _, name = row.strip().partition(' ')
@@ -87,7 +88,8 @@ def _dead_pid() -> int:
     return proc.pid
 
 
-def _run(home: Path, *args: str, install: Path | None = None, timeout: int = 120):
+def _run(home: Path, *args: str, install: Path | None = None, timeout: float = 120):
+    timeout = scaled_timeout(timeout)
     command = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(SCRIPT),
                '-InstallRoot', str(install or home / 'hermes-agent'), '-NoUi', *args]
     env = {**os.environ, 'HERMES_HOME': str(home), 'HERMES_RUNTIME_DIR': str(home / 'empty-store')}
@@ -263,7 +265,7 @@ def test_ui_profile_sweep_keeps_dirs_of_live_handoffs(tmp_path: Path, sleeper: s
         ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(SCRIPT), '-SelfTestUi', '-NoUi'],
         cwd=tmp_path, env={**os.environ, 'HERMES_HOME': str(home), 'TEMP': str(tmp_path),
                            'HERMES_SELFTEST_HOLD_SECONDS': '0'},
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=scaled_timeout(120),
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -301,7 +303,7 @@ def _parent_pid(pid: int) -> int:
     out = subprocess.run(
         ['powershell', '-NoProfile', '-Command',
          f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').ParentProcessId"],
-        capture_output=True, text=True, timeout=60, check=True,
+        capture_output=True, text=True, timeout=scaled_timeout(60), check=True,
     ).stdout.strip()
     return int(out or 0)
 

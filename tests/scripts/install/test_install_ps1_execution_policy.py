@@ -17,6 +17,7 @@ import sys
 import pytest
 
 from hermes_cli._launchers import runtime_command
+from tests.ci_timeouts import scaled_timeout
 
 pytestmark = pytest.mark.platforms("windows")
 INSTALLER = Path(__file__).resolve().parents[3] / "scripts" / "install.ps1"
@@ -39,7 +40,7 @@ def test_installed_hermes_runs_under_restricted_policy(tmp_path):
                "Invoke-InstalledHermes @('setup')")
     result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                              "-Command", command],
-                            cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60, check=False)
+                            cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     output = result.stdout + result.stderr
     assert "running scripts is disabled" not in output, output
     assert f"runtime-from {helper.parents[2]} setup" in result.stdout, output
@@ -74,7 +75,7 @@ def test_installer_runs_runtime_command_from_apostrophe_account_path(tmp_path):
     result = subprocess.run(
         [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command],
         cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=scaled_timeout(60),
         check=False,
     )
     output = result.stdout + result.stderr

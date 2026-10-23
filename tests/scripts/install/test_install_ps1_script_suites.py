@@ -13,6 +13,8 @@ import subprocess
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 pytestmark = pytest.mark.platforms("windows")
 SUITES = Path(__file__).resolve().parents[3] / "scripts" / "tests"
 
@@ -28,5 +30,5 @@ def _shell(name: str) -> str:
 def test_suite_passes(shell, suite):
     result = subprocess.run([_shell(shell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                              "-File", str(SUITES / suite)],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300, check=False)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=scaled_timeout(300), check=False)
     assert result.returncode == 0, result.stdout + result.stderr

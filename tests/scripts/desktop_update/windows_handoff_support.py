@@ -10,6 +10,8 @@ import time
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCRIPT = ROOT / 'scripts/desktop-update/windows.ps1'
@@ -38,7 +40,7 @@ if __name__ == '__main__':
 
 def _ps(command: str, timeout: int = 60) -> str:
     return subprocess.run([POWERSHELL, '-NoProfile', '-Command', command],
-                          capture_output=True, text=True, timeout=timeout, check=True).stdout.strip()
+                          capture_output=True, text=True, timeout=scaled_timeout(timeout), check=True).stdout.strip()
 
 
 def _creation_time(pid: int) -> str:
@@ -70,12 +72,13 @@ def _script(home: Path, *args: str, install: Path | None = None, **env: str) -> 
 
 
 def _finish(proc: subprocess.Popen, timeout: int = 120) -> tuple[int, str]:
+    limit = scaled_timeout(timeout)
     try:
-        out, _ = proc.communicate(timeout=timeout)
+        out, _ = proc.communicate(timeout=limit)
     except subprocess.TimeoutExpired:
         subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True, check=False)
         out, _ = proc.communicate()
-        pytest.fail(f'hand-off did not finish within {timeout}s: {out}')
+        pytest.fail(f'hand-off did not finish within {limit}s: {out}')
     return proc.returncode, out
 
 
@@ -83,7 +86,7 @@ def _op(home: Path, *args: str) -> tuple[int, str, str]:
     proc = subprocess.run(
         [POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', str(SCRIPT),
          '-InstallRoot', str(home / 'hermes-agent'), *args],
-        cwd=home, env=_env(home), capture_output=True, text=True, timeout=120, check=False)
+        cwd=home, env=_env(home), capture_output=True, text=True, timeout=scaled_timeout(120), check=False)
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -112,7 +115,7 @@ class _HeldLock:
     conflicts with the script's FileShare.None open."""
 
     def __init__(self, home: Path) -> None:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + scaled_timeout(30)
         while True:
             try:
                 self._f = open(home / (MARKER + '.lock'), 'a+b')   # windows-footgun: ok — binary mode
@@ -126,7 +129,7 @@ class _HeldLock:
 
 
 def _wait_for_log(home: Path, needle: str, timeout: int = 90) -> str:
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + scaled_timeout(timeout)
     while needle not in _log(home):
         assert time.monotonic() < deadline, f'{needle!r} never logged: {_log(home)}'
         time.sleep(0.1)

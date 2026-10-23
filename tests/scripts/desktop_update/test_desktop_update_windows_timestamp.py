@@ -10,6 +10,8 @@ import time
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 
 @pytest.mark.platforms("windows")
 def test_windows_update_writes_locale_independent_marker_and_result(tmp_path, monkeypatch):
@@ -27,7 +29,7 @@ def test_windows_update_writes_locale_independent_marker_and_result(tmp_path, mo
     started = int(time.time())
     result = subprocess.run([shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
                             env={**os.environ, "HERMES_TIMESTAMP_TEST_SCRIPT": str(script)},
-                            capture_output=True, text=True, timeout=60, check=False)
+                            capture_output=True, text=True, timeout=scaled_timeout(60), check=False)
     finished = int(time.time())
     assert result.returncode == 0, result.stdout + result.stderr
     marker = (tmp_path / ".hermes-update-in-progress").read_text(encoding="utf-8-sig").splitlines()

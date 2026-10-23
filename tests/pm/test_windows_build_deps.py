@@ -7,6 +7,8 @@ import subprocess
 
 import pytest
 
+from tests.ci_timeouts import scaled_timeout
+
 
 pytestmark = pytest.mark.platforms("windows")
 HELPER = Path(__file__).resolve().parents[2] / "scripts" / "windows-build-deps.ps1"
@@ -25,7 +27,7 @@ def _powershell(script, *args, env=None):
     return subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(script), *map(str, args)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=180,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=scaled_timeout(180),
         check=False,
     )
 
