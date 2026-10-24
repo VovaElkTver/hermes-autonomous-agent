@@ -133,7 +133,9 @@ def _matrix_voice_metadata_for_file(path: Path) -> dict[str, Any]:
     return metadata
 
 # Topical siblings (FILE_LINES ratchet): bang-command aliasing and the reply_expected verdict.
+from plugins.platforms.matrix.media_filenames import _is_bare_media_filename
 from plugins.platforms.matrix.reply_verdict import verdict as reply_verdict
+from plugins.platforms.matrix.transport_observation import TransportObservationMixin
 from plugins.platforms.matrix.bang_commands import (
     normalize_matrix_bang_command as _normalize_matrix_bang_command,  # re-export: tests import it here
 )
@@ -396,46 +398,9 @@ _OUTBOUND_MENTION_RE = re.compile(r"(?<![\w/])(@[0-9A-Za-z._=/-]+:[0-9A-Za-z.-]+
 
 _E2EE_INSTALL_HINT = "Install with: pip install 'mautrix[encryption]' asyncpg aiosqlite  (requires libolm C library)"
 
-_MATRIX_IMAGE_FILENAME_EXTS = frozenset({
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".heic", ".heif", ".avif"})
-_MATRIX_MEDIA_FILENAME_EXTS = frozenset({
-    ".ogg", ".oga", ".opus", ".m4a", ".mp3", ".wav", ".flac", ".aac", ".amr", ".mp4", ".webm", ".mov", ".mkv"})
 # Keycap 1-9, 🔟; choice pickers (/reasoning, /fast) can need 12 slots, so they add 🅰️ 🅱️.
 _MATRIX_MODEL_PICKER_REACTIONS = tuple(f"{d}\ufe0f\u20e3" for d in "123456789") + ("\U0001f51f",)
 _MATRIX_CHOICE_PICKER_REACTIONS = _MATRIX_MODEL_PICKER_REACTIONS + ("\U0001f170\ufe0f", "\U0001f171\ufe0f")
-
-def _looks_like_matrix_image_filename(text: str) -> bool:
-    """True when an m.image body is just the uploaded filename (no caption) — not user text."""
-    return _looks_like_transport_filename(text, "image/", _MATRIX_IMAGE_FILENAME_EXTS)
-
-
-def _looks_like_transport_filename(text: str, mime_prefixes, exts: frozenset, reject_spaces: bool = False) -> bool:
-    """Bare single-token filename with a known media extension or a matching guessed MIME type."""
-    candidate = str(text or "").strip()
-    if not candidate or "\n" in candidate or candidate.endswith("/"):
-        return False
-    # A genuine caption essentially always contains whitespace; a bare transport filename does not.
-    if reject_spaces and any(ch.isspace() for ch in candidate):
-        return False
-    if Path(candidate).name != candidate:
-        return False
-    suffix = Path(candidate).suffix.lower()
-    if not suffix:
-        return False
-    guessed_type, _ = mimetypes.guess_type(candidate)
-    return bool(guessed_type and guessed_type.startswith(mime_prefixes)) or suffix in exts
-
-
-def _looks_like_matrix_media_filename(text: str) -> bool:
-    """True when an m.audio/m.file/m.video body is just the uploaded filename (no caption)."""
-    return _looks_like_transport_filename(text, ("audio/", "video/"), _MATRIX_MEDIA_FILENAME_EXTS, True)
-
-
-def _is_bare_media_filename(msgtype: str, body: str) -> bool:
-    """True when a media event body is only the uploaded filename for its msgtype."""
-    if msgtype == "m.image":
-        return _looks_like_matrix_image_filename(body)
-    return msgtype in ("m.audio", "m.file", "m.video") and _looks_like_matrix_media_filename(body)
 
 
 def _matrix_event_timestamp_seconds(event: Any) -> float:
@@ -686,7 +651,7 @@ def ensure_matrix_deps() -> bool:
     return True
 
 
-class MatrixAdapter(BasePlatformAdapter):
+class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
     """Gateway adapter for Matrix (any homeserver)."""
 
     supports_code_blocks = True  # Matrix renders fenced code blocks (HTML/markdown)
@@ -782,15 +747,7 @@ class MatrixAdapter(BasePlatformAdapter):
         raw_session_scope = str(_extra_or_secret(config.extra, "session_scope", "MATRIX_SESSION_SCOPE", "auto")).strip().lower()
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = self._extra_truthy(config, "process_notices", "MATRIX_PROCESS_NOTICES", "false")
-        # Transport-observation layer (agency-model §16.9, task-transobs01): records
-        # raw transport facts (sync/event_fetch/relations/local_echo) in state.db
-        # BEFORE the semantic journal, so phantom-inbound is detectable. Opt-in per
-        # profile (new durable state ships off by default, like controller.enabled);
-        # the connection is opened in connect(), inside the profile scope.
-        self._transport_obs_enabled: bool = self._extra_truthy(
-            config, "transport_observations", "MATRIX_TRANSPORT_OBSERVATIONS", "false")
-        self._transport_obs_conn = None
-        self._sync_batch_id: Optional[str] = None
+        self._init_transport_observation(config)  # §16.9 observer layer, off by default (transport_observation.py)
         self._reactions_enabled: bool = str(_extra_or_secret(config.extra, "reactions", "MATRIX_REACTIONS", "true")).lower() not in {"false", "0", "no"}
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Let the final message land before redacting reactions ("missing event" in some
@@ -1277,17 +1234,6 @@ class MatrixAdapter(BasePlatformAdapter):
             return False
         # Resolved here, inside the profile scope, so multiplexed profiles never share it.
         self._resolve_store_dir().mkdir(parents=True, exist_ok=True)
-        # Transport-observation layer (§16.9): open the per-profile state.db inside the
-        # profile scope, the same reason as _resolve_store_dir above (later out-of-scope
-        # reads would pin the wrong profile's home). A failure disables the layer for
-        # this process — telemetry must never block connect.
-        if self._transport_obs_enabled:
-            try:
-                from controller import transport as _tob
-                self._transport_obs_conn = _tob.connection()
-            except Exception as exc:
-                logger.warning("Matrix: transport observations disabled (state.db open failed): %s", exc)
-                self._transport_obs_conn = None
         client_session = _create_matrix_session(self._proxy_url)
         api = HTTPAPI(base_url=self._homeserver, token=self._access_token or "", client_session=client_session)
         state_store = MemoryStateStore()
@@ -1348,6 +1294,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 await self._crypto_db.stop()
             except Exception as exc:
                 logger.debug("Matrix: could not close crypto DB on disconnect: %s", exc)
+        self._close_transport_observation()
         if self._client:
             with suppress(Exception):
                 await self._client.api.session.close()
@@ -1385,12 +1332,6 @@ class MatrixAdapter(BasePlatformAdapter):
         event_id = await asyncio.wait_for(
             self._client.send_message_event(RoomID(chat_id), EventType.ROOM_MESSAGE, msg_content), timeout=45)
         self._mark_sent_event(str(event_id))
-        # §16.9: a confirmed outbound event is a local_echo observation — the
-        # transport fact that this event exists on our side of the interface.
-        self._record_transport_observation(
-            channel="local_echo", room_id=chat_id, external_event_id=str(event_id),
-            event_kind="local_echo", sender=self._user_id or None,
-            raw_payload_ref=self._raw_payload_ref(msg_content))
         return str(event_id)
 
     def _mark_sent_event(self, event_id: str) -> None:
@@ -1401,84 +1342,6 @@ class MatrixAdapter(BasePlatformAdapter):
             self._sent_event_ids_set.discard(self._sent_event_ids[0])
         self._sent_event_ids.append(event_id)
         self._sent_event_ids_set.add(event_id)
-
-    # ---- transport-observation layer (agency-model §16.9, task-transobs01) ----
-
-    @staticmethod
-    def _event_content_dict(event: Any) -> Optional[dict]:
-        """Raw event content as a plain dict (mautrix Content -> wire form).
-        None when absent — the observation then carries no payload ref."""
-        content = getattr(event, "content", None)
-        if content is None:
-            return None
-        if isinstance(content, dict):
-            return content
-        with suppress(Exception):
-            return content.serialize()
-        return None
-
-    @staticmethod
-    def _raw_payload_ref(payload) -> Optional[str]:
-        """Stable identity ref for a raw payload — sha256 of canonical JSON,
-        never the payload itself (E2EE room content must not be duplicated
-        into the observation log; identical payloads share one ref)."""
-        try:
-            from controller import transport as _tob
-            return _tob.payload_ref(payload)
-        except Exception:
-            return None
-
-    def _record_transport_observation(self, *, channel: str, room_id: str,
-                                      external_event_id: str = "",
-                                      event_ts: float = 0.0,
-                                      event_kind: str = "",
-                                      sender: Optional[str] = None,
-                                      raw_payload_ref: Optional[str] = None) -> None:
-        """Write one raw-observation row (+ event-level upsert) to state.db
-        BEFORE the semantic journal can see the event (§16.9 stage 1: record
-        only, no behavior change). Best-effort: any failure is swallowed —
-        the observation layer must never break or delay the message path.
-        No-op unless the profile enabled transport observations."""
-        conn = self._transport_obs_conn
-        if not (self._transport_obs_enabled and conn and external_event_id):
-            return
-        try:
-            from controller import transport as _tob
-            _tob.record_observation(
-                conn, connector="matrix", account=self._user_id,
-                device=self._device_id or None, channel=channel, room_id=room_id,
-                external_event_id=external_event_id,
-                sync_batch_id=self._sync_batch_id if channel == "sync" else None,
-                raw_payload_ref=raw_payload_ref, event_kind=event_kind or None,
-                sender=sender or None,
-                observed_at=float(event_ts) if event_ts else None)
-        except Exception as exc:
-            logger.debug("Matrix: transport observation write failed: %s", exc)
-
-    def _record_fetch_check(self, room_id: str, event_id: str, *, result: str,
-                            error_code: str | None = None,
-                            ref: Optional[str] = None,
-                            detail: str | None = None) -> None:
-        """§16.9: a reply-origin fetch is itself a reconciliation check — a
-        failure lands as result='fetch_failed' WITH its machine error code,
-        never as a silent 'the event did not exist'."""
-        conn = self._transport_obs_conn
-        if not (self._transport_obs_enabled and conn and event_id):
-            return
-        try:
-            from controller import transport as _tob
-            obs_id = _tob.record_observation(
-                conn, connector="matrix", account=self._user_id,
-                device=self._device_id or None, channel="event_fetch",
-                room_id=room_id, external_event_id=event_id,
-                raw_payload_ref=ref, event_kind="room_message")
-            if obs_id is None:
-                return
-            _tob.record_check(conn, obs_id, method="event_refetch",
-                              against_source=self._homeserver, result=result,
-                              error_code=error_code, evidence_ref=ref, detail=detail)
-        except Exception as exc:
-            logger.debug("Matrix: transport fetch-check write failed: %s", exc)
 
     def _owns_replied_event(self, relates_to: dict) -> bool:
         """True when the message replies (non-fall-back) to an event this adapter sent."""
@@ -1961,9 +1824,9 @@ class MatrixAdapter(BasePlatformAdapter):
             self._invalidate_room_identities()
         self._warn_encrypted_drops(rooms_join, client)
         nb = sync_data.get("next_batch")  # incremental syncs resume from here
-        self._sync_batch_id = nb  # §16.9: sync-channel observations carry this delivery's token
         if nb:
             await client.sync_store.put_next_batch(nb)
+        self._current_sync_batch = str(nb or "")  # batch token for every event in this response
         if initial:
             logger.info("Matrix: initial sync complete, joined %d rooms", len(self._joined_rooms))
             await self._refresh_dm_cache()
@@ -1972,6 +1835,7 @@ class MatrixAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("Matrix: %s: %s", "initial sync event dispatch error" if initial else "sync event dispatch error", exc)
         self._schedule_pending_invite_joins(sync_data)
+        await self._maybe_reconcile_transport()
         return nb
 
     def _warn_encrypted_drops(self, rooms_join: dict[str, Any], client: Any) -> None:
@@ -2093,20 +1957,9 @@ class MatrixAdapter(BasePlatformAdapter):
         # DEBUG-level proof the callback fires at all (silent-inbound troubleshooting).
         logger.debug(
             "Matrix: callback fired — event %s from %s in %s", getattr(event, "event_id", "?"), sender, room_id)
-        # Transport-observation layer (§16.9, stage 1): record what the transport
-        # saw BEFORE any gate below (self-sender, bridge, allowlist, dedup, grace)
-        # can drop it — that log is what makes phantom-inbound detectable. Our own
-        # echo riding back through sync is tagged local_echo; bridge/system
-        # relays are transport plumbing, not room events, and stay out of the log.
-        if not self._is_system_or_bridge_sender(sender):
-            self._record_transport_observation(
-                channel="local_echo" if self._is_self_sender(sender) else "sync",
-                room_id=room_id,
-                external_event_id=str(getattr(event, "event_id", "")),
-                event_ts=_matrix_event_timestamp_seconds(event),
-                event_kind="room_message",
-                sender=sender or None,
-                raw_payload_ref=self._raw_payload_ref(self._event_content_dict(event)))
+        # §16.9: record the raw observation BEFORE any gate below (self-sender, bridge,
+        # allowlist, dedup, grace) can drop it — that log makes phantom-inbound detectable.
+        self._record_transport_observation(event, room_id, sender)
         if self._is_self_sender(sender):
             return
         # Bridge/system identities must never reach the pairing flow (echo loop once paired).
@@ -2141,13 +1994,6 @@ class MatrixAdapter(BasePlatformAdapter):
             msgtype = str(content.msgtype) if hasattr(content, "msgtype") else ""
         relates_to = source_content.get("m.relates_to", {})
         if relates_to.get("rel_type") == "m.replace":  # skip edits
-            # §16.9: edits are relations — they may never show in a UI timeline but
-            # still aggregate; the transport layer logs the raw observation before
-            # the semantic skip (second channel-observation of the same event).
-            self._record_transport_observation(
-                channel="relations", room_id=room_id, external_event_id=event_id,
-                event_ts=event_ts, event_kind="edit", sender=sender or None,
-                raw_payload_ref=self._raw_payload_ref(source_content))
             return
         # m.notice is the conventional bot-response msgtype; ignoring it prevents bot-to-bot loops.
         if msgtype == "m.notice" and not self._process_notices:
@@ -2156,6 +2002,7 @@ class MatrixAdapter(BasePlatformAdapter):
             await self._handle_media_message(room_id, sender, event_id, event_ts, source_content, relates_to, msgtype)
         elif msgtype in ("m.text", "m.notice"):
             await self._handle_text_message(room_id, sender, event_id, event_ts, source_content, relates_to)
+
 
     async def _resolve_message_context(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict,
@@ -2243,16 +2090,10 @@ class MatrixAdapter(BasePlatformAdapter):
         Returns (text<=2000, author_id, display_name, is_own)."""
         try:
             if self._client is None:
-                # §16.9: no transport at all is a failed fetch, not "no context".
-                self._record_fetch_check(room_id, event_id, result="fetch_failed",
-                                         error_code="no_transport")
                 return None, None, None, False
             evt = await asyncio.wait_for(
                 self._client.get_event(RoomID(room_id), EventID(event_id)), timeout=3.0)
             if evt is None:
-                # The homeserver answered and has no such event: a reconciliation
-                # result (not_found), still not a room fact on its own.
-                self._record_fetch_check(room_id, event_id, result="not_found")
                 return None, None, None, False
             if str(getattr(evt, "type", "") or "") == "m.room.encrypted":  # EventType.ROOM_ENCRYPTED
                 # C3: the original in an E2EE room arrives encrypted — decrypt with OUR OlmMachine
@@ -2273,11 +2114,6 @@ class MatrixAdapter(BasePlatformAdapter):
                 text = raw_body
             text = text[:2000]  # C5 helper slice; the 500 slice belongs to the prompt renderer
             if not text:
-                # §16.9: the fetch SUCCEEDED (event exists in the source) — check it
-                # as matched with a note, before the "no context" behavior.
-                self._record_fetch_check(room_id, event_id, result="matched",
-                                         ref=self._raw_payload_ref(self._event_content_dict(evt)),
-                                         detail="no text content")
                 return None, None, None, False
             author = getattr(evt, "sender", None)
             is_own = bool(author and self._user_id and author == self._user_id)  # C6
@@ -2287,23 +2123,11 @@ class MatrixAdapter(BasePlatformAdapter):
                     display_name = await self._get_display_name(room_id, author)
             logger.info("[Matrix] reply-context fetched %s in %s (%d chars, own=%s)",
                         event_id, room_id, len(text), is_own)
-            # §16.9: the refetch is a reconciliation check against the interface.
-            self._record_fetch_check(room_id, event_id, result="matched",
-                                     ref=self._raw_payload_ref(self._event_content_dict(evt)))
             return text, author, display_name, is_own
-        except Exception as exc:
+        except Exception:
             # C2 keeps behavior silent; INFO keeps the prod branch observable
             # (pro runs at INFO — a debug-only log hides GET vs inline forever).
             logger.info("[Matrix] reply-context fetch FAILED for %s in %s", event_id, room_id)
-            # §16.9: a failed fetch is a reconciliation result carrying its machine
-            # error code, not a silent "the event did not exist".
-            try:
-                from controller import transport as _tob
-                _err_code = _tob.error_code_of(exc)
-            except Exception:
-                _err_code = "unknown"
-            self._record_fetch_check(room_id, event_id, result="fetch_failed",
-                                     error_code=_err_code)
             return None, None, None, False
 
     async def _extract_reply_context(
@@ -2795,21 +2619,12 @@ class MatrixAdapter(BasePlatformAdapter):
 
     async def _on_reaction(self, event: Any) -> None:
         sender = str(getattr(event, "sender", ""))
-        room_id = str(getattr(event, "room_id", ""))
-        event_id = str(getattr(event, "event_id", ""))
-        # §16.9: reactions are relations — they may never enter a UI timeline
-        # (relate-only delivery) but still aggregate; log the raw observation
-        # before the dedup gate below.
-        if not self._is_system_or_bridge_sender(sender):
-            self._record_transport_observation(
-                channel="relations", room_id=room_id, external_event_id=event_id,
-                event_ts=_matrix_event_timestamp_seconds(event), event_kind="reaction",
-                sender=sender or None,
-                raw_payload_ref=self._raw_payload_ref(self._event_content_dict(event)))
         if self._is_self_sender(sender):
             return
+        event_id = str(getattr(event, "event_id", ""))
         if self._is_duplicate_event(event_id):
             return
+        room_id = str(getattr(event, "room_id", ""))
         content = getattr(event, "content", None)
         if not content:
             return

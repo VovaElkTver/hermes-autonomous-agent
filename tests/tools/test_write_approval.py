@@ -412,3 +412,55 @@ def test_staged_hint_keeps_command_for_chat_gateway_platform(hermes_home, monkey
     monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
     r = _stage_one_memory_write()
     assert "/memory pending" in r["message"], r["message"]
+
+
+# ---------------------------------------------------------------------------
+# Deliverable-command hints on platforms that reserve "/" (Matrix/Slack) —
+# #98330 follow-up: the review flow said "/memory pending" but Element swallows
+# unknown slash commands client-side, so the hint was never executable there.
+
+def test_pending_list_hint_uses_caller_sigil(hermes_home):
+    from tools import write_approval as wa
+    from hermes_cli.write_approval_commands import handle_pending_subcommand
+    wa.stage_write("memory", {"action": "add", "target": "user", "content": "x"},
+                   summary="s", origin="foreground")
+    out = handle_pending_subcommand(wa.MEMORY, ["pending"], sigil="!")
+    assert "Apply: !memory approve <id>   Reject: !memory reject <id>" in out
+    assert "Apply: /memory" not in out
+    wa.stage_write("skills", {"action": "patch", "name": "demo"}, summary="s", origin="assistant_tool")
+    out = handle_pending_subcommand(wa.SKILLS, ["pending"], sigil="!")
+    assert "!skills approve" in out and "Review full diff: !skills diff" in out
+    out = handle_pending_subcommand(wa.MEMORY, ["pending"])  # default stays "/"
+    assert "Apply: /memory approve" in out
+
+
+def test_usage_and_diff_usage_use_sigil(hermes_home):
+    from tools import write_approval as wa
+    from hermes_cli.write_approval_commands import handle_pending_subcommand
+    wa.stage_write("memory", {"action": "add", "target": "user", "content": "x"},
+                   summary="s", origin="foreground")
+    assert handle_pending_subcommand(wa.MEMORY, ["approve"], sigil="!").startswith("Usage: !memory approve|reject")
+    assert handle_pending_subcommand(wa.MEMORY, ["reject"], sigil="!").startswith("Usage: !memory approve|reject")
+    assert handle_pending_subcommand(wa.SKILLS, ["diff"], sigil="!") == "Usage: !skills diff <id>"
+
+
+def test_staged_hint_follows_session_platform(monkeypatch):
+    from tools import write_approval as wa
+    monkeypatch.setattr(wa, "_session_env",
+                        lambda name: "matrix" if name == "HERMES_SESSION_PLATFORM" else "")
+    assert wa.review_command("memory") == "!memory pending"
+    assert "review with !memory pending" in wa._staged("memory").message
+    monkeypatch.setattr(wa, "_session_env", lambda name: "")
+    monkeypatch.delenv("HERMES_PLATFORM", raising=False)
+    assert wa.review_command("skills") == "/skills pending"
+
+
+def test_memory_tool_notice_composes_via_review_command():
+    """The memory_tool background-review notice must not hardcode an undeliverable "/" command."""
+    import inspect
+    import tools.memory_tool as mt
+    from tools import write_approval as wa
+    src = inspect.getsource(mt)
+    assert "wa.review_command(wa.MEMORY)" in src
+    assert "review it with /memory pending" not in src
+    assert callable(wa.review_command)

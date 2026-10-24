@@ -163,6 +163,24 @@ class GateDecision:
     message: str = ""
 
 
+# Adapters that set ``typed_command_prefix`` (Matrix/Slack reserve "/" in their
+# clients and rewrite "!command"); mirrored here because tools/ cannot import
+# platform adapters. Keep in sync with plugins/platforms/*/adapter.py.
+TYPED_PREFIX = {"matrix": "!", "slack": "!"}
+
+
+def typed_prefix() -> str:
+    """Command sigil the current turn's platform user can actually type."""
+    platform = (_session_env("HERMES_SESSION_PLATFORM")
+                or os.environ.get("HERMES_PLATFORM", "")).strip().lower()
+    return TYPED_PREFIX.get(platform, "/")
+
+
+def review_command(subsystem: str) -> str:
+    """Deliverable "review the queue" command for this platform ("!memory pending" on Matrix)."""
+    return f"{typed_prefix()}{subsystem} pending"
+
+
 def _slash_review_surface() -> bool:
     """Whether the ACTIVE turn has a human who can type ``/<subsystem> pending``: the interactive
     CLI, TUI/desktop (exec route), and chat-gateway sessions all answer it now. Headless worker
@@ -170,11 +188,7 @@ def _slash_review_surface() -> bool:
     programmatic platforms (api_server, webhook delivery) — have nobody at a prompt, so the staged
     hint must not name a command nobody can deliver (#98330); it names the pending dir instead."""
     def _env(name: str) -> str:
-        try:
-            from gateway.session_context import get_session_env
-            return get_session_env(name, "") or ""
-        except Exception:  # standalone/tests: process env is the fallback
-            return os.environ.get(name, "") or ""
+        return _session_env(name)
     if _env("HERMES_KANBAN_TASK").strip():
         return False
     try:
@@ -187,8 +201,16 @@ def _slash_review_surface() -> bool:
     return platform not in {"webhook", "msgraph_webhook", "api_server"}
 
 
+def _session_env(name: str) -> str:
+    try:
+        from gateway.session_context import get_session_env
+        return get_session_env(name, "") or ""
+    except Exception:  # standalone/tests: process env is the fallback
+        return os.environ.get(name, "") or ""
+
+
 def _staged(subsystem: str) -> GateDecision:
-    command = f"/{subsystem} pending"
+    command = review_command(subsystem)
     if _slash_review_surface():
         where = f"review with {command}"
     else:

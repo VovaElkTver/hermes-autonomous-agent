@@ -909,7 +909,9 @@ class GatewaySlashCommandsMixin(
         # the store persists to the same MEMORY/USER.md and honors the configured char limits).
         out = handle_pending_subcommand(
             wa.MEMORY, event.get_command_args().strip().split(), memory_store=load_on_disk_store(),
-            set_mode_fn=self._write_approval_setter("memory", event))
+            set_mode_fn=self._write_approval_setter("memory", event),
+            # hints must name the sigil this client can deliver (Matrix/Slack reserve "/")
+            sigil=self._typed_command_prefix_for(getattr(event.source, "platform", None)))
         return out if out is not None else t("gateway.memory.unknown_subcommand")
 
     async def _handle_skills_command(self, event: MessageEvent) -> str:
@@ -924,7 +926,8 @@ class GatewaySlashCommandsMixin(
         if gate_off and wa.pending_count(wa.SKILLS) == 0:
             return t("gateway.skills.gate_off")
         out = handle_pending_subcommand(
-            wa.SKILLS, args, set_mode_fn=self._write_approval_setter("skills", event))
+            wa.SKILLS, args, set_mode_fn=self._write_approval_setter("skills", event),
+            sigil=self._typed_command_prefix_for(getattr(event.source, "platform", None)))
         if out is None:
             return t("gateway.skills.unknown_subcommand")
 

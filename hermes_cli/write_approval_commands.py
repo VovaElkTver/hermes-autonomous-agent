@@ -14,7 +14,7 @@ def _fmt_state(subsystem: str) -> str:
     return f"{subsystem}.write_approval = {'on' if on else 'off'}"
 
 
-def _fmt_pending_list(subsystem: str) -> str:
+def _fmt_pending_list(subsystem: str, sigil: str = "/") -> str:
     records = wa.list_pending(subsystem)
     if not records:
         return f"No pending {subsystem} writes."
@@ -26,44 +26,48 @@ def _fmt_pending_list(subsystem: str) -> str:
         if subsystem == wa.MEMORY:
             lines.extend(f"      {line}" for line in _matched_entries(r["payload"]))
     lines.append("")
-    lines.append(f"Apply: /{subsystem} approve <id>   Reject: /{subsystem} reject <id>")
+    lines.append(f"Apply: {sigil}{subsystem} approve <id>   Reject: {sigil}{subsystem} reject <id>")
     if subsystem == wa.SKILLS:
-        lines.append("Review full diff: /skills diff <id>")
+        lines.append(f"Review full diff: {sigil}skills diff <id>")
     return "\n".join(lines)
 
 
 def handle_pending_subcommand(
-    subsystem: str, args: list[str], *, memory_store=None, set_mode_fn=None) -> Optional[str]:
+    subsystem: str, args: list[str], *, memory_store=None, set_mode_fn=None,
+    sigil: str = "/") -> Optional[str]:
     """Dispatch a /memory or /skills write-approval subcommand.
 
     ``memory_store`` applies approved memory writes (CLI passes its live store; gateway a freshly
-    loaded one); ``set_mode_fn`` persists the write_approval boolean. Returns text for the user,
+    loaded one); ``set_mode_fn`` persists the write_approval boolean; ``sigil`` is the command
+    prefix users of THIS platform can actually type — Matrix/Slack reserve "/" in their clients,
+    so the gateway passes the adapter's ``typed_command_prefix`` ("!" there) and the hints name a
+    deliverable command (#98330 follow-up). Returns text for the user,
     or None when the args are not a write-approval subcommand so the caller falls through to its
     other handling (e.g. /skills search).
     """
     if not args:
-        return f"{_fmt_state(subsystem)}\n\n" + _fmt_pending_list(subsystem)
+        return f"{_fmt_state(subsystem)}\n\n" + _fmt_pending_list(subsystem, sigil)
     sub, rest = args[0].lower(), args[1:]
     if sub == "pending":
-        return _fmt_pending_list(subsystem)
+        return _fmt_pending_list(subsystem, sigil)
     if sub in {"approve", "apply"}:
-        return _approve(subsystem, rest, memory_store)
+        return _approve(subsystem, rest, memory_store, sigil)
     if sub in {"reject", "deny", "drop"}:
-        return _reject(subsystem, rest)
+        return _reject(subsystem, rest, sigil)
     if sub == "diff" and subsystem == wa.SKILLS:
-        return _diff(rest)
+        return _diff(rest, sigil)
     if sub in {"approval", "mode"}:  # 'mode' kept as a back-compat alias
         return _set_approval(subsystem, rest, set_mode_fn)
     return None  # not ours — caller handles
 
 
-def _usage(subsystem: str) -> str:
-    return f"Usage: /{subsystem} approve|reject <id>  (or 'all')"
+def _usage(subsystem: str, sigil: str = "/") -> str:
+    return f"Usage: {sigil}{subsystem} approve|reject <id>  (or 'all')"
 
 
-def _approve(subsystem: str, rest: list[str], memory_store) -> str:
+def _approve(subsystem: str, rest: list[str], memory_store, sigil: str = "/") -> str:
     if not rest:
-        return _usage(subsystem)
+        return _usage(subsystem, sigil)
     target = rest[0]
     records = wa.list_pending(subsystem)
     if not records:
@@ -136,9 +140,9 @@ def _apply_one(subsystem: str, rec, memory_store):
         return False, str(e), {}
 
 
-def _reject(subsystem: str, rest: list[str]) -> str:
+def _reject(subsystem: str, rest: list[str], sigil: str = "/") -> str:
     if not rest:
-        return _usage(subsystem)
+        return _usage(subsystem, sigil)
     target = rest[0]
     if target.lower() == "all":
         n = sum(1 for rec in wa.list_pending(subsystem) if wa.discard_pending(subsystem, rec["id"]))
@@ -148,9 +152,9 @@ def _reject(subsystem: str, rest: list[str]) -> str:
     return f"No pending {subsystem} write with id '{target}'."
 
 
-def _diff(rest: list[str]) -> str:
+def _diff(rest: list[str], sigil: str = "/") -> str:
     if not rest:
-        return "Usage: /skills diff <id>"
+        return f"Usage: {sigil}skills diff <id>"
     rec = wa.get_pending(wa.SKILLS, rest[0])
     if not rec:
         return f"No pending skill write with id '{rest[0]}'."

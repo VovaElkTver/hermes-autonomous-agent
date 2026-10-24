@@ -1,301 +1,254 @@
-"""controller.transport — transport-observation layer (agency-model §16.9).
+"""controller.transport — the transport-observations layer (agency-model.md §16.9,
+hermes-agency-003 §7).
 
-The layer between a platform adapter (currently Matrix) and the semantic
-journal (the ``messages`` table): it records what the TRANSPORT saw — before
-anything was normalized or journaled — so phantom-inbound ("an event in the
-session with no matching room event") becomes detectable instead of silent.
-Three tables live in state.db next to the ctl_* set
-(schema: hermes_state_common.SCHEMA_SQL):
+The layer between the platform adapters and the semantic journal. It exists
+because the transport itself can lie to the journal (phantom-inbound: an event
+the agent saw that the room does not contain — synthetic re-insertions after a
+tool-result or a session restore). Three append-only tables live next to the
+ctl_* set in state.db:
 
-* ``transport_observations`` — one row per raw observation on one channel
-  (``sync`` | ``event_fetch`` | ``relations`` | ``local_echo``);
-* ``event_observations`` — one row per distinct external event, with status
-  tracked apart from the normalized messages;
-* ``reconciliation_checks`` — one row per interface re-check.
+  transport_observations  raw "the transport delivered this" records
+                          (connector/account/device, channel sync|event_fetch|
+                          relations|local_echo, raw_payload_ref, sync_batch_id,
+                          external_event_id, observed_at)
+  event_observations      canonical event identity plus SIX independent
+                          characteristics. No single `verified` flag by spec:
+                          identity_consistency / server_retrievability /
+                          decryption_status / redaction_status /
+                          timeline_placement / normalization_consistency
+  reconciliation_checks   one row per reconciliation pass over an observation;
+                          a failed fetch is stored as a result WITH an error
+                          code — it is evidence about the interface, not proof
+                          the event never existed
 
-Design rules from the spec:
+Statuses: an inbound that cannot be tied back to its source stays
+`unverified_transport_observation` — not a room fact, not a basis for an
+external action (the external-action gate is stage 3). An event the transport
+re-delivers in a LATER sync batch (the phantom-inbound signature) is stamped
+`synthetic_redelivery` at record time.
 
-* An observation's default status is ``unverified_transport_observation`` —
-  not a room fact, not a basis for external action.
-* A failed fetch is a reconciliation result WITH an error code
-  (``result='fetch_failed'`` + ``error_code``), never a silent "event did not
-  exist".
-* No single ``verified`` flag: "is this event verified?" is computed from the
-  six characteristics of the newest check (``method``, ``against_source``,
-  ``result``, ``error_code``, ``checked_at``, ``evidence_ref``).
-* A re-check against the same homeserver proves the INTERFACE answered
-  (recorded in ``against_source``), not independent truth.
-
-Stages: 1 (this module + the adapter write-path) only records — nothing is
-gated on it yet. Stage 2 wires ``pending``/``reconcile`` to a periodic runner;
-stage 3 gates external actions on the unverified observations.
+All writes to the transport_* / event_observations / reconciliation_checks
+tables go through this module — same single-writer invariant as ctl_*.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
-import threading
 import time
 import uuid
 
-# Channels: where the raw observation was made.
-CHANNELS = ("sync", "event_fetch", "relations", "local_echo")
+from controller import model as _model
 
-# event_observations.status values.
+CHANNELS = frozenset({"sync", "event_fetch", "relations", "local_echo"})
+
+CHARACTERISTICS = (
+    "identity_consistency",
+    "server_retrievability",
+    "decryption_status",
+    "redaction_status",
+    "timeline_placement",
+    "normalization_consistency",
+)
+
+# transport_observations.status values
 UNVERIFIED = "unverified_transport_observation"
-CONFIRMED = "confirmed_via_interface"
-DIVERGENT = "divergent"
-NOT_FOUND = "not_found_in_source"
+SYNTHETIC = "synthetic_redelivery"
+VERIFIED = "verified"
 
-# reconciliation_checks.result values.
-CHECK_RESULTS = ("matched", "diverged", "not_found", "fetch_failed")
+# reconciliation_checks.result values
+CHECK_FETCH_FAILED = "fetch_failed"
+CHECK_METHOD_REFETCH = "refetch_same_homeserver"  # interface check, not independent truth (§7)
 
-# No single "verified" flag: this is the full characteristic set of one check;
-# a verdict is always derived from these, never asserted as a boolean.
-CHECK_FIELDS = ("method", "against_source", "result", "error_code", "checked_at", "evidence_ref")
-
-_tls = threading.local()
-
-
-def connection() -> sqlite3.Connection:
-    """Per-thread state.db connection — same opener as controller.model
-    (state.db next to the ctl_* set; adapter callbacks arrive on worker
-    threads and sqlite3 enforces thread affinity, so no module-global conn).
-    The profile scope is whatever was active at first use in the thread:
-    the Matrix adapter calls this inside connect(), which runs in the owning
-    profile's scope."""
-    conn = getattr(_tls, "conn", None)
-    if conn is None:
-        from controller import model
-        conn = model.connect()
-        _tls.conn = conn
-    return conn
+#: After this many failed refetches an observation is left `unverified_transport_observation`
+#: terminally (a check row with error_code='retry_exhausted' records why) instead of
+#: re-hammering a homeserver that keeps answering with an error.
+FETCH_RETRY_LIMIT = 3
 
 
-def payload_ref(payload) -> str | None:
-    """Stable identity reference for a raw payload WITHOUT storing the
-    payload itself (E2EE room content must not be duplicated into a log
-    table): ``sha256:<hex>`` of the canonical JSON. Two identical raw
-    payloads share one ref, so a phantom duplicate of the same event shows up
-    as repeated refs without ever persisting the content."""
-    if payload is None:
-        return None
-    if isinstance(payload, (bytes, bytearray)):
-        raw = bytes(payload)
-    elif isinstance(payload, str):
-        raw = payload.encode("utf-8")
-    else:
-        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
-                         default=str).encode("utf-8")
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+def _new_id(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
 
-def record_observation(conn, *, connector: str, account: str, device: str | None = None,
-                       channel: str, room_id: str, external_event_id: str | None = None,
-                       sync_batch_id: str | None = None, raw_payload_ref: str | None = None,
-                       event_kind: str | None = None, sender: str | None = None,
-                       observed_at: float | None = None) -> str | None:
-    """Record one raw transport observation and upsert the event-level row for
-    the same external event (first-seen wins; later re-observations only
-    advance ``last_observed_at`` — they never re-verify an event). Returns the
-    event_observations obs_id, or None when the observation has no external
-    event id to key on. ``observed_at`` is message_time (§16.6): the
-    transport/server timestamp when known, else now()."""
+def open_db() -> sqlite3.Connection:
+    """Canonical state.db opener: same barriers/authority as ctl_* (one DDL authority)."""
+    return _model._connect()
+
+
+def record_observation(
+    conn: sqlite3.Connection, *, connector: str, channel: str, room_id: str,
+    event_id: str, event_type: str = "", content_hash: str = "", sender: str = "",
+    relation: dict | None = None, account: str = "", device: str = "",
+    sync_batch_id: str = "", observed_at: float | None = None,
+) -> dict:
+    """Record one transport observation plus its canonical event observation.
+
+    Returns {"observation_id", "event_obs_id", "status"}. An event already
+    observed by the same account in a DIFFERENT sync batch is stamped
+    `synthetic_redelivery` — the transport re-injected it (phantom-inbound),
+    so it must not be read as a fresh room fact.
+
+    decryption_status is settled at record time from what the adapter actually
+    saw: a plaintext event is `plain`; an event that still arrived encrypted
+    (no decryptor could run) is `undecryptable` and can never verify.
+    """
     if channel not in CHANNELS:
-        raise ValueError(f"unknown channel {channel!r}; expected one of {CHANNELS}")
-    now = float(observed_at) if observed_at else time.time()
+        raise ValueError(f"unknown transport channel: {channel!r}")
+    now = time.time() if observed_at is None else observed_at
+    dup = conn.execute(
+        "SELECT 1 FROM transport_observations"
+        " WHERE connector=? AND account=? AND external_event_id=? AND sync_batch_id<>?"
+        " LIMIT 1",
+        (connector, account, event_id, sync_batch_id),
+    ).fetchone()
+    status = SYNTHETIC if dup else UNVERIFIED
+    decryption = "undecryptable" if event_type == "m.room.encrypted" else "plain"
+    obs_id, ev_id = _new_id("tobs"), _new_id("evobs")
     conn.execute(
         "INSERT INTO transport_observations"
-        " (obs_id, connector, account, device, channel, room_id, external_event_id,"
-        "  sync_batch_id, raw_payload_ref, observed_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (f"to-{uuid.uuid4().hex[:12]}", connector, account, device, channel, room_id,
-         external_event_id, sync_batch_id, raw_payload_ref, now))
-    event_obs_id: str | None = None
-    if external_event_id:
-        event_obs_id = f"eo-{uuid.uuid4().hex[:12]}"
-        conn.execute(
-            "INSERT INTO event_observations"
-            " (obs_id, connector, external_event_id, room_id, event_kind, sender,"
-            "  status, first_observed_at, last_observed_at)"
-            " VALUES (?,?,?,?,?,?,?, ?,?)"
-            " ON CONFLICT(connector, external_event_id) DO UPDATE SET"
-            "  last_observed_at=excluded.last_observed_at,"
-            "  room_id=excluded.room_id,"
-            "  event_kind=COALESCE(excluded.event_kind, event_observations.event_kind),"
-            "  sender=COALESCE(excluded.sender, event_observations.sender)",
-            (event_obs_id, connector, external_event_id, room_id, event_kind,
-             sender, UNVERIFIED, now, now))
-        event_obs_id = conn.execute(
-            "SELECT obs_id FROM event_observations"
-            " WHERE connector=? AND external_event_id=?",
-            (connector, external_event_id)).fetchone()[0]
-    conn.commit()
-    return event_obs_id
-
-
-def event_obs_for(conn, connector: str, external_event_id: str) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM event_observations WHERE connector=? AND external_event_id=?",
-        (connector, external_event_id)).fetchone()
-    return dict(row) if row else None
-
-
-def link_journal(conn, connector: str, external_event_id: str, journal_ref: str) -> None:
-    """Tie the observation to the semantic-journal row it produced (stage 3
-    reads this to know which session content rests on which transport fact;
-    until then it is inert)."""
+        " (observation_id, connector, account, device, channel, room_id,"
+        "  external_event_id, event_type, raw_payload_ref, sync_batch_id, status, observed_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (obs_id, connector, account, device, channel, room_id, event_id,
+         event_type, content_hash, sync_batch_id, status, now),
+    )
     conn.execute(
-        "UPDATE event_observations SET journal_ref=?"
-        " WHERE connector=? AND external_event_id=?",
-        (journal_ref, connector, external_event_id))
+        "INSERT INTO event_observations"
+        " (event_obs_id, observation_id, room_id, event_id, event_type, sender,"
+        "  content_hash, relation, normalized_ref, identity_consistency,"
+        "  server_retrievability, decryption_status, redaction_status,"
+        "  timeline_placement, normalization_consistency, created_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ev_id, obs_id, room_id, event_id, event_type, sender, content_hash,
+         json.dumps(relation or {}, ensure_ascii=False, sort_keys=True), "",
+         "pending", "pending", decryption, "pending", "pending", "pending", now),
+    )
     conn.commit()
+    return {"observation_id": obs_id, "event_obs_id": ev_id, "status": status}
 
 
-def record_check(conn, event_obs_id: str, *, method: str, against_source: str,
-                 result: str, error_code: str | None = None,
-                 evidence_ref: str | None = None, detail: str | None = None,
-                 checked_at: float | None = None) -> str:
-    """Record one reconciliation check — the six characteristics, no boolean.
-    Status update rules: matched -> confirmed_via_interface, diverged ->
-    divergent, not_found -> not_found_in_source; fetch_failed leaves the
-    status UNCHANGED (a failed check proves nothing; the event stays
-    unverified and the check row itself carries the error code)."""
-    if result not in CHECK_RESULTS:
-        raise ValueError(f"unknown check result {result!r}; expected one of {CHECK_RESULTS}")
-    if result == "fetch_failed" and not error_code:
-        raise ValueError(
-            "fetch_failed without an error_code: a failed fetch must carry the machine "
-            "code, not a verdict")
-    now = float(checked_at) if checked_at else time.time()
-    row = conn.execute("SELECT obs_id FROM event_observations WHERE obs_id=?",
-                       (event_obs_id,)).fetchone()
-    if row is None:
-        raise LookupError(f"no such event observation: {event_obs_id}")
-    check_id = f"rc-{uuid.uuid4().hex[:12]}"
+def _select_pending(conn: sqlite3.Connection, account: str | None, limit: int) -> list[sqlite3.Row]:
+    """Event observations still worth a refetch: retrievability pending, no terminal
+    check yet, optionally scoped to one account."""
+    return conn.execute(
+        "SELECT eo.event_obs_id, eo.observation_id, eo.room_id, eo.event_id,"
+        "       eo.event_type, eo.sender, eo.relation, eo.decryption_status,"
+        "       tobs.status AS obs_status, tobs.account AS account"
+        " FROM event_observations eo"
+        " JOIN transport_observations tobs ON tobs.observation_id = eo.observation_id"
+        " WHERE (? IS NULL OR tobs.account = ?)"
+        "   AND eo.server_retrievability = 'pending'"
+        "   AND NOT EXISTS (SELECT 1 FROM reconciliation_checks rc"
+        "                   WHERE rc.observation_id = tobs.observation_id"
+        "                     AND rc.result IN (?,?,?))"
+        " ORDER BY eo.created_at LIMIT ?",
+        (account, account, SYNTHETIC, VERIFIED, UNVERIFIED, limit),
+    ).fetchall()
+
+
+def _placement(relation_json: str) -> str:
+    """Timeline placement from the stored relation metadata (§7: relations may not land in
+    any single timeline — "not in the UI" != "a fantasy"; placement is a property of the
+    observation, settled here from what the sync batch told us)."""
+    try:
+        rel = json.loads(relation_json or "{}")
+    except (ValueError, TypeError):
+        return "unknown"
+    if not isinstance(rel, dict):
+        return "unknown"
+    if rel.get("m.thread"):
+        return "thread_timeline"
+    if rel.get("m.in_reply_to"):
+        return "main_fallback_reply"
+    return "main"
+
+
+def _record_check(conn: sqlite3.Connection, row: sqlite3.Row, *, method: str,
+                  result: str, error_code: str = "", detail: str = "") -> dict:
+    check_id = _new_id("recon")
     conn.execute(
         "INSERT INTO reconciliation_checks"
-        " (check_id, obs_id, checked_at, method, against_source, result, error_code,"
-        "  detail, evidence_ref, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (check_id, event_obs_id, now, method, against_source,
-         result, error_code, detail, evidence_ref, now))
-    if result == "fetch_failed":
-        conn.execute(
-            "UPDATE event_observations SET last_checked_at=?, last_check_result=?"
-            " WHERE obs_id=?", (now, result, event_obs_id))
-    else:
-        status = {"matched": CONFIRMED, "diverged": DIVERGENT, "not_found": NOT_FOUND}[result]
-        conn.execute(
-            "UPDATE event_observations SET status=?, last_checked_at=?, last_check_result=?"
-            " WHERE obs_id=?", (status, now, result, event_obs_id))
+        " (check_id, observation_id, method, account, result, error_code, detail, checked_at)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (check_id, row["observation_id"], method, row["account"], result,
+         error_code, detail, time.time()),
+    )
     conn.commit()
-    return check_id
+    return {"check_id": check_id, "observation_id": row["observation_id"],
+            "result": result, "error_code": error_code}
 
 
-def is_verified(conn, event_obs_id: str) -> bool:
-    """DERIVED verdict, never a stored flag (spec: no single `verified`):
-    True iff the NEWEST check for this event is a clean interface match —
-    result='matched', no error_code, and an against_source recorded (a check
-    against nothing proves nothing)."""
-    row = conn.execute(
-        "SELECT result, error_code, against_source FROM reconciliation_checks"
-        " WHERE obs_id=? ORDER BY checked_at DESC, created_at DESC LIMIT 1",
-        (event_obs_id,)).fetchone()
-    if row is None:
-        return False
-    return row["result"] == "matched" and row["error_code"] is None and bool(row["against_source"])
+async def reconcile(conn: sqlite3.Connection, *, fetch_event, account: str | None = None,
+                    limit: int = 50) -> list[dict]:
+    """One reconciliation pass over pending event_observations.
 
+    ``fetch_event`` is an async callable ``(room_id, event_id) -> dict``:
+      success: {"type": str, "sender": str, "content": dict|None, "redacted": bool}
+      failure: {"error_code": str}  — it NEVER raises; a failed fetch is a
+      check result with an error code, not a claim the event was not there.
 
-def pending(conn, *, limit: int = 100, now: float | None = None,
-            min_gap_s: float = 300.0) -> list[dict]:
-    """Unverified event observations due for a re-check, oldest first.
-
-    Only status ``unverified_transport_observation`` is eligible: a
-    fetch_failed check keeps that status (so the event is retried), while
-    matched/diverged/not_found have reached a verdict and are not re-queued
-    here. ``min_gap_s`` throttles re-checks: an event whose last check is
-    younger than the gap is not retried (a failing homeserver must not be
-    hammered every tick). Stage 2's periodic runner walks this list; rows
-    carry ``stored_ref`` (the newest raw_payload_ref) so a re-fetch result
-    can be compared without a second query."""
-    ts = time.time() if now is None else float(now)
-    rows = conn.execute(
-        "SELECT e.obs_id, e.connector, e.room_id, e.external_event_id, e.status,"
-        "  e.first_observed_at, e.last_checked_at,"
-        "  (SELECT t.raw_payload_ref FROM transport_observations t"
-        "   WHERE t.obs_id=e.obs_id AND t.raw_payload_ref IS NOT NULL"
-        "   ORDER BY t.observed_at DESC LIMIT 1) AS stored_ref"
-        " FROM event_observations e"
-        " WHERE e.status=? AND e.external_event_id IS NOT NULL"
-        "   AND (e.last_checked_at IS NULL OR e.last_checked_at <= ?)"
-        " ORDER BY e.first_observed_at ASC LIMIT ?",
-        (UNVERIFIED, ts - min_gap_s, limit)).fetchall()
-    return [dict(r) for r in rows]
-
-
-def reconcile(conn, fetch, *, limit: int = 100, source_label: str = "",
-              min_gap_s: float = 300.0, now: float | None = None) -> dict:
-    """One periodic reconciliation pass (spec §16.9: a re-check against the
-    same homeserver verifies the interface, not independent truth).
-
-    ``fetch(room_id, external_event_id)`` re-queries the live transport and
-    returns ``(raw_payload_ref, error_code)``:
-      * both None           -> the source does not report the event: 'not_found'
-      * error_code not None -> the fetch itself failed: 'fetch_failed' with the
-                               machine code; the observation stays UNVERIFIED
-      * raw_payload_ref     -> compared with the stored ref: equal -> 'matched',
-                               different -> 'diverged' (evidence_ref = new ref)
-    A fetch callable that raises is captured as 'fetch_failed' with
-    ``error_code_of``. Every outcome writes one reconciliation_checks row
-    (method='event_refetch', against_source=source_label). Returns a count
-    summary; the rows are the audit, the counts are all a caller needs."""
-    due = pending(conn, limit=limit, now=now, min_gap_s=min_gap_s)
-    checked_at = time.time() if now is None else float(now)
-    summary = {"checked": 0, "matched": 0, "diverged": 0, "not_found": 0, "fetch_failed": 0}
-    for row in due:
-        try:
-            ref, err = fetch(row["room_id"], row["external_event_id"])
-        except Exception as exc:
-            ref, err = None, error_code_of(exc)
-        summary["checked"] += 1
-        if err:
-            result, evidence, detail = "fetch_failed", None, None
-        elif ref is None:
-            result, evidence, detail = "not_found", None, None
-        elif row.get("stored_ref") and ref != row["stored_ref"]:
-            result, evidence, detail = "diverged", ref, \
-                "re-fetched ref differs from stored raw_payload_ref"
-        else:
-            result, evidence, detail = "matched", ref, None
-        record_check(conn, row["obs_id"], method="event_refetch",
-                     against_source=source_label, result=result,
-                     error_code=err, evidence_ref=evidence, detail=detail,
-                     checked_at=checked_at)
-        summary[result] += 1
-    return summary
-
-
-def error_code_of(exc: BaseException) -> str:
-    """Machine error code for a failed transport fetch. Matrix-first: mautrix
-    raises MatrixRequestError with ``errcode``/``http_status`` for every
-    non-2xx (M_NOT_FOUND, M_FORBIDDEN, ...); timeouts and dropped links get
-    their own codes. A check MUST carry one — "the event did not exist"
-    without a code is exactly the silent failure this layer exists to kill."""
-    errcode = getattr(exc, "errcode", None)
-    if isinstance(errcode, str) and errcode.strip():
-        return errcode.strip().upper()
-    status = getattr(exc, "http_status", None)
-    if isinstance(status, int):
-        return f"http_{status}"
-    import asyncio
-    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
-        return "timeout"
-    try:
-        from mautrix.api import MatrixConnectionError
-        if isinstance(exc, MatrixConnectionError):
-            return "connection"
-    except Exception:
-        pass
-    return "unknown"
+    The refetch goes to the SAME homeserver that delivered the event: an
+    interface cross-check, deliberately not an independent truth claim (§7).
+    Returns one check record per observation processed.
+    """
+    results: list[dict] = []
+    for row in _select_pending(conn, account, limit):
+        if row["obs_status"] == SYNTHETIC:
+            # Terminal, no fetch: the transport itself re-injected the event in a
+            # later batch. It is cut off here — this layer must not let it
+            # become a room fact.
+            results.append(_record_check(
+                conn, row, method=CHECK_METHOD_REFETCH, result=SYNTHETIC,
+                detail="re-delivered by the transport in a later sync batch; not a room fact"))
+            continue
+        failed = conn.execute(
+            "SELECT COUNT(*) AS c FROM reconciliation_checks"
+            " WHERE observation_id=? AND result=?",
+            (row["observation_id"], CHECK_FETCH_FAILED),
+        ).fetchone()["c"]
+        if failed >= FETCH_RETRY_LIMIT:
+            conn.execute(
+                "UPDATE transport_observations SET status=? WHERE observation_id=?",
+                (UNVERIFIED, row["observation_id"]))
+            conn.commit()
+            results.append(_record_check(
+                conn, row, method=CHECK_METHOD_REFETCH, result=UNVERIFIED,
+                error_code="retry_exhausted",
+                detail=f"{failed} failed refetches; left unverified_transport_observation"))
+            continue
+        fetched = await fetch_event(row["room_id"], row["event_id"])
+        error_code = str(fetched.get("error_code") or "")
+        if error_code:
+            # The fetch failed: store the RESULT with the error code. Do not
+            # touch server_retrievability — "unknown" stays unknown until a
+            # refetch succeeds or retries exhaust.
+            results.append(_record_check(
+                conn, row, method=CHECK_METHOD_REFETCH, result=CHECK_FETCH_FAILED,
+                error_code=error_code,
+                detail="failed fetch is a check result, not proof of absence"))
+            continue
+        identity = "ok" if (fetched.get("sender") == row["sender"]
+                            and fetched.get("type") == row["event_type"]) else "mismatch"
+        redaction = "redacted" if fetched.get("redacted") else "ok"
+        placement = _placement(row["relation"])
+        # Verified needs agreement on identity + retrievability + redaction, and
+        # the event must not be undecryptable. normalization_consistency stays
+        # pending until a journal reference is recorded (stage 3) — the verdict
+        # must not silently depend on it.
+        verified = (identity == "ok" and redaction == "ok"
+                    and row["decryption_status"] != "undecryptable")
+        result = VERIFIED if verified else UNVERIFIED
+        conn.execute(
+            "UPDATE event_observations SET identity_consistency=?,"
+            " server_retrievability='ok', redaction_status=?, timeline_placement=?"
+            " WHERE event_obs_id=?",
+            (identity, redaction, placement, row["event_obs_id"]),
+        )
+        conn.execute(
+            "UPDATE transport_observations SET status=? WHERE observation_id=?",
+            (result, row["observation_id"]),
+        )
+        conn.commit()
+        results.append(_record_check(
+            conn, row, method=CHECK_METHOD_REFETCH, result=result,
+            detail="" if verified else "characteristic mismatch; not a room fact"))
+    return results
