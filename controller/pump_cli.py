@@ -112,6 +112,26 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
 
+    # Single-flight, enforced HERE rather than only in the cron bash wrapper:
+    # every dispatcher (cron pump_tick.sh, the controller plugin's post-session
+    # spawn, manual runs) enters through main(), and only the flock'd one may
+    # run. An unlocked second pump executes reconcile.recover at start and
+    # marks the FIRST pump's live runs 'unknown' mid-flight, releasing their
+    # claims and dispatching a second worker onto the same workdir — the
+    # 13-hour orphan storm of 23.10 (13 live workers, redispatch every tick).
+    # The kernel drops the lock with the holder's corpse, so takeover is
+    # automatic and there is no stale-lock state to repair here.
+    import fcntl
+    import os
+    lock_path = os.path.join(os.environ.get("HOME", "/"), ".hermes", "run", "pump-tick.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    _lock_fh = open(lock_path, "a+")
+    try:
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0  # another pump owns the queue right now; silence is the contract
+    _ = _lock_fh  # keep the fd referenced for the process lifetime
+
     from controller import model
     from controller.loop import run_cycle
     from controller.workers import make_review, make_worker

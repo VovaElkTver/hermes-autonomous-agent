@@ -479,3 +479,21 @@ def test_orphan_in_progress_step_released_before_verifying(env):
     assert len(c.execute("SELECT 1 FROM ctl_run WHERE step_id=?", (sid,)).fetchall()) == 2
     assert c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()[0] \
         == "completed"
+
+
+def test_pump_cli_single_flight(tmp_path, monkeypatch):
+    """A second pump must exit silently while one holds pump-tick.lock: the
+    23.10 orphan storm came from an unlocked plugin-spawned pump whose startup
+    recover() marked the live pump's runs 'unknown' mid-dispatch."""
+    import fcntl
+    import os
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".hermes" / "run").mkdir(parents=True)
+    holder = open(tmp_path / ".hermes" / "run" / "pump-tick.lock", "a+")
+    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    from controller import pump_cli
+
+    assert pump_cli.main([]) == 0  # silent, no cycle ran
+    fcntl.flock(holder, fcntl.LOCK_UN)
