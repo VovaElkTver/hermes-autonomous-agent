@@ -16,8 +16,6 @@ import json
 
 import pytest
 
-pytest.importorskip("mautrix", reason="adapter test uses the real mautrix types")
-
 from controller import model
 from plugins.platforms.matrix.adapter import MatrixAdapter
 
