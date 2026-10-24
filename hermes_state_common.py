@@ -742,6 +742,64 @@ CREATE INDEX IF NOT EXISTS idx_ctl_run_task_status ON ctl_run(task_id, run_statu
 CREATE INDEX IF NOT EXISTS idx_ctl_event_task ON ctl_event(task_id, ts);
 CREATE INDEX IF NOT EXISTS idx_ctl_todo_status ON ctl_todo(status, owner);
 -- ---- end controller ----
+-- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
+-- Layer between platform adapters and the semantic journal (phantom-inbound fix).
+-- transport_observations = raw "the transport delivered this" records;
+-- event_observations = canonical event identity plus SIX independent
+-- characteristics — deliberately no single `verified` flag (spec §7: one boolean
+-- collapses redaction/echo/timeline/decryption distinctions the reconciliation
+-- layer needs); reconciliation_checks = one row per reconciliation pass, so a
+-- failed fetch is a result WITH an error code, not "the event never existed".
+-- Status `unverified_transport_observation` is not a room fact and not a basis
+-- for an external action. Writes go through the controller package only
+-- (controller/transport.py), same invariant as ctl_*.
+CREATE TABLE IF NOT EXISTS transport_observations (
+  observation_id TEXT PRIMARY KEY,
+  connector TEXT NOT NULL,
+  account TEXT NOT NULL DEFAULT '',
+  device TEXT NOT NULL DEFAULT '',
+  channel TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  external_event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL DEFAULT '',
+  raw_payload_ref TEXT NOT NULL DEFAULT '',
+  sync_batch_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'unverified_transport_observation',
+  observed_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transport_obs_event ON transport_observations(external_event_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_transport_obs_status ON transport_observations(status, observed_at);
+CREATE TABLE IF NOT EXISTS event_observations (
+  event_obs_id TEXT PRIMARY KEY,
+  observation_id TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  event_type TEXT NOT NULL DEFAULT '',
+  sender TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
+  relation TEXT NOT NULL DEFAULT '',
+  normalized_ref TEXT NOT NULL DEFAULT '',
+  identity_consistency TEXT NOT NULL DEFAULT 'pending',
+  server_retrievability TEXT NOT NULL DEFAULT 'pending',
+  decryption_status TEXT NOT NULL DEFAULT 'pending',
+  redaction_status TEXT NOT NULL DEFAULT 'pending',
+  timeline_placement TEXT NOT NULL DEFAULT 'pending',
+  normalization_consistency TEXT NOT NULL DEFAULT 'pending',
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_event_obs_lookup ON event_observations(room_id, event_id);
+CREATE TABLE IF NOT EXISTS reconciliation_checks (
+  check_id TEXT PRIMARY KEY,
+  observation_id TEXT NOT NULL,
+  method TEXT NOT NULL,
+  account TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL,
+  error_code TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  checked_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recon_checks_obs ON reconciliation_checks(observation_id, checked_at);
+-- ---- end transport observations ----
 """
 
 # Indexes on later-added columns must run AFTER _reconcile_columns(), or executescript fails on legacy DBs.

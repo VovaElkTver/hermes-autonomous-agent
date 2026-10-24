@@ -128,6 +128,40 @@ materialize ждёт человеческого «иди task-…», как лю
 Снять флаг + убрать controller из plugins.enabled. Ничто кроме controller/ не читает ctl_*;
 таблицы можно удалить вручную (DROP TABLE ctl_*), данные sessions/triggers не затронуты.
 
+## Транспортный слой наблюдений (transport_observations, agency-model §16.9)
+
+Слой между Matrix-адаптером и семантическим журналом: чинит phantom-inbound
+(событие у агента есть, в комнате его нет — синтетическая вставка после
+tool-result/восстановления сессии). Таблицы рядом с ctl_* в том же state.db
+(SCHEMA_SQL), записи — только через `controller/transport.py`:
+
+- `transport_observations` — сырое «транспорт доставил это»: connector/account/device,
+  канал `sync|event_fetch|relations|local_echo`, raw_payload_ref (sha256 контента),
+  sync_batch_id, external_event_id, observed_at.
+- `event_observations` — каноническая идентичность события + 6 независимых
+  характеристик (единого флага `verified` нет по спеке):
+  identity_consistency / server_retrievability / decryption_status / redaction_status /
+  timeline_placement / normalization_consistency.
+- `reconciliation_checks` — по строке на проход сверки; неудачный fetch = результат
+  **с кодом ошибки** (fetch_failed + M_код), а не «события не было»; после
+  `FETCH_RETRY_LIMIT` неудач — терминальный `unverified_transport_observation`
+  (error_code=retry_exhausted).
+
+Статусы: `unverified_transport_observation` — не факт комнаты и не основание внешнего
+действия (гейт внешних действий — этап 3, вне текущего PR); `synthetic_redelivery`
+проставляется при записи, если то же (connector, account, external_event_id) уже
+наблюдалось в другом sync-батче — синтетическая вставка отсекается этим слоем.
+
+Писатель: Matrix-адаптер (`plugins/platforms/matrix/adapter.py`) — запись ДО любого
+семантического гейтинга/журналирования (включая локальный эхо как `local_echo`),
+плюс периодический `reconcile` в sync-цикле (интервал
+`matrix.transport_reconcile_seconds`, дефолт 300с; refetch через room-event endpoint
+того же homeserver — сверка интерфейсов, не независимая истина). Флаг по профилю:
+`matrix.transport_observations: true` (или `MATRIX_TRANSPORT_OBSERVATIONS`),
+выключен по умолчанию; observer-режим — любой сбой в слое не трогает приём.
+Тесты: `tests/plugins/test_controller_transport.py`,
+`tests/plugins/platforms/matrix/test_transport_observations.py`.
+
 
 ## To-do layer (ctl_todo) — слой намерений над очередью
 
