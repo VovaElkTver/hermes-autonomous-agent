@@ -12,6 +12,7 @@ interactive CLI only) or **stages** the write under
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import logging
 import os
@@ -71,16 +72,40 @@ def _pending_files(subsystem: str) -> list:
     return list(d.glob("*.json")) if d.exists() else []
 
 
+def _payload_fingerprint(subsystem: str, payload: dict[str, Any]) -> str:
+    """Stable hash of the pending write's replayable payload. Used to collapse
+    repeat proposals of the *same* pending write — a background review that keeps
+    re-proposing one consolidation would otherwise bury the queue (self-cycle)."""
+    blob = json.dumps({"subsystem": subsystem, "payload": payload},
+                      sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
 def stage_write(subsystem: str, payload: dict[str, Any], *, summary: str, origin: str) -> dict[str, Any]:
     """Persist a pending write and return its record (``id`` + metadata). ``payload`` is the exact
     kwargs to replay the write on approval; ``origin`` is ``foreground`` or ``background_review``.
     Best-effort: on disk failure it logs and still returns a record — the write is lost, which is
-    the safe failure for an approval gate (nothing silently committed)."""
+    the safe failure for an approval gate (nothing silently committed).
+
+    Dedup: an identical pending payload (same subsystem + replay fingerprint) is NOT
+    staged twice — the existing record's ``seen_count`` and ``last_seen`` are bumped
+    so the reviewer sees one line with "x N" instead of N clones."""
+    fp = _payload_fingerprint(subsystem, payload)
+    for existing in list_pending(subsystem):
+        if existing.get("payload_fp") == fp:
+            existing["seen_count"] = int(existing.get("seen_count", 1)) + 1
+            existing["last_seen"] = time.time()
+            try:
+                atomic_json_write(_pending_path(subsystem, existing["id"]), existing)
+            except Exception as e:  # pragma: no cover - disk failure path
+                logger.error("Failed to refresh pending %s: %s", existing["id"], e)
+            return existing
     pid = uuid.uuid4().hex[:8]
     record = {
         "id": pid, "subsystem": subsystem, "action": payload.get("action", ""),
         "summary": (summary or "").strip(), "origin": origin or "foreground",
         "created_at": time.time(), "payload": payload,
+        "payload_fp": fp, "seen_count": 1,
     }
     try:
         atomic_json_write(_pending_path(subsystem, pid), record)

@@ -367,10 +367,10 @@ def test_memory_invalid_params_rejected_before_staging(hermes_home):
 # Staged-write review hint is surface-aware (#98330)
 # ---------------------------------------------------------------------------
 
-def _stage_one_memory_write():
+def _stage_one_memory_write(content: str = "surface hint fact"):
     from tools.memory_tool import memory_tool, MemoryStore
     store = MemoryStore(); store.load_from_disk()
-    r = json.loads(memory_tool("add", "memory", "surface hint fact", store=store))
+    r = json.loads(memory_tool("add", "memory", content, store=store))
     assert r.get("staged") is True, r
     return r
 
@@ -387,20 +387,21 @@ def test_staged_hint_names_the_review_command_on_slash_surfaces(hermes_home):
 def test_staged_hint_names_the_pending_dir_on_headless_surfaces(hermes_home, monkeypatch):
     from tools import write_approval as wa
     _set_approval("memory", True)
+    _facts = iter(["headless cron fact", "headless kanban fact", "headless api fact"])
     monkeypatch.setenv("HERMES_CRON_SESSION", "1")
-    r = _stage_one_memory_write()
+    r = _stage_one_memory_write(content=next(_facts))
     assert "review with /memory pending" not in r["message"], r["message"]
     assert "pending records live in" in r["message"]
     assert str(wa._pending_path(wa.MEMORY, "").parent) in r["message"]
     monkeypatch.delenv("HERMES_CRON_SESSION")
 
     monkeypatch.setenv("HERMES_KANBAN_TASK", "task-7")
-    r = _stage_one_memory_write()
+    r = _stage_one_memory_write(content=next(_facts))
     assert "review with /memory pending" not in r["message"], r["message"]
     monkeypatch.delenv("HERMES_KANBAN_TASK")
 
     monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
-    r = _stage_one_memory_write()
+    r = _stage_one_memory_write(content=next(_facts))
     assert "review with /memory pending" not in r["message"], r["message"]
     assert "pending records live in" in r["message"]
     monkeypatch.delenv("HERMES_SESSION_PLATFORM")
@@ -412,3 +413,42 @@ def test_staged_hint_keeps_command_for_chat_gateway_platform(hermes_home, monkey
     monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
     r = _stage_one_memory_write()
     assert "/memory pending" in r["message"], r["message"]
+
+# ---------------------------------------------------------------------------
+# Repeat-proposal dedup (background self-cycle)
+# ---------------------------------------------------------------------------
+
+def test_stage_write_dedups_identical_payload(hermes_home):
+    """The same pending payload staged twice yields ONE record with seen_count=2."""
+    from tools import write_approval as wa
+    payload = {"action": "add", "target": "memory", "content": "dup me"}
+    r1 = wa.stage_write("memory", payload, summary="s1", origin="background_review")
+    r2 = wa.stage_write("memory", payload, summary="s1", origin="background_review")
+    assert r2["id"] == r1["id"]
+    assert wa.pending_count("memory") == 1
+    rec = wa.get_pending("memory", r1["id"])
+    assert rec["seen_count"] == 2 and "last_seen" in rec
+
+def test_stage_write_distinct_payloads_not_deduped(hermes_home):
+    from tools import write_approval as wa
+    a = wa.stage_write("memory", {"action": "add", "content": "x"}, summary="s", origin="foreground")
+    b = wa.stage_write("memory", {"action": "add", "content": "y"}, summary="s", origin="foreground")
+    assert a["id"] != b["id"] and wa.pending_count("memory") == 2
+
+def test_stage_write_dedup_is_per_subsystem(hermes_home):
+    """Identical payload across subsystems stays two records."""
+    from tools import write_approval as wa
+    payload = {"action": "patch", "content": "same"}
+    r_m = wa.stage_write("memory", payload, summary="s", origin="foreground")
+    r_s = wa.stage_write("skills", payload, summary="s", origin="foreground")
+    assert r_m["id"] != r_s["id"]
+
+def test_pending_list_shows_repeat_count(hermes_home):
+    from tools import write_approval as wa
+    from hermes_cli.write_approval_commands import _fmt_pending_list
+    payload = {"action": "add", "target": "memory", "content": "noisy"}
+    wa.stage_write("memory", payload, summary="consolidation", origin="background_review")
+    wa.stage_write("memory", payload, summary="consolidation", origin="background_review")
+    wa.stage_write("memory", payload, summary="consolidation", origin="background_review")
+    out = _fmt_pending_list("memory")
+    assert "x3" in out and out.count("consolidation") == 1
