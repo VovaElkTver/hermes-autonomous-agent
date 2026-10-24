@@ -183,6 +183,36 @@ def test_empty_plan_blocks_instead_of_vacuous_complete(env):
     assert not c.execute("SELECT 1 FROM ctl_run WHERE task_id=?", (tid,)).fetchone()
 
 
+def test_text_checkpoint_step_not_vacuous_empty_plan(env):
+    """Legacy hand-seeded rows carry acceptance-JSON in ctl_step.checkpoint.
+    The verify guard must count them as checkpoints (ea4a988cb5 parked on a
+    vacuous "empty plan" 22.10 while its step was done+passed)."""
+    import hashlib, time
+    from controller import model, transitions
+    c, wd = env
+    tid = model.create_task(conn=c, owner="o", workdir=wd, goal="g")
+    model.agree_contract(c, tid)
+    c.execute("UPDATE ctl_task SET state='verifying' WHERE task_id=?", (tid,))
+    c.execute("INSERT INTO ctl_step(step_id,task_id,kind,title,status,checkpoint)"
+              " VALUES('step-tc1',?,'work','done thing','done',"
+              "'{\"acceptance\": \"принято\"}')", (tid,))
+    c.execute("INSERT INTO ctl_run(run_id,task_id,step_id,attempt,worker_id,"
+              "contract_version,execution_epoch,authority,run_status,started_at,ended_at)"
+              " VALUES('run-tc1',?,'step-tc1',1,'w',1,1,'full','finished',?,?)",
+              (tid, time.time()-10, time.time()))
+    h = hashlib.sha256(b"{}").hexdigest()
+    c.execute("INSERT INTO ctl_review(review_id,step_id,run_id,artifact_hash,verdict,"
+              "reviewer,detail,created_at) VALUES('rev-tc1','step-tc1','run-tc1',?,"
+              "'pass','judge','ok',?)", (h, time.time()))
+    c.commit()
+    res = transitions.transition(c, tid, "completed",
+                                 basis="test: json-checkpoint accepted")
+    assert res["to"] == "completed", res
+    assert c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)
+               ).fetchone()["state"] == "completed"
+
+
+
 def test_queue_order_deps_and_notbefore(env):
     c, wd = env
     low = mk(c, wd, "low", priority=0)

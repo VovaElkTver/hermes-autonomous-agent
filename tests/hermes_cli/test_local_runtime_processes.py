@@ -174,7 +174,19 @@ def test_failed_setup_never_runs_child_and_releases_handles(tmp_path, monkeypatc
 
     def assign(job, proc):
         children.append(proc)
-        assert psutil.Process(proc.pid).status() == psutil.STATUS_STOPPED
+        # A CREATE_SUSPENDED child reaches the reported stopped state only after
+        # the loader finishes first-instruction bookkeeping; under xdist load the
+        # window is milliseconds wide and an immediate read races it (Windows CI
+        # flake, 22.10: 'running' == 'stopped' on busy runners, passes idle).
+        # Bound the wait — the suspension guarantee itself stays asserted.
+        proc_ps = psutil.Process(proc.pid)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            status = proc_ps.status()
+            if status == psutil.STATUS_STOPPED:
+                break
+            time.sleep(0.05)
+        assert status == psutil.STATUS_STOPPED
         assert not marker.exists()
         # Query the actual kernel object, not implementation source/constants.
         limits = processes._ExtendedLimits()
