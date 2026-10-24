@@ -133,7 +133,9 @@ def _matrix_voice_metadata_for_file(path: Path) -> dict[str, Any]:
     return metadata
 
 # Topical siblings (FILE_LINES ratchet): bang-command aliasing and the reply_expected verdict.
+from plugins.platforms.matrix.media_filenames import _is_bare_media_filename
 from plugins.platforms.matrix.reply_verdict import verdict as reply_verdict
+from plugins.platforms.matrix.transport_observation import TransportObservationMixin
 from plugins.platforms.matrix.bang_commands import (
     normalize_matrix_bang_command as _normalize_matrix_bang_command,  # re-export: tests import it here
 )
@@ -396,46 +398,9 @@ _OUTBOUND_MENTION_RE = re.compile(r"(?<![\w/])(@[0-9A-Za-z._=/-]+:[0-9A-Za-z.-]+
 
 _E2EE_INSTALL_HINT = "Install with: pip install 'mautrix[encryption]' asyncpg aiosqlite  (requires libolm C library)"
 
-_MATRIX_IMAGE_FILENAME_EXTS = frozenset({
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".heic", ".heif", ".avif"})
-_MATRIX_MEDIA_FILENAME_EXTS = frozenset({
-    ".ogg", ".oga", ".opus", ".m4a", ".mp3", ".wav", ".flac", ".aac", ".amr", ".mp4", ".webm", ".mov", ".mkv"})
 # Keycap 1-9, 🔟; choice pickers (/reasoning, /fast) can need 12 slots, so they add 🅰️ 🅱️.
 _MATRIX_MODEL_PICKER_REACTIONS = tuple(f"{d}\ufe0f\u20e3" for d in "123456789") + ("\U0001f51f",)
 _MATRIX_CHOICE_PICKER_REACTIONS = _MATRIX_MODEL_PICKER_REACTIONS + ("\U0001f170\ufe0f", "\U0001f171\ufe0f")
-
-def _looks_like_matrix_image_filename(text: str) -> bool:
-    """True when an m.image body is just the uploaded filename (no caption) — not user text."""
-    return _looks_like_transport_filename(text, "image/", _MATRIX_IMAGE_FILENAME_EXTS)
-
-
-def _looks_like_transport_filename(text: str, mime_prefixes, exts: frozenset, reject_spaces: bool = False) -> bool:
-    """Bare single-token filename with a known media extension or a matching guessed MIME type."""
-    candidate = str(text or "").strip()
-    if not candidate or "\n" in candidate or candidate.endswith("/"):
-        return False
-    # A genuine caption essentially always contains whitespace; a bare transport filename does not.
-    if reject_spaces and any(ch.isspace() for ch in candidate):
-        return False
-    if Path(candidate).name != candidate:
-        return False
-    suffix = Path(candidate).suffix.lower()
-    if not suffix:
-        return False
-    guessed_type, _ = mimetypes.guess_type(candidate)
-    return bool(guessed_type and guessed_type.startswith(mime_prefixes)) or suffix in exts
-
-
-def _looks_like_matrix_media_filename(text: str) -> bool:
-    """True when an m.audio/m.file/m.video body is just the uploaded filename (no caption)."""
-    return _looks_like_transport_filename(text, ("audio/", "video/"), _MATRIX_MEDIA_FILENAME_EXTS, True)
-
-
-def _is_bare_media_filename(msgtype: str, body: str) -> bool:
-    """True when a media event body is only the uploaded filename for its msgtype."""
-    if msgtype == "m.image":
-        return _looks_like_matrix_image_filename(body)
-    return msgtype in ("m.audio", "m.file", "m.video") and _looks_like_matrix_media_filename(body)
 
 
 def _matrix_event_timestamp_seconds(event: Any) -> float:
@@ -686,7 +651,7 @@ def ensure_matrix_deps() -> bool:
     return True
 
 
-class MatrixAdapter(BasePlatformAdapter):
+class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
     """Gateway adapter for Matrix (any homeserver)."""
 
     supports_code_blocks = True  # Matrix renders fenced code blocks (HTML/markdown)
@@ -782,6 +747,7 @@ class MatrixAdapter(BasePlatformAdapter):
         raw_session_scope = str(_extra_or_secret(config.extra, "session_scope", "MATRIX_SESSION_SCOPE", "auto")).strip().lower()
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = self._extra_truthy(config, "process_notices", "MATRIX_PROCESS_NOTICES", "false")
+        self._init_transport_observation(config)  # §16.9 observer layer, off by default (transport_observation.py)
         self._reactions_enabled: bool = str(_extra_or_secret(config.extra, "reactions", "MATRIX_REACTIONS", "true")).lower() not in {"false", "0", "no"}
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Let the final message land before redacting reactions ("missing event" in some
@@ -1328,6 +1294,7 @@ class MatrixAdapter(BasePlatformAdapter):
                 await self._crypto_db.stop()
             except Exception as exc:
                 logger.debug("Matrix: could not close crypto DB on disconnect: %s", exc)
+        self._close_transport_observation()
         if self._client:
             with suppress(Exception):
                 await self._client.api.session.close()
@@ -1859,6 +1826,7 @@ class MatrixAdapter(BasePlatformAdapter):
         nb = sync_data.get("next_batch")  # incremental syncs resume from here
         if nb:
             await client.sync_store.put_next_batch(nb)
+        self._current_sync_batch = str(nb or "")  # batch token for every event in this response
         if initial:
             logger.info("Matrix: initial sync complete, joined %d rooms", len(self._joined_rooms))
             await self._refresh_dm_cache()
@@ -1867,6 +1835,7 @@ class MatrixAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("Matrix: %s: %s", "initial sync event dispatch error" if initial else "sync event dispatch error", exc)
         self._schedule_pending_invite_joins(sync_data)
+        await self._maybe_reconcile_transport()
         return nb
 
     def _warn_encrypted_drops(self, rooms_join: dict[str, Any], client: Any) -> None:
@@ -1988,6 +1957,9 @@ class MatrixAdapter(BasePlatformAdapter):
         # DEBUG-level proof the callback fires at all (silent-inbound troubleshooting).
         logger.debug(
             "Matrix: callback fired — event %s from %s in %s", getattr(event, "event_id", "?"), sender, room_id)
+        # §16.9: record the raw observation BEFORE any gate below (self-sender, bridge,
+        # allowlist, dedup, grace) can drop it — that log makes phantom-inbound detectable.
+        self._record_transport_observation(event, room_id, sender)
         if self._is_self_sender(sender):
             return
         # Bridge/system identities must never reach the pairing flow (echo loop once paired).
@@ -2030,6 +2002,7 @@ class MatrixAdapter(BasePlatformAdapter):
             await self._handle_media_message(room_id, sender, event_id, event_ts, source_content, relates_to, msgtype)
         elif msgtype in ("m.text", "m.notice"):
             await self._handle_text_message(room_id, sender, event_id, event_ts, source_content, relates_to)
+
 
     async def _resolve_message_context(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict,
