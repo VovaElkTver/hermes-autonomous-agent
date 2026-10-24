@@ -1,9 +1,18 @@
 """controller.pump_cli — one-shot queue pump in a detached process.
 
-Run: python -m controller.pump_cli [--scope DIR] (default: every workdir that has
-queued tasks). Invoked by the controller plugin after operator sessions (and safe
-to cron). One worker at a time per scope by construction: the loop processes
-ready->running claims serially and the subprocess dies when the queue empties.
+Run: python -m controller.pump_cli [--scope DIR] [--max-steps N] (default:
+every workdir that has queued tasks). Invoked by the controller plugin after
+operator sessions (spec §20) and by the cron tick (~/.hermes/scripts/
+pump_tick.sh). One worker at a time per scope by construction: the loop
+processes ready->running claims serially and the subprocess dies when the
+queue empties.
+
+Single-flight for the whole tick: controller.pump_lock holds a flock for the
+drain with STALE-HOLDER TAKEOVER — a dead or wedged holder (no heartbeat for
+more than an hour) is tree-killed and the lock is taken over and journaled,
+so a crashed pump can no longer silence the emitter (the 24.10 incident: a
+dead pump left its lock held and every 5-minute tick quietly exited for
+13 hours). A contended-but-healthy lock reports the "lock held" stop line.
 
 To-do layer subcommand:
   python -m controller.pump_cli todo add --owner OWNER --text TEXT
@@ -114,6 +123,7 @@ def main(argv=None) -> int:
 
     from controller import model
     from controller.loop import run_cycle
+    from controller.pump_lock import acquire, default_lock_path, heartbeat, release
     from controller.workers import make_review, make_worker
 
     conn = model.connect()
@@ -132,21 +142,42 @@ def main(argv=None) -> int:
         scopes = [r["workdir"] for r in conn.execute(
             "SELECT DISTINCT workdir FROM ctl_task"
             " WHERE state IN ('ready','running')")]
-    out = {}
-    for scope in scopes:
-        perm = model.get_permission(conn, scope)
-        if not perm["enabled"]:
-            out[scope] = [{"stop": "permission off"}]
-            continue
-        out[scope] = run_cycle(
-            conn, scope=scope, max_steps=a.max_steps,
-            worker_fn=make_worker(
-                conn,
-                model_id=(cfg_ctl.get("worker_model") or None),
-                provider=(cfg_ctl.get("worker_provider") or None)),
-            review_fn=make_review(conn, judge_cfg=judge_cfg))
-    print(json.dumps(out, ensure_ascii=False, default=str))
-    return 0
+    # Single-flight for the WHOLE tick: the lock is held for the drain, with
+    # stale-holder takeover (a wedged holder no longer silences the emitter —
+    # the 24.10 incident: a dead pump left the flock held, every 5-minute tick
+    # quietly exited for 13 hours). "lock held" is the ONLY benign stop reason
+    # a concurrent tick reports.
+    lock_path = default_lock_path()
+    lock = acquire(str(lock_path), conn=conn)
+    if lock["status"] == "held":
+        print(json.dumps(
+            {s: [{"stop": "lock held", "holder_pid": lock["holder_pid"],
+                 "detail": lock["detail"]}] for s in scopes},
+            ensure_ascii=False, default=str))
+        conn.close()
+        return 0
+    try:
+        out = {}
+        for scope in scopes:
+            perm = model.get_permission(conn, scope)
+            if not perm["enabled"]:
+                out[scope] = [{"stop": "permission off"}]
+                heartbeat(lock_path)  # inter-scope gap: keep the record fresh
+                continue
+            out[scope] = run_cycle(
+                conn, scope=scope, max_steps=a.max_steps,
+                worker_fn=make_worker(
+                    conn,
+                    model_id=(cfg_ctl.get("worker_model") or None),
+                    provider=(cfg_ctl.get("worker_provider") or None),
+                    on_poll=lambda p=lock_path: heartbeat(p)),
+                review_fn=make_review(conn, judge_cfg=judge_cfg))
+            heartbeat(lock_path)  # a full scope drain may outlast the stale window
+        print(json.dumps(out, ensure_ascii=False, default=str))
+        return 0
+    finally:
+        release(lock["handle"])
+        conn.close()
 
 
 if __name__ == "__main__":

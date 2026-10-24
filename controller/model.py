@@ -241,6 +241,18 @@ def set_run_status(conn, run_id: str, status: str) -> None:
     conn.commit()
 
 
+def record_run_process(conn, run_id: str, *, pid: int | None = None,
+                       pgid: int | None = None) -> None:
+    """Attach the worker's process identity to the run row the moment Popen
+    returns (start_run creates the row; the pid only exists once the worker is
+    spawned). This is the handle a post-crash recover uses to tree-kill an
+    orphaned worker under an 'unknown' run — without it the orphan writes into
+    the workdir until somebody restarts the gateway."""
+    conn.execute("UPDATE ctl_run SET worker_pid=?, worker_pgid=? WHERE run_id=?",
+                 (pid, pgid, run_id))
+    conn.commit()
+
+
 # ---- budgets (spec §41) ------------------------------------------------------
 
 def add_budget(conn, task_id: str, metric: str, amount: float = 1) -> dict:

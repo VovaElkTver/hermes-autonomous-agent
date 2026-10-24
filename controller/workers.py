@@ -14,6 +14,7 @@ review_fn: supervisor judge, but FAIL CLOSED (judge.review fails open for the
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -41,22 +42,55 @@ def _spawn_kwargs() -> dict:
     return {"start_new_session": True}
 
 
-def _kill_tree(proc) -> None:
-    """Kill the timed-out worker and every grandchild still writing into the
-    workdir. POSIX: the spawn put it in its own session -> killpg. Windows: no
-    killpg/getpgid exist at all (AttributeError would escape the except) ->
-    taskkill /T /F walks the process tree."""
+def kill_worker_tree(pid: int | None, pgid: int | None = None) -> bool:
+    """SIGKILL a worker's process tree by the pid/pgid recorded at dispatch.
+
+    The worker spawn put it in its own session (start_new_session /
+    CREATE_NEW_PROCESS_GROUP), so killing the group is exactly the worker's tree —
+    the worker plus grandchildren still writing into the workdir. Used by
+    reconcile (post-crash recover must not leave a live tree under an 'unknown'
+    run) and by the pump lock takeover (a wedged lock holder). Returns True when
+    a signal was delivered. A recorded pgid that is the caller's own group is
+    refused: a corrupt row must never kill the caller's process tree. Dead pids
+    no-op."""
+    if not pid:
+        return False
     if os.name == "nt":
         try:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
                            capture_output=True, timeout=15, check=False)
+            return True
         except (OSError, subprocess.TimeoutExpired):
+            return False
+    if pgid is None:
+        try:
+            pgid = os.getpgid(pid)
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            return False  # no process-group primitive (Windows), or the process is gone
+    if pgid == os.getpgrp():
+        pgid = None  # own-group guard: kill the process, never the caller's tree
+    if pgid is not None:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            return True
+        except ProcessLookupError:
+            return False  # group already gone
+        except (PermissionError, OSError):
             pass
-        return
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, AttributeError):
-        pass
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return False
+
+
+def _kill_tree(proc) -> None:
+    """Kill the timed-out worker and every grandchild still writing into the
+    workdir (see kill_worker_tree). Failures are swallowed on purpose: the
+    caller proceeds to collect whatever partial output the pipes still hold."""
+    kill_worker_tree(getattr(proc, "pid", None))
 
 
 def _preempt_signal(conn, *, run_id: str, step_id: str | None) -> bool:
@@ -81,13 +115,18 @@ def _preempt_signal(conn, *, run_id: str, step_id: str | None) -> bool:
 
 
 def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
-                  timeout_s: float | None, poll_s: float, grace_s: float = 60.0):
+                  timeout_s: float | None, poll_s: float, grace_s: float = 60.0,
+                  on_poll=None):
     """Bounded wait for the worker with out-of-band preempt polling.
 
     ``timeout_s=None`` removes the wall-clock bound entirely: the wait is only
     interrupted by completion or a preempt. When a budget IS set and spent with
     no preempt, raises ``subprocess.TimeoutExpired`` (the caller converts it to
     the same graceful pause a preempt gets — see make_worker).
+
+    ``on_poll`` runs once per poll tick, before the preempt/timeout checks: the
+    pump's lock heartbeat rides it, so a long worker wait keeps the single-flight
+    lock's holder record fresh instead of reading as a stale stall.
 
     Returns ``(stdout, stderr, preempted)``. Repeated ``communicate()`` calls are
     safe since bpo-39531: partial pipe data is kept in the Popen buffers between
@@ -101,6 +140,9 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
             out, err = proc.communicate(timeout=poll_s if remaining is None else min(poll_s, remaining))
             return out, err, False
         except subprocess.TimeoutExpired:
+            if on_poll is not None:
+                with contextlib.suppress(Exception):
+                    on_poll()
             if _preempt_signal(conn, run_id=run_id, step_id=step_id):
                 _kill_tree(proc)
                 # After the kill every pipe reaches EOF; this collects the buffered
@@ -112,7 +154,8 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
 def make_worker(conn, *, timeout_s: float | None = None,
                 hermes_bin: str | None = None, extra_env: dict | None = None,
                 preempt_poll_s: float = 2.0, grace_s: float = 60.0,
-                model_id: str | None = None, provider: str | None = None):
+                model_id: str | None = None, provider: str | None = None,
+                on_poll=None):
     # model_id/provider (config: controller.worker_model / worker_provider) route
     # background steps to a dedicated endpoint (e.g. an idle GPU) so queue work
     # never competes with the interactive model. Unset -> inherit the default,
@@ -152,6 +195,21 @@ def make_worker(conn, *, timeout_s: float | None = None,
                 cwd=task["workdir"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", env=env,
                 **spawn_kwargs)
+            # Record the worker's process identity on the run row the moment it
+            # exists: a post-crash recover tree-kills an 'unknown' run by this
+            # pid/pgid (23.10: live orphaned workers under 'unknown' runs kept
+            # writing into the workdir for hours).
+            from controller import model
+            try:
+                pgid = os.getpgid(proc.pid)
+            except (OSError, AttributeError):  # AttributeError: no getpgid on Windows
+                pgid = None
+            try:
+                model.record_run_process(conn, run["run_id"], pid=proc.pid, pgid=pgid)
+            except sqlite3.Error:
+                logger.warning("run %s: worker pid=%s not recorded on the run row "
+                               "(recover cannot tree-kill it if the pump dies)",
+                               run["run_id"], proc.pid, exc_info=True)
             try:
                 # Bounded wait with preempt polling: communicate() may be re-entered on
                 # timeout (CPython keeps partial pipe data in internal buffers and the
@@ -162,7 +220,7 @@ def make_worker(conn, *, timeout_s: float | None = None,
                 out, err, preempted = _await_worker(
                     proc, conn=conn, run_id=run["run_id"],
                     step_id=step.get("step_id"), timeout_s=timeout_s,
-                    poll_s=preempt_poll_s, grace_s=grace_s)
+                    poll_s=preempt_poll_s, grace_s=grace_s, on_poll=on_poll)
                 returncode = proc.returncode
             except subprocess.TimeoutExpired:
                 # Budget (explicitly configured) exhausted: take the SAME graceful

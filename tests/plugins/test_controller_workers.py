@@ -200,10 +200,12 @@ def test_review_gate_rejects_pass_when_worker_failed(env, monkeypatch):
     assert out["verdict"] == "revise"          # code gate beats judge
 
 
-def test_pump_cli_permission_off_noop(env, monkeypatch):
-    from controller import pump_cli
-    # pump_cli.main uses model.connect() -> point it at our temp db
-    monkeypatch.setattr(model, "connect", lambda db_path=None: env[0])
+def test_pump_cli_permission_off_noop(env, tmp_path, monkeypatch):
+    from controller import pump_cli, pump_lock
+    # pump_cli.main uses model.connect() -> point it at our temp db; and point the
+    # single-flight lock at a temp file so the test never touches ~/.hermes.
+    monkeypatch.setattr(model, "connect", lambda *a, **k: env[0])
+    monkeypatch.setattr(pump_lock, "default_lock_path", lambda: tmp_path / "pump.lock")
     out = pump_cli.main(["--scope", "/nonexistent-scope"])
     assert out == 0
 

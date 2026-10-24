@@ -16,7 +16,7 @@ import hashlib
 import json
 import time
 
-from . import barrier, model, queue as Q, transitions
+from . import barrier, memory_gate, model, queue as Q, transitions
 
 
 def _artifact_hash(payloads: list) -> str:
@@ -47,7 +47,6 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
         return {"entry": {"task": tid, "run": run_id, "step": sid,
                           "to": "paused", "preempted": True}, "stop": True}
     status = res.get("status", "failed")
-    model.set_run_status(conn, run_id, "finished" if status == "finished" else status)
     if status == "interrupted":
         # Worker cut short with no external pause recorded: park the step paused with
         # the worker's own handoff so a resume re-anchors instead of restarting blind.
@@ -57,6 +56,23 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
         _park_task_paused(conn, tid, basis="worker interrupted (resume pending)")
         return {"entry": {"task": tid, "run": run_id, "step": sid,
                           "to": "paused", "interrupted": True}, "stop": True}
+    # The task can park BETWEEN the step claim and the worker's return (an operator
+    # pause, or a barrier) — task state is then 'paused' while the worker's outcome is
+    # still in flight. The outcome must be honored without moving the task: a
+    # paused->failed transition is illegal and, uncaught, kills the pump tick, which
+    # holds the single-flight lock it will never release (23-24.10: 13 hours of a
+    # silent emitter on exactly this ValueError). The run row keeps the worker's
+    # REAL outcome (no information loss); the step claim is released so a resume
+    # re-dispatches; the task stays paused, untouched.
+    task_now = model.get_task(conn, tid)
+    if task_now is not None and task_now["state"] == "paused":
+        model.set_run_status(conn, run_id, "finished" if status == "finished" else status)
+        if cur is not None and cur["status"] == "in_progress":
+            model.unstick_step(conn, sid)
+        return {"entry": {"task": tid, "run": run_id, "step": sid, "to": "paused",
+                          "interrupted": True, "worker_status": status},
+                "stop": True}
+    model.set_run_status(conn, run_id, "finished" if status == "finished" else status)
     if status != "finished":
         model.unstick_step(conn, sid)  # release the claim: a ready->running retry must find it dispatchable
         transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
@@ -77,6 +93,39 @@ def _release_orphan_claims(conn, task_id: str) -> bool:
                           (task_id,)).fetchall():
         model.unstick_step(conn, o["step_id"])
     return True
+
+
+def _advance_no_step(conn, task, log, *, review_fn) -> list[dict] | None:
+    """``next_step`` returned nothing: move the task where it belongs.
+    Returns the finished log only when the cycle must stop (a parked step);
+    None otherwise — the loop rescans with the claim released / state moved."""
+    total = conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=?",
+                         (task["task_id"],)).fetchone()["c"]
+    # An in_progress step whose run is closed is unfinished work —
+    # release the claim for re-dispatch, never verify over it.
+    if _release_orphan_claims(conn, task["task_id"]):
+        log.append({"task": task["task_id"], "orphan_steps_released": True})
+        return None
+    if total == 0:
+        transitions.transition(conn, task["task_id"], "blocked",
+                               basis="empty plan: add steps before running")
+        log.append({"task": task["task_id"], "to": "blocked",
+                    "reason": "empty plan"})
+        return None
+    # A preempted (paused) step is NOT "all done": the task parks until the step is
+    # resumed, instead of marching into verifying with unfinished work.
+    if conn.execute("SELECT 1 FROM ctl_step WHERE task_id=? AND status='paused' LIMIT 1",
+                    (task["task_id"],)).fetchone() is not None:
+        transitions.transition(conn, task["task_id"], "paused",
+                               basis="preempted step awaiting resume")
+        log.append({"task": task["task_id"], "to": "paused",
+                    "reason": "preempted step"})
+        return log
+    transitions.transition(conn, task["task_id"], "verifying",
+                           basis="all steps done")
+    outcome = finish_verifying(conn, task["task_id"], review_fn=review_fn)
+    log.append({"task": task["task_id"], "to": outcome})
+    return None
 
 
 def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) -> list[dict]:
@@ -109,32 +158,9 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
                 return log
         step = Q.next_step(conn, task["task_id"])
         if step is None:
-            total = conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=?",
-                                 (task["task_id"],)).fetchone()["c"]
-            # An in_progress step whose run is closed is unfinished work —
-            # release the claim for re-dispatch, never verify over it.
-            if _release_orphan_claims(conn, task["task_id"]):
-                log.append({"task": task["task_id"], "orphan_steps_released": True})
-                continue
-            if total == 0:
-                transitions.transition(conn, task["task_id"], "blocked",
-                                       basis="empty plan: add steps before running")
-                log.append({"task": task["task_id"], "to": "blocked",
-                            "reason": "empty plan"})
-                continue
-            # A preempted (paused) step is NOT "all done": the task parks until the step is
-            # resumed, instead of marching into verifying with unfinished work.
-            if conn.execute("SELECT 1 FROM ctl_step WHERE task_id=? AND status='paused' LIMIT 1",
-                            (task["task_id"],)).fetchone() is not None:
-                transitions.transition(conn, task["task_id"], "paused",
-                                       basis="preempted step awaiting resume")
-                log.append({"task": task["task_id"], "to": "paused",
-                            "reason": "preempted step"})
-                return log
-            transitions.transition(conn, task["task_id"], "verifying",
-                                   basis="all steps done")
-            outcome = finish_verifying(conn, task["task_id"], review_fn=review_fn)
-            log.append({"task": task["task_id"], "to": outcome})
+            settled = _advance_no_step(conn, task, log, review_fn=review_fn)
+            if settled is not None:
+                return settled
             continue
         # dispatch-time barrier: pause arriving after selection is caught here (§7 race)
         ok, why = barrier.check(conn, scope=scope, origin="autonomous",
@@ -143,6 +169,15 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
             transitions.transition(conn, task["task_id"], "paused",
                                    basis=f"loop barrier: {why}")
             log.append({"task": task["task_id"], "to": "paused", "reason": why})
+            return log
+        # Dispatch-time memory gate (incident 24.10 09:07: a worker spawn on a
+        # host near OOM tipped it over). Below the MemAvailable floor the spawn
+        # is DEFERRED — no run row, no step claim, no failure: the step stays
+        # pending and the next tick retries. The journal line is the tick's only
+        # signal while deferred, so it must appear on EVERY tick, not once.
+        gate = memory_gate.pressure_reason()
+        if gate:
+            log.append({"stop": gate})
             return log
         run_id = model.start_run(conn, task_id=task["task_id"], step_id=step["step_id"],
                                  contract_version=task["contract_version"],

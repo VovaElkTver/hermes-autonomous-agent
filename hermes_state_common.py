@@ -700,7 +700,8 @@ CREATE TABLE IF NOT EXISTS ctl_run (
   attempt INTEGER NOT NULL DEFAULT 1, worker_id TEXT, contract_version INTEGER NOT NULL,
   execution_epoch INTEGER NOT NULL, input_artifacts TEXT NOT NULL DEFAULT '[]',
   authority TEXT NOT NULL DEFAULT '[]', run_status TEXT NOT NULL DEFAULT 'starting',
-  started_at REAL, ended_at REAL
+  started_at REAL, ended_at REAL,
+  worker_pid INTEGER, worker_pgid INTEGER
 );
 CREATE TABLE IF NOT EXISTS ctl_artifact_revision (
   artifact_rev_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT, kind TEXT NOT NULL,
