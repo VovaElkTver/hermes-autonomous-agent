@@ -783,6 +783,19 @@ class MatrixAdapter(BasePlatformAdapter):
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = self._extra_truthy(config, "process_notices", "MATRIX_PROCESS_NOTICES", "false")
         self._reactions_enabled: bool = str(_extra_or_secret(config.extra, "reactions", "MATRIX_REACTIONS", "true")).lower() not in {"false", "0", "no"}
+        # Transport-observations layer (agency-model.md §16.9): observer-mode recording between
+        # this adapter and the semantic journal — catches phantom-inbound (events the agent saw
+        # that the room does not contain: synthetic re-insertions after a tool-result or a session
+        # restore). Off by default; a profile enables it with matrix.transport_observations: true
+        # (or MATRIX_TRANSPORT_OBSERVATIONS). It never alters the receive path, and every failure
+        # in it degrades to a no-op at the call site.
+        self._transport_obs: bool = self._extra_truthy(
+            config, "transport_observations", "MATRIX_TRANSPORT_OBSERVATIONS", "false")
+        self._transport_reconcile_seconds: float = self._coerce_float_extra(
+            "transport_reconcile_seconds", 300.0, max_value=3600.0)
+        self._last_transport_reconcile: float = 0.0
+        self._transport_conn: Any = None  # lazily opened state.db (same opener as ctl_*)
+        self._current_sync_batch: str = ""  # next_batch token of the sync being dispatched
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Let the final message land before redacting reactions ("missing event" in some
         # clients). 5s is empirically safe; if it must be tunable, use config.yaml not env.
@@ -1328,6 +1341,10 @@ class MatrixAdapter(BasePlatformAdapter):
                 await self._crypto_db.stop()
             except Exception as exc:
                 logger.debug("Matrix: could not close crypto DB on disconnect: %s", exc)
+        if getattr(self, "_transport_conn", None) is not None:
+            with suppress(Exception):
+                self._transport_conn.close()
+            self._transport_conn = None
         if self._client:
             with suppress(Exception):
                 await self._client.api.session.close()
@@ -1859,6 +1876,7 @@ class MatrixAdapter(BasePlatformAdapter):
         nb = sync_data.get("next_batch")  # incremental syncs resume from here
         if nb:
             await client.sync_store.put_next_batch(nb)
+        self._current_sync_batch = str(nb or "")  # batch token for every event in this response
         if initial:
             logger.info("Matrix: initial sync complete, joined %d rooms", len(self._joined_rooms))
             await self._refresh_dm_cache()
@@ -1867,6 +1885,7 @@ class MatrixAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("Matrix: %s: %s", "initial sync event dispatch error" if initial else "sync event dispatch error", exc)
         self._schedule_pending_invite_joins(sync_data)
+        await self._maybe_reconcile_transport()
         return nb
 
     def _warn_encrypted_drops(self, rooms_join: dict[str, Any], client: Any) -> None:
@@ -1988,6 +2007,10 @@ class MatrixAdapter(BasePlatformAdapter):
         # DEBUG-level proof the callback fires at all (silent-inbound troubleshooting).
         logger.debug(
             "Matrix: callback fired — event %s from %s in %s", getattr(event, "event_id", "?"), sender, room_id)
+        # Transport observation BEFORE any semantic gating/journaling (§16.9): the raw record
+        # of what the transport delivered — including our own events (local_echo) — so the
+        # reconciliation layer can later cut off synthetic re-insertions.
+        self._record_transport_observation(event, room_id, sender)
         if self._is_self_sender(sender):
             return
         # Bridge/system identities must never reach the pairing flow (echo loop once paired).
@@ -2030,6 +2053,105 @@ class MatrixAdapter(BasePlatformAdapter):
             await self._handle_media_message(room_id, sender, event_id, event_ts, source_content, relates_to, msgtype)
         elif msgtype in ("m.text", "m.notice"):
             await self._handle_text_message(room_id, sender, event_id, event_ts, source_content, relates_to)
+
+    # ---- transport-observations layer (agency-model.md §16.9) ------------------
+    #
+    # Observer-mode records between this adapter and the semantic journal. The transport
+    # can lie to the journal (phantom-inbound: an event the agent saw that the room does
+    # not contain — synthetic re-insertions after a tool-result or a session restore). The
+    # layer records what the transport delivered BEFORE semantic processing, so the
+    # reconciliation loop can re-check each observation against the homeserver and cut
+    # off synthetic re-insertions. Flag-gated, off by default; no single `verified` flag —
+    # six independent characteristics. All failures here degrade to no-ops.
+
+    def _transport_db(self) -> Any:
+        """Lazily open the state.db connection (the ctl_* opener: one DDL authority,
+        same durability barriers). One connection per adapter instance, closed in
+        disconnect()."""
+        if self._transport_conn is None:
+            from controller import model as _ctl_model
+            self._transport_conn = _ctl_model._connect()
+        return self._transport_conn
+
+    def _record_transport_observation(self, event: Any, room_id: str, sender: str) -> None:
+        """Record the raw transport observation for one observed room event.
+
+        Runs BEFORE any semantic gating or journaling — and before the self-sender
+        filter, so own events land with channel='local_echo'. ``raw_payload_ref`` is
+        the sha256 of the serialized event content (content address of the raw
+        payload, not the payload itself). Any failure is swallowed: an observation
+        must never affect the receive path.
+        """
+        if not self._transport_obs:
+            return
+        try:
+            import hashlib
+            from controller import transport as _transport
+            content = getattr(event, "content", None)
+            source = content if isinstance(content, dict) else (
+                content.serialize() if content is not None and hasattr(content, "serialize") else {})
+            if not isinstance(source, dict):
+                source = {}
+            relates_to = source.get("m.relates_to")
+            payload_ref = hashlib.sha256(
+                json.dumps(source, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            _transport.record_observation(
+                self._transport_db(),
+                connector="matrix",
+                channel="local_echo" if self._is_self_sender(sender) else "sync",
+                room_id=room_id,
+                event_id=str(getattr(event, "event_id", "")),
+                event_type=str(getattr(event, "type", "") or ""),
+                content_hash=payload_ref,
+                sender=sender,
+                relation=relates_to if isinstance(relates_to, dict) else {},
+                account=self._user_id, device=self._device_id,
+                sync_batch_id=self._current_sync_batch)
+        except Exception:
+            logger.debug("Matrix: transport-observation recording failed", exc_info=True)
+
+    async def _maybe_reconcile_transport(self) -> None:
+        """Periodic reconciliation of pending transport observations against the same
+        homeserver (§16.9 stage 2, agency-003 §7: refetch is an interface check, not
+        independent truth). Observer-mode: one bounded pass per interval, every failure
+        logged at debug and swallowed — the sync loop must never break on diagnostics."""
+        if not self._transport_obs or self._client is None:
+            return
+        if time.time() - self._last_transport_reconcile < self._transport_reconcile_seconds:
+            return
+        self._last_transport_reconcile = time.time()
+        try:
+            from controller import transport as _transport
+            await _transport.reconcile(
+                self._transport_db(), fetch_event=self._transport_fetch_event,
+                account=self._user_id or None, limit=50)
+        except Exception:
+            logger.debug("Matrix: transport reconciliation failed", exc_info=True)
+
+    async def _transport_fetch_event(self, room_id: str, event_id: str) -> dict:
+        """Re-fetch one room event through the room event endpoint. NEVER raises: a
+        failure returns {"error_code": ...} — a failed fetch is a reconciliation RESULT
+        with an error code, not a claim the event was not there (agency-003 §7)."""
+        try:
+            evt = await asyncio.wait_for(
+                self._client.get_event(RoomID(room_id), EventID(event_id)), timeout=10.0)
+        except Exception as exc:
+            errcode = getattr(exc, "errcode", None)
+            return {"error_code": str(errcode or type(exc).__name__)}
+        content = getattr(evt, "content", None)
+        content_dict: Optional[dict] = None
+        if isinstance(content, dict):
+            content_dict = content
+        elif content is not None and hasattr(content, "serialize"):
+            with suppress(Exception):
+                serialized = content.serialize()
+                if isinstance(serialized, dict):
+                    content_dict = serialized
+        # A redacted event comes back with (essentially) no content: a fact about the
+        # event, not about the fetch. Room messages normally always carry content.
+        return {"type": str(getattr(evt, "type", "") or ""),
+                "sender": str(getattr(evt, "sender", "") or ""),
+                "content": content_dict, "redacted": not content_dict}
 
     async def _resolve_message_context(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict,
