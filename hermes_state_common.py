@@ -739,9 +739,75 @@ CREATE TABLE IF NOT EXISTS ctl_todo (
   created_at REAL NOT NULL,
   materialized_task_id TEXT
 );
+CREATE TABLE IF NOT EXISTS ctl_alert_state (
+  alert_key TEXT PRIMARY KEY, digest TEXT NOT NULL, last_ts REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ctl_ticker_heartbeat (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL,
+  kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_ticker_kind_ts ON ctl_ticker_heartbeat(kind, ts);
 CREATE INDEX IF NOT EXISTS idx_ctl_run_task_status ON ctl_run(task_id, run_status);
 CREATE INDEX IF NOT EXISTS idx_ctl_event_task ON ctl_event(task_id, ts);
 CREATE INDEX IF NOT EXISTS idx_ctl_todo_status ON ctl_todo(status, owner);
+-- ---- transport observations (agency-model §16.9; task-transobs01) -----------
+-- The transport-observation layer between the Matrix adapter and the semantic
+-- journal (the `messages` table). Records what the TRANSPORT saw, BEFORE
+-- normalization: raw room events (channel 'sync'), fetched reply origins
+-- ('event_fetch'), relations/edits/reactions ('relations') and our own
+-- confirmed outbound events ('local_echo'). An observation is NOT a room fact:
+-- the default event_observations.status is 'unverified_transport_observation',
+-- and it is not a basis for external action. A failed fetch is a
+-- reconciliation result WITH an error code, never a silent "the event did not
+-- exist". There is deliberately no single `verified` flag anywhere: a verdict
+-- is derived from the six characteristics of a reconciliation_checks row
+-- (method, against_source, result, error_code, checked_at, evidence_ref). A
+-- re-check against the same homeserver proves the interface answered, not
+-- independent truth.
+CREATE TABLE IF NOT EXISTS transport_observations (
+  obs_id TEXT PRIMARY KEY,
+  connector TEXT NOT NULL,
+  account TEXT NOT NULL,
+  device TEXT,
+  channel TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  external_event_id TEXT,
+  sync_batch_id TEXT,
+  raw_payload_ref TEXT,
+  observed_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_observations (
+  obs_id TEXT PRIMARY KEY,
+  connector TEXT NOT NULL,
+  external_event_id TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  event_kind TEXT,
+  sender TEXT,
+  status TEXT NOT NULL DEFAULT 'unverified_transport_observation',
+  journal_ref TEXT,
+  first_observed_at REAL NOT NULL,
+  last_observed_at REAL NOT NULL,
+  last_checked_at REAL,
+  last_check_result TEXT,
+  UNIQUE (connector, external_event_id)
+);
+CREATE TABLE IF NOT EXISTS reconciliation_checks (
+  check_id TEXT PRIMARY KEY,
+  obs_id TEXT NOT NULL,
+  checked_at REAL NOT NULL,
+  method TEXT NOT NULL,
+  against_source TEXT,
+  result TEXT NOT NULL,
+  error_code TEXT,
+  detail TEXT,
+  evidence_ref TEXT,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_transport_obs_room_time ON transport_observations(room_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_transport_obs_external ON transport_observations(connector, external_event_id);
+CREATE INDEX IF NOT EXISTS idx_event_obs_status ON event_observations(status, last_checked_at);
+CREATE INDEX IF NOT EXISTS idx_recon_checks_obs ON reconciliation_checks(obs_id, checked_at);
+-- ---- end transport observations ----
 -- ---- end controller ----
 """
 

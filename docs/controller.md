@@ -161,3 +161,49 @@ $ todo list --status open
 
 Тесты: `tests/plugins/test_controller_todo.py` (жизненный цикл, privacy view,
 слепость pump_claim) + общий контроллер-слайт.
+
+## Ticker — резидентный тик-цикл автономии (controller.ticker)
+
+Нить внутри процесса gateway: плагин controller при `register()` поднимает
+daemon-thread (`ticker.start_default()`); это НЕ systemd, НЕ cron и НЕ
+отдельный процесс. Таблица интервалов — на monotonic clock: pump 5 минут
+(первый тик сразу), watchdog 30 минут; якоря переустанавливаются как
+`max(next_anchor, now) + interval` — запоздавший тик не схлопывает каденцию
+в busy-loop. Эпоха прав перепроверяется на каждом тике
+(`ctl_autonomy_permission.execution_epoch`, событие
+`ticker-permission-change` при смене).
+
+`run_cycle` вызывается в той же нити (без cron- и LLM-сессий для механики).
+Single-flight — сам gateway: flock `<HERMES_HOME>/run/controller-ticker.lock`
+делает процесс-владелец синглтоном; ручные CLI-вызовы pump_cli и резервный
+cron-тик держат общий pump-lock (`controller.pump_lock`, non-blocking,
+stale-holder takeover): конкурент всегда skip, никогда не ждёт.
+
+Heartbeats пишутся в `ctl_ticker_heartbeat(kind, ts, payload)`:
+ticker-start (`pid`, intervals), pump, watchdog, ticker-stop.
+
+Worker pgid-реестр — состояние нити: при старте открытые runs
+(`ctl_run` starting/running/interrupt_requested с записанными pid/pgid)
+адоптируются; обнаружение мёртвого процесса → run=interrupted, claim шага
+освобождается, событие `worker-reaped`. Восстановление после рестарта
+gateway — то же принятие из БД (`reconcile.recover` остаётся входом плагина).
+
+Watchdog — детерминированный код (перенос правил watchdog-cron
+df527e45e5e2): протухший pump-heartbeat (>25 мин) → «pump замолчал»;
+machine-park дольше 30 минут на основании `verify:` без вопросов о revise со
+всеми шагами done и passing-review → возврат задачи в ready. Человеческие
+гейты (`needs_human` не по `verify:`) детерминика не трогает. Gate-digest
+пишется в `<HERMES_HOME>/run/pump-gates.json` каждым pump-тиком (внешний
+контракт на время параллельного soak-периода).
+
+Алерты — только фиксированные шаблоны (`controller/alerts.py`,
+`ALERT_TEMPLATES`): строка человеку уходит только при СМЕНЕ digest
+состояния в `ctl_alert_state`, доставка `hermes send -t <target> -q`
+(без агент-цикла), стабильное состояние молчит; выздоровление чистит
+digest — условие может выстрелить снова. Никакой LLM текст статуса не
+сочиняет.
+
+Soak (с 24.10): тикер-нить и cron-тик `b17bcdf067af` работают параллельно
+24 часа (общий pump_lock исключает двойной drain); после отчёта cron-тик
+паузится и удаляется, watchdog-cron `df527e45e5e2` удаляется (его правила
+стали кодом `run_watchdog`).

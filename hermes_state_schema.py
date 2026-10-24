@@ -1358,10 +1358,12 @@ def reconcile_state_schema(conn: sqlite3.Connection) -> None:
     reconciliation, so out-of-band openers can never grow a second
     hand-maintained shape for the same durable tables.
     """
-    conn.executescript(SCHEMA_SQL)
-    # _reconcile_columns only touches the staticmethod _parse_schema_columns,
-    # so a bare instance works; reusing it keeps one reconciliation
-    # implementation (one authority) instead of a near-copy on raw
-    # connections.
     shim = object.__new__(SessionSchemaMixin)
+    # Reconcile columns BEFORE replaying the DDL: SCHEMA_SQL may contain index
+    # statements against the DECLARED shape of a table an older build already
+    # created with fewer columns; executescript would fail on them ("no such
+    # column") before any reconciliation could run. Same ordering constraint
+    # SessionDB._init_schema solves with DEFERRED_INDEX_SQL (comment there).
+    # Missing tables are skipped by _reconcile_columns and created below.
     shim._reconcile_columns(conn.cursor())
+    conn.executescript(SCHEMA_SQL)

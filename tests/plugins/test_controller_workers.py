@@ -406,43 +406,33 @@ def test_worker_spawn_receives_os_appropriate_flags(env, monkeypatch):
     assert "creationflags" not in seen
 
 
-def test_maybe_pump_spawn_receives_os_appropriate_flags(monkeypatch):
-    """plugins/controller pump spawn: branch selection via _pump_spawn_kwargs
-    (same flags as the worker), and _maybe_pump must forward the resolved
-    kwargs to Popen."""
-    import os as _os
+def test_post_session_pump_spawn_removed(monkeypatch):
+    """Acceptance (task-ticker01): the plugin's post-session pump_cli
+    subprocess spawn is REMOVED — replaced by the in-thread controller.ticker.
+    The spawn surface must be gone, and register() must not wire a
+    post_llm_call hook."""
     import plugins.controller as pc
-    from controller import workers
 
-    # branch selection (fake os.name, call the pure resolver)
-    monkeypatch.setattr(_os, "name", "nt")
-    kw_nt = pc._pump_spawn_kwargs()
-    assert kw_nt == {"creationflags": workers.CREATE_NEW_PROCESS_GROUP
-                               | workers.DETACHED_PROCESS}
-    monkeypatch.setattr(_os, "name", "posix")
-    assert pc._pump_spawn_kwargs() == {"start_new_session": True}
-    monkeypatch.undo()
+    assert not hasattr(pc, "_maybe_pump")
+    assert not hasattr(pc, "_pump_spawn_kwargs")
+    assert not hasattr(pc, "_on_post_llm_call")
 
-    # wiring: real Popen spy sees the resolved detached flags
-    seen = {}
-    class FakeProc:
-        pid = 1
-    def fake_popen(*a, **k):
-        seen.update(k)
-        return FakeProc()
-    monkeypatch.setattr(pc._sp, "Popen", fake_popen)
-    monkeypatch.setattr(pc, "_last_pump", 0.0)
-    monkeypatch.setattr(pc, "_PUMP_SPAWN_KWARGS",
-                        {"creationflags": workers.CREATE_NEW_PROCESS_GROUP
-                                         | workers.DETACHED_PROCESS})
-    pc._maybe_pump("default")
-    assert seen["creationflags"] == (workers.CREATE_NEW_PROCESS_GROUP
-                                     | workers.DETACHED_PROCESS)
-    assert "start_new_session" not in seen
+    class FakeCtx:
+        def __init__(self):
+            self.hooks = {}
 
-    seen.clear()
-    monkeypatch.setattr(pc, "_last_pump", 0.0)
-    monkeypatch.setattr(pc, "_PUMP_SPAWN_KWARGS", {"start_new_session": True})
-    pc._maybe_pump("default")
-    assert seen["start_new_session"] is True
-    assert "creationflags" not in seen
+        def register_hook(self, name, fn):
+            self.hooks.setdefault(name, []).append(fn)
+
+        def register_tool(self, **kw):
+            pass
+
+    monkeypatch.setattr(pc, "_enabled", lambda: True)
+    monkeypatch.setattr(pc, "_db", lambda: None)
+    import controller.ticker as CT
+    started = []
+    monkeypatch.setattr(CT, "start_default", lambda: started.append(1) or object())
+    ctx = FakeCtx()
+    pc.register(ctx)
+    assert "post_llm_call" not in ctx.hooks
+    assert started

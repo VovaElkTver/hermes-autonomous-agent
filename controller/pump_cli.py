@@ -1,11 +1,12 @@
 """controller.pump_cli — one-shot queue pump in a detached process.
 
 Run: python -m controller.pump_cli [--scope DIR] [--max-steps N] (default:
-every workdir that has queued tasks). Invoked by the controller plugin after
-operator sessions (spec §20) and by the cron tick (~/.hermes/scripts/
-pump_tick.sh). One worker at a time per scope by construction: the loop
-processes ready->running claims serially and the subprocess dies when the
-queue empties.
+every workdir that has queued tasks). Out-of-thread entry points: manual CLI
+and the cron backup tick (~/.hermes/scripts/pump_tick.sh, residual during the
+24h parallel soak — the in-thread gateway ticker, controller.ticker, drives
+the same run_cycle engine in-process). One worker at a time per scope by
+construction: the loop processes ready->running claims serially and the
+subprocess dies when the queue empties.
 
 Single-flight for the whole tick: controller.pump_lock holds a flock for the
 drain with STALE-HOLDER TAKEOVER — a dead or wedged holder (no heartbeat for

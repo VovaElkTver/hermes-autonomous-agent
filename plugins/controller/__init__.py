@@ -11,12 +11,18 @@ Wiring:
   post_tool_call   -> budget accounting per task_id (survives restart, not per-worker).
   register()       -> restart recovery (Q5): operator /restart marker -> non-autonomous;
                       no marker (crash) -> continue with epoch bump; unfinished runs to
-                      'unknown' awaiting verify (no blind retry).
+                      'unknown' awaiting verify (no blind retry). Then the in-thread
+                      TICKER (controller.ticker) starts: one daemon thread inside this
+                      gateway process drives the pump drain + watchdog on a fixed
+                      cadence (the 24.10 decision: NOT systemd, NOT cron, NOT a
+                      separate process). The post-session pump_cli subprocess spawn is
+                      gone — the ticker's 5-minute pump tick replaces it, and the
+                      residual cron tick stays a single-flight backup during the 24h
+                      parallel soak.
 """
 from __future__ import annotations
 
 import logging
-import subprocess
 import threading
 from pathlib import Path
 
@@ -142,65 +148,11 @@ def pump(scope: str, *, worker_fn=None, review_fn=None, max_steps: int = 20) -> 
                            review_fn=review_fn, max_steps=max_steps)
 
 
-
-import subprocess as _sp
-import time as _time
-_last_pump = 0.0
-
-
-def _pump_spawn_kwargs() -> dict:
-    """Same OS branch as the worker spawn (controller.workers._spawn_kwargs).
-    Resolved once at plugin-import time so a missing/failing import can't ride
-    inside _maybe_pump's broad except and silently kill the pump spawn."""
-    try:
-        from controller.workers import _spawn_kwargs
-        return _spawn_kwargs()
-    except Exception:
-        import os as _os
-        if _os.name == "nt":
-            return {"creationflags": 0x00000200 | 0x00000008}  # NEW_PROCESS_GROUP|DETACHED
-        return {"start_new_session": True}
-
-
-_PUMP_SPAWN_KWARGS = _pump_spawn_kwargs()
-
-
-def _maybe_pump(scope: str) -> None:
-    """Fire-and-forget detached pump after a turn (spec §20 loop runner). Cooldown
-    prevents spawn thrash; the pump process itself no-ops when permission is off or
-    the queue is empty, so worker-session endings re-pumping is self-limiting."""
-    global _last_pump
-    with _lock_obj:
-        if _time.time() - _last_pump < 30:
-            return
-        _last_pump = _time.time()
-    try:
-        import sys
-        _sp.Popen([sys.executable, "-m", "controller.pump_cli", "--scope", scope],
-                  cwd=str(Path(__file__).resolve().parents[2]),
-                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                  **_PUMP_SPAWN_KWARGS)
-    except Exception as exc:
-        logger.debug("controller pump spawn failed: %s", exc)
-
-
-def _on_post_llm_call(session_id: str = "", **kw):
-    if not _enabled():
-        return
-    try:
-        scope = _scope_by_session.get(session_id) or _default_scope()
-        _maybe_pump(scope)
-    except Exception as exc:
-        logger.debug("controller post-llm pump check failed: %s", exc)
-    return
-
-
 def register(ctx):
     global _ctx
     _ctx = ctx
     ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
-    ctx.register_hook("post_llm_call", _on_post_llm_call)
     try:
         from . import agent_tools
         for _name, _schema, _handler in agent_tools.tool_defs():
@@ -220,3 +172,14 @@ def register(ctx):
                         mode["mode"], [x["run_id"] for x in rep])
         except Exception as exc:
             logger.warning("controller recovery failed: %s", exc)
+        # The autonomy loop itself now runs IN THIS PROCESS: one daemon thread,
+        # fixed cadence, no cron for the mechanics. Ownership (flock) makes it a
+        # gateway singleton even though CLI/worker processes also load this plugin.
+        try:
+            from controller import ticker as _ticker
+            started = _ticker.start_default()
+            logger.info("controller ticker: %s",
+                        "in-thread scheduler started" if started
+                        else "not started (another live gateway owns the loop)")
+        except Exception as exc:
+            logger.warning("controller ticker start failed: %s", exc)
