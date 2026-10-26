@@ -905,12 +905,13 @@ class GatewayBusySessionMixin:
         return True
 
     # Slash name → handler method is ``_handle_<name>_command`` (``-`` → ``_``) except these.
-    _COMMAND_HANDLER_ALIASES = {"bg": "_handle_background_command", "sethome": "_handle_set_home_command"}
+    _COMMAND_HANDLER_ALIASES = {"bg": "_handle_background_command", "sethome": "_handle_set_home_command",
+                                "reset": "_handle_hard_reset_full_command"}
     # Ordinary slash handlers shared by idle and busy dispatch.
     _PLAIN_COMMANDS = (
         "status", "context", "restart", "approve", "deny", "pause", "agents", "bg", "btw",
         "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
-        "commands", "profile", "login", "update", "version", "reset2safe",
+        "commands", "profile", "login", "update", "version", "reset-safe", "reset",
     )
     # Dispatched only on the idle path (busy dispatch has its own allowlist).
     _IDLE_COMMANDS = (
@@ -1010,134 +1011,33 @@ class GatewayBusySessionMixin:
         suffix = t("gateway.pause.reason_suffix", reason=args) if args else ""
         return t("gateway.pause.paused", suffix=suffix)
 
-    async def _handle_reset2safe_command(self, event: MessageEvent):
-        """/reset2safe — one deterministic button to safe mode (fork; no LLM).
+    def _hard_reboot(self, mode: str) -> None:
+        """Quit force through an outside executor (scripts/hard_reboot.sh): SIGKILL this
+        process, arm/disarm the one-shot safe boot flag, restart the unit. The gateway
+        never cleans itself up — sqlite commits per message already, nothing in memory
+        is worth saving, that is the whole point."""
+        import subprocess
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "scripts" / "hard_reboot.sh"
+        subprocess.Popen(
+            ["systemd-run", "--user", "--collect", "/bin/bash", str(script), mode],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
 
-        Engage: snapshot (ESTOP state + enabled autonomy scopes) → ESTOP (blocks cron, kanban
-        dispatch and new agent turns) → hard-interrupt every running agent → silence the
-        autonomy pump (ctl_autonomy_permission.enabled=0) → discard FIFO overflow. Undoable:
-        ``/reset2safe undo`` restores the snapshot. Plain commands pass the estop gate, so the
-        button works while paused and while the node is busy.
-        """
-        import json
-        import sqlite3
-        import time
-        from agent import estop
-        from agent.file_safety import _hermes_home_path
+    async def _handle_reset_safe_command(self, event: MessageEvent):
+        """/reset-safe — quit force (no drain, no save) and boot the SAFE identity:
+        owner transport only; cron, controller pump and MCP discovery stay off."""
+        from agent import safe_mode
+        self._hard_reboot("safe")
+        was = "already safe" if safe_mode.is_safe() else "from full"
+        return f"quit force ({was}) → boot SAFE: транспорт + слэш, автономия выключена."
 
-        args = (event.get_command_args() or "").strip().lower()
-        home = _hermes_home_path()
-        snap_dir = home / "safe-snapshots"
-        latest = snap_dir / "reset2safe-latest.json"
-        lines: list[str] = []
-
-        def _autonomy_enabled() -> list:
-            db = home / "state.db"
-            if not db.exists():
-                return []
-            try:
-                con = sqlite3.connect(str(db), timeout=5)
-                try:
-                    return [row for row in con.execute(
-                        "SELECT scope, enabled FROM ctl_autonomy_permission") if row[1]]
-                finally:
-                    con.close()
-            except Exception as exc:
-                logger.warning("reset2safe: autonomy read failed: %s", exc)
-                return []
-
-        if args == "undo":
-            if not latest.exists():
-                return "reset2safe undo: snapshot not found — nothing to restore."
-            try:
-                snap = json.loads(latest.read_text())
-            except Exception:
-                snap = {}
-            scopes = [row[0] for row in snap.get("autonomy_enabled", [])]
-            if scopes:
-                try:
-                    con = sqlite3.connect(str(home / "state.db"), timeout=5)
-                    try:
-                        con.executemany(
-                            "UPDATE ctl_autonomy_permission SET enabled=1 WHERE scope=?",
-                            [(scope,) for scope in scopes])
-                        con.commit()
-                    finally:
-                        con.close()
-                except Exception as exc:
-                    lines.append(f"pump restore failed: {exc}")
-            lifted = estop.disengage()
-            latest.rename(latest.with_name(f"reset2safe-restored-{int(time.time())}.json"))
-            lines.append("ESTOP: removed" if lifted else "ESTOP: was not engaged")
-            lines.append(f"pump: {len(scopes)} scope(s) restored")
-            return "**reset2safe undo**\n" + "\n".join(lines)
-
-        # ── engage (idempotent) ─────────────────────────────────────────────
-        snap_dir.mkdir(parents=True, exist_ok=True)
-        was_engaged = estop.is_engaged()
-        enabled_rows = _autonomy_enabled()
-        latest.write_text(json.dumps({
-            "ts": time.time(),
-            "estop_was_engaged": was_engaged,
-            "autonomy_enabled": enabled_rows,
-        }))
-        estop.engage(reason="reset2safe")
-        lines.append("ESTOP: %s — cron/kanban/new turns blocked"
-                     % ("already engaged" if was_engaged else "engaged"))
-        pump_off = 0
-        if enabled_rows:
-            try:
-                con = sqlite3.connect(str(home / "state.db"), timeout=5)
-                try:
-                    cur = con.execute(
-                        "UPDATE ctl_autonomy_permission SET enabled=0 WHERE enabled=1")
-                    con.commit()
-                    pump_off = cur.rowcount
-                finally:
-                    con.close()
-            except Exception as exc:
-                lines.append(f"pump silence failed: {exc}")
-        lines.append(f"pump: {pump_off} scope(s) silenced (in snapshot)")
-        killed = 0
-        try:
-            from gateway.run import _AGENT_PENDING_SENTINEL, _INTERRUPT_REASON_STOP
-            from tools.async_delegation import interrupt_for_session
-            for key, agent in list(getattr(self, "_running_agents", {}).items()):
-                try:
-                    if agent is _AGENT_PENDING_SENTINEL:
-                        continue
-                    self._interrupt_running_turn(
-                        key, interrupt_reason=_INTERRUPT_REASON_STOP,
-                        invalidation_reason="reset2safe")
-                    interrupt_for_session(
-                        session_key=key, reason="reset2safe",
-                        parent_session_id=str(getattr(agent, "session_id", "") or ""))
-                    killed += 1
-                except Exception:
-                    logger.debug("reset2safe: interrupt failed for %s", key, exc_info=True)
-        except Exception:
-            logger.debug("reset2safe: running-agents enumeration failed", exc_info=True)
-        lines.append(f"agents: {killed} running → interrupted")
-        cleared = 0
-        try:
-            for key in list(getattr(self, "_running_agents", {})):
-                queue = self._overflow_queue(key)
-                if queue:
-                    cleared += len(queue)
-                    queue.clear()
-        except Exception:
-            logger.debug("reset2safe: overflow clear failed", exc_info=True)
-        lines.append(f"queues: {cleared} pending message(s) discarded")
-        try:
-            hb_age = time.time() - (home / "gateway-heartbeat").stat().st_mtime
-            lines.append(f"heartbeat: {hb_age:.0f}s ago")
-        except Exception:
-            lines.append("heartbeat: file missing")
-        try:
-            lines.append(f"state.db: {(home / 'state.db').stat().st_size / 1e6:.1f} MB")
-        except Exception:
-            pass
-        return "**reset2safe — safe mode engaged**\n" + "\n".join(lines)
+    async def _handle_hard_reset_full_command(self, event: MessageEvent):
+        """/reset — quit force and boot the main autonomous identity (safe flag disarmed)."""
+        from agent import safe_mode
+        self._hard_reboot("full")
+        was = "was safe" if safe_mode.is_safe() else "was full"
+        return f"quit force ({was}) → boot основной автономный режим."
 
     async def _busy_start_command(self, event: MessageEvent, quick_key: str, source):
         # Telegram's /start is a platform ping (bot launch/deep-link), not a user command.

@@ -12,8 +12,8 @@
 6. **Git не в аварийном контуре.** Сборка релизов — мирная процедура; откат = `switch_release` по указателю, `readlink` как констатация, ноль git-команд при аварии.
 
 ## Роли
-- `hermes_autonomy` (main): разум, широкие права, право на ошибку. `/reset2safe` — кнопка отсюда в safe-состояние, пока ядро живо.
-- `hermes_rescue`: иммунный контур, когда ядро НЕ живо: crash-loop детект (systemd-триггер, v1.5) → inspect → decide → kit → observe → рапорт владельцу → отдать управление main.
+- `hermes_autonomy` (main): разум, широкие права, право на ошибку. **`/reset-safe`** — quit force (SIGKILL, без drain/сохранений) и следующий boot в SAFE-идентичности (кроны, pump, MCP off на гейтах инициализации, баннер в owner-room); **`/reset`** — quit force и обычный autonomous boot. Кнопки явные, симметричных триггеров нет; `/reset` больше не алиас `/new`. Механика: `agent/safe_mode.py` (одноразовый флаг `~/.hermes/NEXT_BOOT_SAFE`) + `scripts/hard_reboot.sh` (detached executor, gateway сам себя не убивает).
+- `hermes_rescue`: иммунный контур, когда ядро НЕ живо: crash-loop детект → inspect → decide → kit → observe → рапорт владельцу → отдать управление main.
 
 ## Критерий разумности (стартовый)
 - healthy (active, heartbeat <90s, quick_check ok, нет FATAL) → `none`;
@@ -27,4 +27,4 @@
 - **v1.5**: systemd-пара `hermes-rescue.service` (+ OnFailure/триггер от watchdog-детекта crash-loop) в поставке форка; release-модель (`~/hermes-releases` + `~/hermes-live`) как стандарт развёртывания — тогда `switch_release` боевой.
 - **v2**: резидентный режим по решению Вл; ротация LKG = переразвёртывание rescue-кода тем же deploy.
 
-Связано: SPEC-v1.2 (watchdog/heartbeat — переходят в supervisor-поставку форка), `/reset2safe` (`34e5160a3c`).
+Связано: SPEC-v1.2 (watchdog/heartbeat — переходят в supervisor-поставку форка).

@@ -5628,9 +5628,14 @@ def _start_gateway_start_cron_and_housekeeping(runner):
             runner._draining or runner._external_drain_active)
     # Supervised: a ticker that dies without a stop request is respawned by housekeeping (#111010).
     from cron.scheduler_thread import SupervisedTickerThread
-    cron_thread = SupervisedTickerThread(
-        cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
-    cron_thread.start()
+    from agent import safe_mode as _safe_mode
+    cron_thread: Any = None
+    if _safe_mode.is_safe():
+        logger.warning("SAFE MODE: cron ticker not started")
+    else:
+        cron_thread = SupervisedTickerThread(
+            cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
+        cron_thread.start()
 
     # External providers fire over loopback HTTP to THIS process's api_server; if it never came up (usually
     # API_SERVER_KEY missing) every fire fails while manual runs work — misread as a job bug. Say it ONCE.
@@ -5844,13 +5849,22 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     _best_effort(_start_keepalive, "Nous auth keepalive did not start: %s")
     _ensure_windows_gateway_venv_imports()
 
+    # SAFE MODE boot identity (fork): one-shot flag consumed here; the whole node comes
+    # up as owner-transport-only — cron ticker, controller pump and MCP stay off.
+    from agent import safe_mode as _safe_mode
+    if _safe_mode.consume_boot_flag():
+        logger.warning("SAFE MODE boot: autonomous contours disabled for this process")
+
     # discover_mcp_tools() blocks up to 120s; on the loop thread it would freeze platform heartbeats.
     try:
         # MCP tool discovery — run in an executor so the asyncio event loop stays responsive even when a
         # configured MCP server is slow or unreachable.  discover_mcp_tools() uses a blocking 120s wait
         # internally; calling it from the loop thread would freeze platform heartbeats (Discord shard,
         # Telegram polling) until it returned. See #16856.
-        await _discover_gateway_mcp_tools(runner.config)
+        if _safe_mode.is_safe():
+            logger.info("SAFE MODE: MCP tool discovery skipped")
+        else:
+            await _discover_gateway_mcp_tools(runner.config)
     except Exception as e:
         logger.debug("MCP tool discovery failed: %s", e)
 
@@ -5884,6 +5898,19 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
 
     cron_stop, cron_provider, cron_thread, housekeeping_thread = (
         _start_gateway_start_cron_and_housekeeping(runner))
+
+    if _safe_mode.is_safe():
+        # The identity must be impossible to mistake: one banner into the owner room.
+        try:
+            _banner_room = os.environ.get("MATRIX_HOME_ROOM", "")
+            _banner_adapter = (runner.adapters or {}).get(Platform.MATRIX)
+            if _banner_adapter is not None and _banner_room:
+                await _banner_adapter.send(
+                    _banner_room,
+                    "SAFE MODE активен: транспорт + слэш-команды; кроны, pump и MCP "
+                    "этим бутом отключены. Выход — /reset (quit force → основной режим).")
+        except Exception:
+            logger.debug("SAFE MODE banner send failed", exc_info=True)
 
     # READY only once adapters, cron and housekeeping run; missing systemd state just disables watchdog.
     runner._start_systemd_watchdog()
