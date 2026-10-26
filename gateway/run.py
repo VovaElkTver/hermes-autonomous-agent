@@ -5637,6 +5637,44 @@ def _start_gateway_start_cron_and_housekeeping(runner):
             cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
         cron_thread.start()
 
+    # hermes_events: the kernel's own event processor (26.10 contract — the
+    # replacement for cron-thinking, not another cron). Same SAFE gate.
+    events_processor: Any = None
+    if _safe_mode.is_safe():
+        logger.warning("SAFE MODE: hermes_events processor not started")
+    else:
+        try:
+            from hermes_events import Clock, EventProcessor, EventStore, Registry
+
+            _ev_clock = Clock()
+            _ev_registry = Registry(_ev_clock, store=EventStore())
+            _rearmed = _ev_registry.load()
+            _ev_journal_dir = get_hermes_home() / "events"
+            _ev_journal_dir.mkdir(parents=True, exist_ok=True)
+            events_processor = EventProcessor(
+                registry=_ev_registry, clock=_ev_clock,
+                journal_path=_ev_journal_dir / "journal.jsonl",
+            )
+            events_processor.start()
+
+            def _events_loop() -> None:
+                while not cron_stop.is_set():
+                    cron_stop.wait(30)
+                    if cron_stop.is_set():
+                        break
+                    try:
+                        events_processor.tick()
+                    except Exception:
+                        logger.exception("hermes_events tick failed (loop survives)")
+
+            threading.Thread(
+                target=_events_loop, name="hermes-events-tick", daemon=True).start()
+            logger.info(
+                "hermes_events processor started (at-least-once re-armed: %d)", len(_rearmed))
+        except Exception:
+            # Fail-open: an experimental subsystem must not gate the message loop.
+            logger.exception("hermes_events failed to start; continuing without it")
+
     # External providers fire over loopback HTTP to THIS process's api_server; if it never came up (usually
     # API_SERVER_KEY missing) every fire fails while manual runs work — misread as a job bug. Say it ONCE.
     if not isinstance(cron_provider, InProcessCronScheduler):
