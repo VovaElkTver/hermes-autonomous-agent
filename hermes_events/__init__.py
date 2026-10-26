@@ -17,10 +17,19 @@ separate execution queue. Key semantics (contract agreed 26.10):
 * the queue dedups per handler id: while an execution is in flight (or already
   pending), a re-fire marks ``wait_again`` instead of cloning work.
 * the processor must NOT write to agent memory; it journals to jsonl only.
+* registry state lives in a SEPARATE sqlite DB (``events.db``, see store.py),
+  never in state.db; a restart reloads it and re-arms crash-stranded events
+  at-least-once.
 """
 
 from hermes_events.clock import Clock, now
-from hermes_events.registry import EventKind, Registry, parse_when
+from hermes_events.registry import (
+    EventKind, Registry, parse_when, persistable_ref, resolve_ref,
+)
 from hermes_events.processor import EventProcessor
+from hermes_events.store import EventStore, default_db_path
 
-__all__ = ["Clock", "EventKind", "EventProcessor", "Registry", "now", "parse_when"]
+__all__ = [
+    "Clock", "EventKind", "EventProcessor", "EventStore", "Registry",
+    "default_db_path", "now", "parse_when", "persistable_ref", "resolve_ref",
+]

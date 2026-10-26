@@ -5,7 +5,15 @@ import threading
 
 from hermes_events.clock import Clock
 from hermes_events.processor import EventProcessor
-from hermes_events.registry import EventKind, Registry, parse_when
+from hermes_events.registry import (
+    EventKind, Registry, parse_when, persistable_ref, resolve_ref,
+)
+from hermes_events.store import EventStore
+
+
+def _sink(ts):
+    """Module-level importable handler for persistence round-trips."""
+    return ts
 
 
 class FakeClock:
@@ -117,3 +125,79 @@ def test_silence_is_default_wake_only_on_event():
     p.tick()
     p._run_one("w")
     assert woken == ["w"]
+
+
+# ---- separate DB (vovak 26.10: "отдельная db") ----------------------------
+
+def test_registry_round_trips_through_its_own_db(tmp_path):
+    db = tmp_path / "events.db"
+    fc = FakeClock()
+    reg = Registry(fc, store=EventStore(db))
+    reg.register(id="p", kind="periodic", when=1200.0,
+                 handler=_sink, period_s=60, meta={"why": "tick"})
+    assert db.exists()                       # its own file, not state.db
+    # "restart": fresh store handle + fresh registry over the same file
+    reg2 = Registry(FakeClock(1300.0), store=EventStore(db))
+    assert reg2.load() == []
+    ev = reg2.get("p")
+    assert ev is not None and ev.t == 1200.0 and ev.meta == {"why": "tick"}
+    assert resolve_ref(ev.handler_ref) is _sink
+
+
+def test_rearm_and_removal_are_written_through(tmp_path):
+    db = tmp_path / "events.db"
+    fc = FakeClock()
+    reg = Registry(fc, store=EventStore(db))
+    p = EventProcessor(registry=reg, clock=fc, journal_path=io.StringIO())
+    reg.register(id="p", kind="periodic", when=1010.0,
+                 handler=_sink, period_s=100)
+    reg.register(id="o", kind="once", when=1010.0, handler=_sink)
+    fc.advance(11)
+    assert p.tick() == 2
+    p._run_one("p")
+    p._run_one("o")
+    rows = {r["id"]: r for r in reg._store.rows()}
+    assert rows["p"]["t"] == 1111.0          # rearm persisted
+    assert rows["p"]["in_flight"] == 0       # crash marker cleared
+    assert "o" not in rows                   # ONCE removed from the DB too
+
+
+def test_crash_mid_flight_reloads_at_least_once(tmp_path):
+    db = tmp_path / "events.db"
+    fc = FakeClock()
+    reg = Registry(fc, store=EventStore(db))
+    p = EventProcessor(registry=reg, clock=fc, journal_path=io.StringIO())
+    reg.register(id="c", kind="periodic", when=1001.0,
+                 handler=_sink, period_s=10)
+    fc.advance(2)
+    assert p.tick() == 1                      # enqueued, in_flight persisted
+    # crash: the worker never completes. fresh process, later clock.
+    reg2 = Registry(FakeClock(1500.0), store=EventStore(db))
+    notes = reg2.load()
+    assert any("re-armed after crash" in n for n in notes)
+    ev = reg2.get("c")
+    assert ev.in_flight is False and ev.t == 1500.0   # due on next tick
+
+
+def test_non_importable_handler_needs_explicit_ref(tmp_path):
+    reg = Registry(FakeClock(), store=EventStore(tmp_path / "events.db"))
+    try:
+        reg.register(id="l", kind="once", when=1.0, handler=lambda ts: None)
+        raise AssertionError("lambda without handler_ref must be refused")
+    except ValueError as exc:
+        assert "handler_ref" in str(exc)
+    reg.register(id="l", kind="once", when=1.0,
+                 handler=lambda ts: None, handler_ref="hermes_events.clock:now")
+    assert persistable_ref(_sink) == f"{_sink.__module__}:_sink"
+
+
+def test_unresolvable_ref_stays_in_db_unloaded(tmp_path):
+    db = tmp_path / "events.db"
+    store = EventStore(db)
+    store.upsert(id="gone", kind="once", t=10.0, period_s=None,
+                 handler_ref="no.such.module:fn", meta={},
+                 in_flight=False, wait_again=False)
+    reg = Registry(FakeClock(), store=store)
+    notes = reg.load()
+    assert any("unresolvable" in n for n in notes)
+    assert len(reg) == 0 and store.count() == 1   # kept, not silently deleted

@@ -59,14 +59,17 @@ class EventProcessor:
                 self._log("service-inline", ev.id)
                 ev.handler(now_ts)
                 ev.t = now_ts + (ev.period_s or 0.0) if ev.period_s else ev.t
+                self._registry.save(ev)
                 continue
             with self._lock:
                 if ev.in_flight:
                     ev.wait_again = True
+                    self._registry.save(ev)
                     self._log("refire-suppressed", ev.id)
                 else:
                     ev.in_flight = True
                     ev.t = float("inf")  # disarm until completion rearms
+                    self._registry.save(ev)
                     self._queue.put(ev.id)
                     self._log("enqueued", ev.id, fired_at=now_ts)
                 fired += 1
@@ -91,11 +94,14 @@ class EventProcessor:
             elif ev.kind is EventKind.PERIODIC:
                 # auto-rearm from COMPLETION — the core anti-avalanche law
                 ev.t = done_ts + (ev.period_s or 0.0)
+                self._registry.save(ev)
                 self._log("rearmed", ev_id, next_t=ev.t)
             ev.in_flight = False
+            self._registry.save(ev)  # clears the crash marker; no-op once unregistered
             if ev.wait_again and ev.kind is not EventKind.ONCE:
                 ev.wait_again = False
                 ev.in_flight = True
+                self._registry.save(ev)
                 self._queue.put(ev_id)
                 self._log("requeued-wait-again", ev_id)
         if self._wake is not None and ev.kind is not EventKind.SERVICE:
