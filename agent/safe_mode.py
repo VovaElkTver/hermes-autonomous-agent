@@ -15,6 +15,7 @@ from pathlib import Path
 
 BOOT_FLAG_NAME = "NEXT_BOOT_SAFE"
 _ENV = "HERMES_SAFE_MODE"
+_TAG_ENV = "HERMES_SAFE_BOOT_TAG"
 _state = False
 _boot_tag: str | None = None
 
@@ -44,15 +45,23 @@ def set_safe(value: bool) -> None:
     global _state, _boot_tag
     _state = bool(value)
     os.environ[_ENV] = "1" if _state else "0"
-    if value and _boot_tag is None:
-        _boot_tag = str(int(time.time()))
+    if value:
+        # One tag per BOOT, not per process: children spawn after consume and
+        # must route to the same :safe-<tag> sessions the gateway created. A
+        # pre-seeded tag (test/reset harness) wins over wall-clock minting.
+        _boot_tag = os.environ.get(_TAG_ENV) or str(int(time.time()))
+        os.environ[_TAG_ENV] = _boot_tag
+    else:
+        _boot_tag = None
+        os.environ.pop(_TAG_ENV, None)
 
 
 def boot_tag() -> str:
-    """Stable id of THIS process — keys safe-mode session history to one boot."""
+    """Stable id of THIS BOOT — keys safe-mode session history to one boot."""
     global _boot_tag
     if _boot_tag is None:
-        _boot_tag = str(int(time.time()))
+        _boot_tag = os.environ.get(_TAG_ENV) or str(int(time.time()))
+        os.environ[_TAG_ENV] = _boot_tag
     return _boot_tag
 
 
