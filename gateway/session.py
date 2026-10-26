@@ -723,7 +723,14 @@ def build_session_key(
     user_part = [str(participant_id)] if isolate_user and participant_id else []
     thread_part = [thread_id] if thread_id else []
     parts += user_part + thread_part if is_dm else thread_part + user_part
-    return ":".join(str(part) for part in parts)
+    key = ":".join(str(part) for part in parts)
+    from agent.safe_mode import is_safe as _boot_is_safe
+    if _boot_is_safe():
+        # Sterile boot (fork): the possibly-poisoned transcript does not come along —
+        # a fresh per-boot namespace isolates it on read; nothing on disk is destroyed.
+        from agent.safe_mode import boot_tag as _tag
+        key = f"{key}:safe-{_tag()}"
+    return key
 
 
 class _SessionFlight:

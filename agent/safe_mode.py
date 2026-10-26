@@ -10,6 +10,7 @@ button *is* the next boot's identity, quit means quit.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 BOOT_FLAG_NAME = "NEXT_BOOT_SAFE"
@@ -39,9 +40,19 @@ def consume_boot_flag() -> bool:
 
 
 def set_safe(value: bool) -> None:
-    global _state
+    global _state, _boot_tag
     _state = bool(value)
     os.environ[_ENV] = "1" if _state else "0"
+    if value and _boot_tag is None:
+        _boot_tag = str(int(time.time()))
+
+
+def boot_tag() -> str:
+    """Stable id of THIS process — keys safe-mode session history to one boot."""
+    global _boot_tag
+    if _boot_tag is None:
+        _boot_tag = str(int(time.time()))
+    return _boot_tag
 
 
 def is_safe() -> bool:
