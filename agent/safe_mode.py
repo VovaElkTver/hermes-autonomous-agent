@@ -16,6 +16,7 @@ from pathlib import Path
 BOOT_FLAG_NAME = "NEXT_BOOT_SAFE"
 _ENV = "HERMES_SAFE_MODE"
 _state = False
+_boot_tag: str | None = None
 
 
 def home_dir() -> Path:
