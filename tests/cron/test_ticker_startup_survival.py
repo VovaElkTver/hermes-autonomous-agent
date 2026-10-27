@@ -119,3 +119,48 @@ def test_supervisor_leaves_a_returning_external_provider_alone():
     ticker.start()
     _wait_until(lambda: not ticker.is_alive())
     assert ticker.restart_if_dead() is False and starts == [1] and ticker.restarts == 0
+
+
+def test_boot_starts_the_ticker_exactly_once(tmp_path, monkeypatch):
+    """Start is owned EXCLUSIVELY by ``process_ownership.start_writer`` (register-then-start).
+
+    The 27.10 safe-mode refactor re-added an explicit ``cron_thread.start()`` before the
+    ``start_writer`` call, so every non-safe boot raised ``RuntimeError: threads can only be
+    started once`` from ``threading.Thread.start`` and died before READY (fleet crash loop,
+    2026-10-27 15:32). A fake ticker that tolerates double-start hides this — the boot path
+    must run against the real ``SupervisedTickerThread``.
+    """
+    import asyncio
+    import types
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    from cron import scheduler_provider
+
+    starts: list[int] = []
+
+    class _FakeProvider:
+        def start(self, stop, **kwargs):
+            starts.append(1)
+            stop.wait(30)
+
+    monkeypatch.setattr(scheduler_provider, "resolve_cron_scheduler", lambda: "in-process")
+    monkeypatch.setattr(scheduler_provider, "scheduler_for_profile_mode",
+                        lambda *_a, **_k: _FakeProvider())
+    from gateway import run as gateway_run
+
+    monkeypatch.setattr(gateway_run, "_start_gateway_housekeeping", lambda *_a, **_kw: None)
+    runner = types.SimpleNamespace(
+        config=types.SimpleNamespace(multiplex_profiles=False),
+        adapters={}, _profile_adapters=None, _primary_profile_name="default",
+        _draining=False, _external_drain_active=False,
+    )
+
+    async def _boot():
+        return gateway_run._start_gateway_start_cron_and_housekeeping(runner)
+
+    cron_stop, _provider, thread, _housekeeping = asyncio.run(_boot())
+    assert starts == [1], "the ticker target must have been started exactly once"
+    assert thread.is_alive(), "start_writer must leave a live ticker behind"
+    cron_stop.set()
+    thread.join(timeout=10)
+    assert not thread.is_alive()

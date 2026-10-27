@@ -437,7 +437,9 @@ def _start_gateway_start_cron_and_housekeeping(runner):
     else:
         cron_thread = SupervisedTickerThread(
             cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
-        cron_thread.start()
+        # NOT started here: start_writer below registers-then-starts atomically. A second
+        # start() on the wrapper raises "threads can only be started once" and killed the
+        # 15:32 boot (fleet 27.10); start is owned exclusively by process_ownership.
     from gateway.runtime_ownership import process_ownership
     if cron_thread is not None:
         process_ownership.start_writer(cron_thread)
