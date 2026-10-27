@@ -136,8 +136,8 @@ def get_available_skills() -> dict[str, list[str]]:
     ``prefetch_banner_data()`` pays it off-thread. A failed scan yields ``{}`` and is not cached.
     """
     def _scan():
-        from tools.skills_tool import _find_all_skills
-        return _find_all_skills()  # already filtered
+        from tools.skills_tool import find_all_skills
+        return find_all_skills()  # already filtered
 
     def _compute():
         all_skills = _quiet(_scan)
@@ -604,16 +604,6 @@ def _codex_runtime_active() -> bool:
 def _active_profile_name() -> Optional[str]:
     from hermes_cli.profiles import get_active_profile_name
     return get_active_profile_name()
-
-
-def _route_model_for_banner(provider: Any) -> str:
-    """The model the resolved route will actually serve when config names none: today only the Nous
-    free tier (welcome host -> ``nous/welcome``). Read from the boot record and local auth state;
-    no network. Empty when nothing resolves, so the caller keeps its "no model configured" line."""
-    if (provider or "auto").strip().lower() not in ("auto", "nous"):
-        return ""
-    from hermes_cli.anon_auth import GUEST_MODEL, free_tier_route
-    return GUEST_MODEL if free_tier_route() else ""
 
 
 def _banner_left_lines(model: str, cwd: str, session_id, context_length, provider, *, accent: str, dim: str,

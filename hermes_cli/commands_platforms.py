@@ -393,7 +393,10 @@ _SLACK_VIA_HERMES_ONLY = frozenset({
     "usage",
     # Fork /att tipped the cap again; /codex-runtime is a one-off config lookup
     # (rule: one-off lookups before recurring interactive surfaces), reachable via /hermes codex-runtime.
-    "codex-runtime"})
+    "codex-runtime",
+    # Upstream: recovery-only verbs, reachable as /hermes discard|autoprune.
+    "discard",
+    "autoprune"})
 
 
 def _sanitize_slack_name(raw: str) -> str:
