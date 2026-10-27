@@ -362,8 +362,13 @@ class GatewayConfigLoadersMixin:
         # queues instead of steering/interrupting — a running parent turn must not interleave
         # with branch-side turns sharing the same lineage context.
         try:
+            # Both probes must hit the SYNC objects: this runs on the event-loop thread, and the
+            # async facades (``async_session_store`` / ``_session_db``) return coroutines from
+            # ``__getattr__`` — an un-awaited coroutine is always truthy, so the active-branches
+            # check below would read True for every session and force "queue" instead of
+            # interrupting.
             session_id = None
-            store = getattr(self, "async_session_store", None)
+            store = getattr(self, "session_store", None)
             peek = getattr(store, "peek_session_id", None)
             if callable(peek):
                 session_id = peek(self._session_key_for_source(source))
@@ -371,6 +376,7 @@ class GatewayConfigLoadersMixin:
                 session_id = self._session_key_for_source(source) if hasattr(
                     self, "_session_key_for_source") else None
             db = getattr(self, "_session_db", None)
+            db = getattr(db, "_db", db) if db is not None else None
             if session_id and db is not None and db.has_active_branches(session_id):
                 if attr == "_busy_input_mode" and fallback == "interrupt":
                     return "queue"

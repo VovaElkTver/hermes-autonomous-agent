@@ -385,7 +385,7 @@ async def _start_gateway_start_control_socket(runner):
 def _start_gateway_start_cron_and_housekeeping(runner):
     """Start the cron scheduler thread + gateway housekeeping thread; returns
     ``(cron_stop, cron_provider, cron_thread, housekeeping_thread)``."""
-    from gateway.run import (Dict, Platform, _cron_profile_gate, _cron_tick_profile_homes, _start_gateway_housekeeping, asyncio, logger, threading)
+    from gateway.run import (Dict, Platform, _cron_profile_gate, _cron_tick_profile_homes, _start_gateway_housekeeping, asyncio, get_hermes_home, logger, threading)
     # The event loop is passed so cron delivery can use live adapters (E2EE support).
     from cron.scheduler_provider import (
         InProcessCronScheduler, resolve_cron_scheduler, scheduler_for_profile_mode)
@@ -430,10 +430,54 @@ def _start_gateway_start_cron_and_housekeeping(runner):
             runner._draining or runner._external_drain_active)
     # Supervised: a ticker that dies without a stop request is respawned by housekeeping (#111010).
     from cron.scheduler_thread import SupervisedTickerThread
-    cron_thread = SupervisedTickerThread(
-        cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
+    from agent import safe_mode as _safe_mode
+    cron_thread: Any = None
+    if _safe_mode.is_safe():
+        logger.warning("SAFE MODE: cron ticker not started")
+    else:
+        cron_thread = SupervisedTickerThread(
+            cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
+        cron_thread.start()
     from gateway.runtime_ownership import process_ownership
-    process_ownership.start_writer(cron_thread)
+    if cron_thread is not None:
+        process_ownership.start_writer(cron_thread)
+
+    # hermes_events: the kernel's own event processor (fleet fork, 26.10 contract — the
+    # replacement for cron-thinking, not another cron). Same SAFE gate, fail-open:
+    # an experimental subsystem must never gate the message loop.
+    if _safe_mode.is_safe():
+        logger.warning("SAFE MODE: hermes_events processor not started")
+    else:
+        try:
+            from hermes_events import Clock, EventProcessor, EventStore, Registry
+
+            _ev_clock = Clock()
+            _ev_registry = Registry(_ev_clock, store=EventStore())
+            _rearmed = _ev_registry.load()
+            _ev_journal_dir = get_hermes_home() / "events"
+            _ev_journal_dir.mkdir(parents=True, exist_ok=True)
+            _events_processor = EventProcessor(
+                registry=_ev_registry, clock=_ev_clock,
+                journal_path=_ev_journal_dir / "journal.jsonl",
+            )
+            _events_processor.start()
+
+            def _events_loop() -> None:
+                while not cron_stop.is_set():
+                    cron_stop.wait(30)
+                    if cron_stop.is_set():
+                        break
+                    try:
+                        _events_processor.tick()
+                    except Exception:
+                        logger.exception("hermes_events tick failed (loop survives)")
+
+            threading.Thread(
+                target=_events_loop, name="hermes-events-tick", daemon=True).start()
+            logger.info(
+                "hermes_events processor started (at-least-once re-armed: %d)", len(_rearmed))
+        except Exception:
+            logger.exception("hermes_events failed to start; continuing without it")
 
     # External providers fire over loopback HTTP to THIS process's api_server; if it never came up (usually
     # API_SERVER_KEY missing) every fire fails while manual runs work — misread as a job bug. Say it ONCE.
@@ -677,13 +721,23 @@ async def _start_gateway_run_runner(runner, _signal_initiated_shutdown: list) ->
     before running mode (start failed, clean exit, aborted startup); None to continue into cron."""
     from gateway.run import (_discover_gateway_mcp_tools, _resolve_gateway_exit_verdict,
                              _shutdown_gateway_health_export, _shutdown_mcp_servers_nonblocking)
+    # SAFE MODE boot identity (fleet fork): one-shot flag consumed here; the whole node
+    # comes up owner-transport-only — cron ticker, controller pump, MCP and hermes_events
+    # stay off, and the sterile boot isolates history/memory/skills by session key suffix.
+    from agent import safe_mode as _safe_mode
+    if _safe_mode.consume_boot_flag():
+        logger.warning("SAFE MODE boot: autonomous contours disabled for this process")
+
     # discover_mcp_tools() blocks up to 120s; on the loop thread it would freeze platform heartbeats.
     try:
         # MCP tool discovery — run in an executor so the asyncio event loop stays responsive even when a
         # configured MCP server is slow or unreachable.  discover_mcp_tools() uses a blocking 120s wait
         # internally; calling it from the loop thread would freeze platform heartbeats (Discord shard,
         # Telegram polling) until it returned. See #16856.
-        await _discover_gateway_mcp_tools(runner.config)
+        if _safe_mode.is_safe():
+            logger.info("SAFE MODE: MCP tool discovery skipped")
+        else:
+            await _discover_gateway_mcp_tools(runner.config)
     except Exception:
         logger.debug("MCP tool discovery failed (non-fatal)", exc_info=True)
 

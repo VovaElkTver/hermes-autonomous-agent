@@ -229,6 +229,23 @@ class GatewaySessionWatchersMixin:
             while self._running and time.monotonic() < deadline:
                 await asyncio.sleep(min(30.0, max(0.0, deadline - time.monotonic())))
 
+    async def _heartbeat_watcher(self, interval: float = 15.0) -> None:
+        """Loop-level liveness: touch ``$HERMES_HOME/gateway-heartbeat`` every tick so the
+        out-of-band watchdog can detect a wedged event loop (process alive, loop dead).
+        An idle gateway logs ZERO lines per minute, so log freshness is NOT a liveness
+        signal — this file's mtime is. Payload: "<pid> <epoch>". Errors are swallowed:
+        a flaky fs must not kill the supervised task, a stale file is fail-visible
+        (watchdog treats missing/stale as unknown, not dead)."""
+        import os
+        from pathlib import Path
+        hb = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")) / "gateway-heartbeat"
+        while self._running:
+            try:
+                hb.write_text(f"{os.getpid()} {time.time():.0f}")
+            except Exception:
+                logger.debug("heartbeat write failed", exc_info=True)
+            await _interruptible_sleep(self, int(max(1, interval)))
+
     async def _session_stall_watcher(self, interval: float = 30.0):
         """Pending-inbound + stale-activity stall watchdog. Progress comes only from
         ``get_activity_summary()``; pending inbound is a notify policy gate, not a progress clock.

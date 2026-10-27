@@ -220,3 +220,18 @@ def register(ctx):
                         mode["mode"], [x["run_id"] for x in rep])
         except Exception as exc:
             logger.warning("controller recovery failed: %s", exc)
+        # The autonomy loop itself now runs IN THIS PROCESS: one daemon thread,
+        # fixed cadence, no cron for the mechanics. Ownership (flock) makes it a
+        # gateway singleton even though CLI/worker processes also load this plugin.
+        try:
+            from agent import safe_mode as _safe_mode
+            if _safe_mode.is_safe():
+                logger.info("SAFE MODE: controller pump not started")
+            else:
+                from controller import ticker as _ticker
+                started = _ticker.start_default()
+                logger.info("controller ticker: %s",
+                            "in-thread scheduler started" if started
+                            else "not started (another live gateway owns the loop)")
+        except Exception as exc:
+            logger.warning("controller ticker start failed: %s", exc)

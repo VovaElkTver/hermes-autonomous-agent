@@ -62,3 +62,30 @@ def test_resolve_db_fallback_rejects_row_started_after_flush(tmp_path):
     # SAME second as the flush is still a valid origin, not a post-flush row.
     same_second = _FakeGatewayDB({key: {"id": "same-sec", "started_at": 1700000000.818}})
     assert _store(tmp_path / "b", same_second).resolve_session_id_for_key(key, not_after=1700000000) == ("same-sec", same_second)
+
+
+def test_safe_boot_disables_peer_tuple_recovery(tmp_path, monkeypatch):
+    """A SAFE boot must recover by the exact (suffixed) key only: the peer tuple
+    (chat/user/thread) would resurrect the pre-boot transcript the sterile boot
+    exists to shed. Outside SAFE the tuple fallback stays available."""
+    from types import SimpleNamespace
+    captured = {}
+
+    class _SpyDB(_FakeGatewayDB):
+        def find_latest_gateway_session_for_peer(self, *, source, session_key=None, **kw):
+            captured.clear(); captured.update(kw, session_key=session_key)
+            return self.rows_by_key.get(session_key)
+
+    key = "agent:main:matrix:dm:!room:mx:mn:safe-123"
+    db = _SpyDB({})
+    store = _store(tmp_path, db)
+    source = SimpleNamespace(platform=SimpleNamespace(value="matrix"), user_id="u",
+                             chat_id="!room:mx:mn", chat_type="dm", thread_id=None)
+    monkeypatch.delenv("HERMES_SAFE_MODE", raising=False)
+    store._find_gateway_session_row(session_key=key, source=source, allow_peer_fallback=True)
+    assert captured["chat_id"] == "!room:mx:mn"
+    monkeypatch.setenv("HERMES_SAFE_MODE", "1")
+    assert store._find_gateway_session_row(
+        session_key=key, source=source, allow_peer_fallback=True) is None
+    assert captured["chat_id"] is None and captured["chat_type"] is None
+    assert captured["session_key"] == key

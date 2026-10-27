@@ -163,12 +163,18 @@ class SessionRecoveryMixin:
         raise_on_lookup_error: bool = False) -> Optional[dict[str, Any]]:
         """Query one durable gateway session row. Scoped Slack lookups disable SessionDB's
         platform/chat/user fallback: that tuple has no workspace id and could revive another team's
-        session; the caller performs one explicit exact lookup of the old unscoped key instead."""
+        session; the caller performs one explicit exact lookup of the old unscoped key instead.
+
+        SAFE boot: identity is only the fresh suffixed key. The peer tuple
+        (chat/user/thread) indexes the possibly-poisoned transcript — recovering
+        by it resurrects exactly the history a sterile boot exists to shed."""
+        from agent.safe_mode import is_safe as _boot_is_safe
+        scoped = allow_peer_fallback and not _boot_is_safe()
         return self._peer_row(
             self._db_for_key(session_key), source=source.platform.value, session_key=session_key,
             user_id=source.user_id,
-            chat_id=source.chat_id if allow_peer_fallback else None,
-            chat_type=source.chat_type if allow_peer_fallback else None,
+            chat_id=source.chat_id if scoped else None,
+            chat_type=source.chat_type if scoped else None,
             thread_id=source.thread_id, raise_on_lookup_error=raise_on_lookup_error)
 
     @staticmethod

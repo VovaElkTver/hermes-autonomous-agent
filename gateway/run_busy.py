@@ -1010,12 +1010,14 @@ class GatewayBusySessionMixin:
         await self._send_busy_ack_reply(event, adapter, message)
 
     # Slash name → handler method is ``_handle_<name>_command`` (``-`` → ``_``) except these.
-    _COMMAND_HANDLER_ALIASES = {"bg": "_handle_background_command", "sethome": "_handle_set_home_command"}
+    _COMMAND_HANDLER_ALIASES = {"bg": "_handle_background_command", "sethome": "_handle_set_home_command",
+                                "reset": "_handle_hard_reset_full_command"}
     # Ordinary slash handlers shared by idle and busy dispatch.
     _PLAIN_COMMANDS = (
         "status", "context", "restart", "approve", "deny", "pause", "discard", "agents", "bg", "btw",
         "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
         "commands", "profile", "login", "update", "version", "autoprune",
+        "reset-safe", "reset",
     )
     # Dispatched only on the idle path (busy dispatch has its own allowlist).
     _IDLE_COMMANDS = (
@@ -1129,6 +1131,34 @@ class GatewayBusySessionMixin:
         estop.engage(reason=args or None)
         suffix = t("gateway.pause.reason_suffix", reason=args) if args else ""
         return t("gateway.pause.paused", suffix=suffix)
+
+    def _hard_reboot(self, mode: str) -> None:
+        """Quit force through an outside executor (scripts/hard_reboot.sh): SIGKILL this
+        process, arm/disarm the one-shot safe boot flag, restart the unit. The gateway
+        never cleans itself up — sqlite commits per message already, nothing in memory
+        is worth saving, that is the whole point."""
+        import subprocess
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "scripts" / "hard_reboot.sh"
+        subprocess.Popen(
+            ["systemd-run", "--user", "--collect", "/bin/bash", str(script), mode],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+    async def _handle_reset_safe_command(self, event: MessageEvent):
+        """/reset-safe — quit force (no drain, no save) and boot the SAFE identity:
+        owner transport only; cron, controller pump and MCP discovery stay off."""
+        from agent import safe_mode
+        self._hard_reboot("safe")
+        was = "already safe" if safe_mode.is_safe() else "from full"
+        return f"quit force ({was}) → boot SAFE: транспорт + слэш, автономия выключена."
+
+    async def _handle_hard_reset_full_command(self, event: MessageEvent):
+        """/reset — quit force and boot the main autonomous identity (safe flag disarmed)."""
+        from agent import safe_mode
+        self._hard_reboot("full")
+        was = "was safe" if safe_mode.is_safe() else "was full"
+        return f"quit force ({was}) → boot основной автономный режим."
 
     async def _busy_start_command(self, event: MessageEvent, quick_key: str, source):
         # Telegram's /start is a platform ping (bot launch/deep-link), not a user command.
