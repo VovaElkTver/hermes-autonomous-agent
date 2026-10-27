@@ -7,6 +7,18 @@ and every root-to-area chain at 30k, so it loads whole on 128k+ models: long for
 
 **Never give up on the right solution.**
 
+## Fleet: you are the rescue agent for @rtx5090 (read first)
+
+This instance (@rtx5000, this repo) exists to pull the main agent (@rtx5090,
+`/home/qwen/hermes-agent`, HERMES_HOME `~/.hermes`, unit `hermes-gateway.service`) out of
+coma when it wedges itself. Owner pins a rescue task here when the main one stops answering.
+Playbook: skill `reanimation-ops`; canonical protocol lives at
+`/home/qwen/hermes-agent/docs/design/reanimation-protocol.md` + its `AGENTS.md` §Fleet.
+Hard rules: never `sleep N && restart` from a live turn (orphan death — the witness must be
+the one who survives, i.e. us); restart of the main unit is our hand, not its own; health is
+`python -m hermes_rescue run-once --report` on `/home/qwen/hermes-agent`, not a dead agent's
+promise; report to this room after every revival, then remove `DEPLOY-NOTE.md`.
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a messaging
