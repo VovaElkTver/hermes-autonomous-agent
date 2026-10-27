@@ -65,6 +65,42 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 
 ---
 
+## Проект hermes autonomous (elk) — описание и правила
+
+**Область проекта:** автономный контур Hermes на нодах флота — managed-autonomy
+controller и pump, durable approvals, dev-контур `@rtx5000` (комната отладки
+`!yzPjsOSdMSfUfZKtVk`), политика записи в память. Это — дом всех текстов этого
+направления.
+
+**Правила ведения (Вл, 27.10):**
+- Требования и приёмы проекта хранятся только здесь, в описании проекта (README/docs
+  этого репо), а не в глобальной памяти экземпляров Hermes.
+- Отдельные spec-артефакты не плодить: новый текст — разделом сюда. Родовые имена
+  (`spec vN`, `plan`, `final`) без префикса проекта на флоте пересекаются.
+
+**Состояние направления (срезы по датам):**
+- **Memory-gate.** 24.10 включён флаг `memory.write_approval=true` на rtx5090-main
+  (foreground writes из Matrix стаджились в `~/.hermes/pending/`, review-команда
+  `!memory pending|approve|reject`). 27.10 ОТКАЧЁН по команде Вл «на стандартный
+  механизм» — writes прямые. Директива 24.10 «правь косяк для всех» значила «починить
+  баг в коде, чтобы было у всех», а не «включить гейт на всех нодах»; гейт на других
+  нодах никогда не стоял. Неприменённый архив гейта: 83 memory / 34 skills в
+  `~/.hermes/pending/` (не инжектировать).
+- **Pump/ticker.** `state='running'` открывает pump — шаги идут в headless
+  `hermes chat --oneshot` (PR#63: budget expiry → graceful pause). Новый workdir
+  задачи требует `ctl_autonomy_permission(enabled=1, epoch)` — без строки pump молчит
+  «permission off». Мандат делегации («го субагенты») живёт только в последнем
+  user-turn; при блокировке — pump-очередь (ready + autonomy_permission),
+  execution_epoch из неё же.
+- **Dev-контур @rtx5000.** `hermes-gateway-dev.service` (не enabled),
+  `HERMES_HOME=~/.hermes-dev`, worktree `~/hermes-dev` @17e581e27b, аккаунт @rtx5000,
+  слушает только комнату отладки, require-mention. WSL-патч `pass` в
+  `runtime_ownership.start_writer` в fleet НЕ закатывать как есть — ломает запуск
+  housekeeping-треда; нужен идемпотентный start_writer.
+- **Обновление живого экземпляра.** Запущенный гейтвей может отставать от кода ветки;
+  накат — только по явной команде владельца («обновись» = checkout + gw_cycle), т.к.
+  рестарт трогает живые сессии.
+
 ## Quick Install
 
 ### Linux, macOS, WSL2
