@@ -18,10 +18,10 @@ last_active) on acquisition and refreshes last_active as the drain progresses
   description closes). The live fd-holders are found by scanning /proc and
   tree-killed, the lock is retaken -> ``taken_over``;
 * holder alive but last_active older than ``stale_s`` (wedged: hung worker wait,
-  dead loop) -> tree-kill the holder, retake -> ``taken_over``;
-* no holder record at all -> a live fd-holder OLDER than ``stale_s`` is a stall
-  (a healthy drain stamps its record within the first second); younger
-  fd-holders may be in-progress contenders and are left alone.
+  dead loop) -> STALE SUSPECT on the first sighting (alert only); the tree-kill
+  lands on the SECOND consecutive sighting of the same stall record;
+* the recorded holder pid equals OUR pid -> never killpg (that would SIGKILL
+  this very process): skip + alert;
 
 Every takeover is journaled (``ctl_event`` kind ``pump_lock_takeover`` + a
 logger line), never silent. Indeterminate liveness (unreadable record, /proc
@@ -41,9 +41,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STALE_S = 3600.0  # 60 min without activity = stall (acceptance row)
+DEFAULT_STALE_S = 7200.0  # 2x the longest observed marathon turn (3595.8s, 27.09) + margin
 _TAKEOVER_REACQUIRE_S = 5.0
 _POLL_S = 0.2
+# Stalls seen once are suspects, not corpses: a kill needs a SECOND consecutive
+# sighting of the same stall record (first tick only alerts). Process-local by
+# design — the resident ticker is the intended executioner; a short-lived CLI
+# contender reports suspects and defers.
+_STALE_SUSPECTS: set[tuple] = set()
 
 
 def default_lock_path() -> Path:
@@ -274,13 +279,57 @@ def acquire(lock_path, *, stale_s: float = DEFAULT_STALE_S, conn=None) -> dict:
     return {"status": "acquired", "handle": handle, "holder_pid": os.getpid(), "detail": ""}
 
 
+def _sighting_key(rec, lock_path) -> tuple:
+    """Identity of a stall, stable across consecutive sightings: the holder's
+    (pid, last_active); with no record, the live fd-holder set minus myself."""
+    if rec is not None:
+        return (_holder_pid(rec), rec.get("last_active"))
+    return ("fd-holders", tuple(sorted(set(lock_file_holder_pids(lock_path))
+                                       - {os.getpid()})))
+
+
+def _alert_stale(conn, phase: str, holder_pid, rec, now: float) -> None:
+    """Journal the takeover decision (dedup alert row + event line); reporting
+    never raises — a decision path must not die on its own bookkeeping."""
+    if conn is None:
+        return
+    try:
+        from controller import alerts
+        age = rec.get("last_active", now) if rec else now
+        line = alerts.maybe_alert(conn, f"pump-lock-stale:{holder_pid}:{phase}",
+                                  "pump-lock-stale", pid=holder_pid, phase=phase,
+                                  age_s=int(now - age))
+        if line:
+            from controller import model
+            model.emit(conn, kind="pump_lock_stale_suspect", origin="controller",
+                       payload={"phase": phase, "holder_pid": holder_pid})
+    except Exception:
+        logger.debug("pump lock stale alerting failed", exc_info=True)
+
+
 def _take_or_defer(handle, lock_path: Path, stale_s: float, conn) -> dict:
     """Lock is contended: decide on the holder's liveness, and kill only stalls."""
     rec = _holder_record(handle)
-    reason = _stale_reason(rec, lock_path, time.time(), stale_s)
+    now = time.time()
+    reason = _stale_reason(rec, lock_path, now, stale_s)
     if reason is None:
         return _held(handle, _holder_pid(rec), "holder alive and recent"
                      if rec else "no stale-holder evidence")
+    holder_pid = _holder_pid(rec)
+    if holder_pid is not None and holder_pid == os.getpid():
+        _alert_stale(conn, "self-hold", holder_pid, rec, now)
+        logger.warning("pump lock %s: stale holder is this process (pid %d) — "
+                       "skip, NEVER self-kill (%s)", lock_path, holder_pid, reason)
+        return _held(handle, holder_pid, f"self-held, no self-kill: {reason}")
+    key = _sighting_key(rec, lock_path)
+    if key not in _STALE_SUSPECTS:
+        _STALE_SUSPECTS.add(key)
+        _alert_stale(conn, "stale-suspect", holder_pid, rec, now)
+        logger.warning("pump lock %s: %s — first sighting, kill deferred to "
+                       "the next one", lock_path, reason)
+        return _held(handle, holder_pid, f"stale-suspect (kill on second "
+                                         f"sighting): {reason}")
+    _STALE_SUSPECTS.discard(key)
     if not _kill_stall_holders(lock_path, rec, stale_s):
         return _held(handle, _holder_pid(rec),
                      "stale holder not killable (indeterminate liveness)")

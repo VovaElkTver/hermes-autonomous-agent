@@ -34,6 +34,8 @@ ALERT_TEMPLATES = {
     "machine-park": "⚙ машинная парковка зависла: {task_id} (basis: {basis})",
     # Ticker mechanics: a tick crashed.
     "tick-error": "TICKER: ошибка тика {kind}: {error}",
+    # Pump lock takeover decisions (first sighting / self-hold), pre-kill signal.
+    "pump-lock-stale": "PUMP LOCK: {phase} — holder pid {pid} молчит {age_s} с",
 }
 
 
