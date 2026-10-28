@@ -318,3 +318,29 @@ def test_owner_row_refreshed_each_tick(db_connect):
     assert conn.execute("SELECT payload FROM ctl_ticker_heartbeat"
                         " WHERE kind='owner'").fetchone()["payload"] == row["payload"]
     conn.close()
+
+
+def test_watchdog_prunes_old_heartbeats_keeps_owner(db_connect):
+    """Item 9: a week-old heartbeat history is dropped each watchdog cycle;
+    the owner row (CAS token) and fresh rows stay."""
+    from controller import ticker
+    conn = db_connect()
+    old = time.time() - ticker.HEARTBEAT_RETENTION_S - 60
+    fresh = time.time()
+    for ts, kind in [(old, "pump"), (old, "watchdog"), (old, "ticker-fatal"),
+                     (fresh, "pump")]:
+        conn.execute("INSERT INTO ctl_ticker_heartbeat(ts, kind, payload)"
+                     " VALUES (?,?,?)", (ts, kind, "{}"))
+    conn.execute("INSERT INTO ctl_ticker_heartbeat(ts, kind, payload)"
+                 " VALUES (?,?,?)", (old, "owner", "{}"))  # ancient owner too
+    conn.commit()
+    t = ticker.Ticker(gates_path=None, deliver_fn=lambda line: None)
+    t.run_watchdog(conn)
+    left = {(r["ts"] < fresh - 1, r["kind"]) for r in conn.execute(
+        "SELECT ts, kind FROM ctl_ticker_heartbeat").fetchall()}
+    assert (True, "owner") in left      # never pruned
+    assert (True, "pump") not in left   # old pump gone
+    assert (True, "watchdog") not in left and (True, "ticker-fatal") not in left
+    assert (False, "pump") in left      # fresh pump kept
+    assert (False, "watchdog") in left  # this very tick's heartbeat
+    conn.close()

@@ -63,7 +63,7 @@ MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
 HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
 HB_RETRIES = 3               # then the row is skipped, the tick stays alive
 TICK_ERROR_RE_ALERT_S = 60.0  # base of the growing tick-error re-alert interval
-
+HEARTBEAT_RETENTION_S = 7 * 86400  # watchdog prunes heartbeat rows older than this
 
 # ---- process ownership of the ticker (gateway singleton) ----------------------
 
@@ -479,6 +479,12 @@ class Ticker:
     # -- watchdog (the deleted cron's rules, deterministic) ----------------------
 
     def run_watchdog(self, conn) -> None:
+        # 0) retention (audit 28.10: an insert-only heartbeat table is a leak):
+        #    drop rows older than a week; the owner row is the CAS token, it
+        #    never gets pruned.
+        conn.execute("DELETE FROM ctl_ticker_heartbeat WHERE ts < ?"
+                     " AND kind != 'owner'", (time.time() - HEARTBEAT_RETENTION_S,))
+        conn.commit()
         # 1) pump staleness (watchdog rule 2): no 'pump' heartbeat within the
         #    freshness window => the tick went quiet. The watchdog runs on its
         #    own thread, so a drain wedged inside run_cycle (which never reaches
