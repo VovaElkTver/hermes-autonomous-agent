@@ -48,9 +48,9 @@ def test_reconcile_migrates_pre_transport_db(tmp_path):
     the migration path for live profiles."""
     import sqlite3
     start = SCHEMA_SQL.index("-- ---- transport observations")
-    end = SCHEMA_SQL.index("-- ---- end transport observations ----")
-    end = SCHEMA_SQL.index("\n", end)
-    legacy_sql = SCHEMA_SQL[:start] + SCHEMA_SQL[end:]
+    # the section is the tail of the canonical DDL (its last index trails the
+    # end marker); dropping it reproduces the pre-transport release exactly
+    legacy_sql = SCHEMA_SQL[:start]
     db = tmp_path / "legacy.db"
     conn2 = sqlite3.connect(str(db))
     conn2.row_factory = sqlite3.Row
