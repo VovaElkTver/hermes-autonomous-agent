@@ -62,6 +62,7 @@ PUMP_STALE_S = 25 * 60   # the watchdog cron's own freshness rule
 MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
 HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
 HB_RETRIES = 3               # then the row is skipped, the tick stays alive
+TICK_ERROR_RE_ALERT_S = 60.0  # base of the growing tick-error re-alert interval
 
 
 # ---- process ownership of the ticker (gateway singleton) ----------------------
@@ -308,11 +309,17 @@ class Ticker:
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
         alert, never a dead thread (a dead thread is the 24.10 silent-emitter
-        incident, in-thread edition)."""
+        incident, in-thread edition). A healthy tick clears the error ledger —
+        recurrence after recovery is news again."""
         try:
             fn(conn)
         except Exception as exc:  # the loop MUST survive any tick
             self._tick_error(conn, kind, exc)
+        else:
+            try:
+                alerts.clear_alert(conn, f"tick-error:{kind}")
+            except sqlite3.Error:
+                pass
 
     def _tick_error(self, conn, kind: str, exc: Exception) -> None:
         """Reporting NEVER raises: a second sqlite failure thrown out of this
@@ -330,8 +337,14 @@ class Ticker:
             try:
                 self._heartbeat(econn, f"tick-error:{kind}",
                                 {"error": str(exc)[:200]})
-                line = alerts.maybe_alert(econn, f"tick-error:{kind}", "tick-error",
-                                          kind=kind, error=str(exc)[:120])
+                # The digest sees only the exception IDENTITY (module.class):
+                # the same error with a different traceback tail must not be
+                # a new alert, and repeats back off 1,2,4.. capped daily.
+                err_id = f"{type(exc).__module__}.{type(exc).__name__}"
+                line = alerts.maybe_alert(econn, f"tick-error:{kind}",
+                                          "tick-error",
+                                          backoff_s=TICK_ERROR_RE_ALERT_S,
+                                          kind=kind, error=err_id)
                 if line:
                     self._journal_and_deliver(econn, line)
             finally:

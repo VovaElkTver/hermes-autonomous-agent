@@ -43,22 +43,37 @@ def _digest(text: str) -> str:
     return hashlib.sha1(text.encode()).hexdigest()[:12]
 
 
-def maybe_alert(conn, key: str, template_key: str, **fields) -> str | None:
+_MAX_REALERT_S = 86400.0  # a persisting condition screams at most daily
+
+
+def maybe_alert(conn, key: str, template_key: str, backoff_s: float = 0.0,
+                **fields) -> str | None:
     """Render the template and return the line iff its digest changed since the
     last stored alert for ``key`` (state.db dedupe); else None. The digest is
-    stored either way, so a cleared-then-recurred condition re-alerts."""
+    stored either way, so a cleared-then-recurred condition re-alerts.
+
+    ``backoff_s`` adds the growing re-alert interval (audit 28.10 §3б): a
+    SAME-digest condition that keeps repeating re-fires at
+    ``backoff_s * 2**count``, capped at one day; ``clear_alert`` (or a digest
+    change) resets the count, so the first alert after recovery is immediate."""
     if template_key not in ALERT_TEMPLATES:
         raise KeyError(f"unknown alert template {template_key!r}")
     text = ALERT_TEMPLATES[template_key].format(**fields)
     d = _digest(text)
-    row = conn.execute("SELECT digest FROM ctl_alert_state WHERE alert_key=?", (key,)).fetchone()
+    now = time.time()
+    row = conn.execute("SELECT digest, last_ts, count FROM ctl_alert_state"
+                       " WHERE alert_key=?", (key,)).fetchone()
+    count = 0
     if row and row["digest"] == d:
-        return None
+        if backoff_s > 0 and now - row["last_ts"] < min(backoff_s * 2 ** row["count"],
+                                                        _MAX_REALERT_S):
+            return None
+        count = row["count"] + 1
     conn.execute(
-        "INSERT INTO ctl_alert_state(alert_key, digest, last_ts) VALUES (?,?,?)"
+        "INSERT INTO ctl_alert_state(alert_key, digest, last_ts, count) VALUES (?,?,?,?)"
         " ON CONFLICT(alert_key) DO UPDATE SET digest=excluded.digest,"
-        " last_ts=excluded.last_ts",
-        (key, d, time.time()))
+        " last_ts=excluded.last_ts, count=excluded.count",
+        (key, d, now, count))
     conn.commit()
     return text
 
