@@ -28,8 +28,12 @@ from hermes_events.registry import (
 )
 from hermes_events.processor import EventProcessor
 from hermes_events.store import EventStore, default_db_path
+from hermes_events.wake import (
+    install_gateway_transport, set_wake_transport, wake_handler,
+)
 
 __all__ = [
     "Clock", "EventKind", "EventProcessor", "EventStore", "Registry",
-    "default_db_path", "now", "parse_when", "persistable_ref", "resolve_ref",
+    "default_db_path", "install_gateway_transport", "now", "parse_when",
+    "persistable_ref", "resolve_ref", "set_wake_transport", "wake_handler",
 ]
