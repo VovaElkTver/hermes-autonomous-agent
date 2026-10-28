@@ -218,7 +218,8 @@ cron-тик держат общий pump-lock (`controller.pump_lock`, non-block
 stale-holder takeover): конкурент всегда skip, никогда не ждёт.
 
 Heartbeats пишутся в `ctl_ticker_heartbeat(kind, ts, payload)`:
-ticker-start (`pid`, intervals), pump, watchdog, ticker-stop. Плюс
+ticker-start (`pid`, intervals), pump, watchdog, ticker-stop; watchdog каждый
+цикл чистит строки старше 7 суток (кроме owner-строки). Плюс
 data-инвариант exactly-once: единственная строка `kind='owner'`
 (payload `{pid, boot_token, ts}`, partial unique index), refresh каждый
 pump-тик; `start_default` поднимает тикер только когда владелец мёртв
@@ -239,14 +240,19 @@ machine-park дольше 30 минут на основании `verify:` без
 всеми шагами done и passing-review → возврат задачи в ready. Человеческие
 гейты (`needs_human` не по `verify:`) детерминика не трогает. Gate-digest
 пишется в `<HERMES_HOME>/run/pump-gates.json` каждым pump-тиком (внешний
-контракт на время параллельного soak-периода).
+контракт на время параллельного soak-периода): tmp-файл + `os.replace` —
+читатель (`read_gates_file`) никогда не видит полдокумента, битый файл
+деградирует в `None` с логом.
 
 Алерты — только фиксированные шаблоны (`controller/alerts.py`,
 `ALERT_TEMPLATES`): строка человеку уходит только при СМЕНЕ digest
 состояния в `ctl_alert_state`, доставка `hermes send -t <target> -q`
 (без агент-цикла), стабильное состояние молчит; выздоровление чистит
 digest — условие может выстрелить снова. Никакой LLM текст статуса не
-сочиняет.
+сочиняет. Digest `tick-error` нормализован: класс исключения + форма
+heartbeat-строки, текстовые поля (в т.ч. `database is locked`) в digest не
+проникают; повторная отправка одного и того же ошибки растёт 1→2→4… минут
+(потолок сутки) и обнуляется чистым тиком.
 
 Soak (с 24.10): тикер-нить и cron-тик `b17bcdf067af` работают параллельно
 24 часа (общий pump_lock исключает двойной drain); после отчёта cron-тик
