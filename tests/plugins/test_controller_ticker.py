@@ -4,7 +4,10 @@ The ticker runs real daemon threads against a temp state.db: ``model.connect``
 is patched to one shared file so the pump thread, the watchdog thread and the
 scratch connections all see the same rows (raw SCHEMA_SQL path).
 """
+import json
+import os
 import sqlite3
+import subprocess
 import threading
 import time
 
@@ -193,3 +196,125 @@ def test_first_pump_tick_waits_half_an_interval(db_connect, monkeypatch):
         assert first[0] >= 0.25  # interval/2 = 0.3 minus jitter margin
     finally:
         t.stop()
+
+
+def _pump_threads():
+    return [th for th in threading.enumerate() if th.name == "controller-ticker"]
+
+
+@pytest.fixture()
+def singleton(db_connect):
+    """controller.ticker with the process singleton torn down after the test."""
+    from controller import ticker
+    yield ticker
+    ticker.stop_default()
+    ticker._default = None
+    ticker._release_ownership()
+
+
+def test_start_default_double_call_one_thread(singleton):
+    t1 = singleton.start_default()
+    t2 = singleton.start_default()
+    assert t1 is not None
+    assert t2 is t1
+    assert len(_pump_threads()) == 1
+
+
+def test_start_default_after_reimport_one_thread(singleton):
+    """Hot-reload path: module globals reset, the old thread keeps running —
+    only the DB owner row can keep the re-imported start_default honest."""
+    import importlib
+    t1 = singleton.start_default()
+    assert t1 is not None and len(_pump_threads()) == 1
+    leaked_fd = singleton._ownership_fd
+    mod = importlib.reload(singleton)
+    try:
+        assert mod.start_default() is None  # owner row: live pid, fresh ts
+        assert len(_pump_threads()) == 1    # the reload started nothing
+    finally:
+        mod._ownership_fd = leaked_fd  # hand the pre-reload flock back
+        t1.stop()
+
+
+def test_start_default_race_one_thread(singleton):
+    barrier = threading.Barrier(2)
+    results = []
+
+    def go():
+        barrier.wait()
+        results.append(singleton.start_default())
+
+    ths = [threading.Thread(target=go) for _ in range(2)]
+    for th in ths:
+        th.start()
+    for th in ths:
+        th.join(timeout=10)
+    assert len(results) == 2 and all(r is not None for r in results)
+    assert results[0] is results[1]
+    assert len(_pump_threads()) == 1
+
+
+def test_owner_claim_race_exactly_one_winner(db_connect):
+    """The CAS itself: three starters, no row yet — INSERT-then-CAS lets one
+    win regardless of thread interleaving."""
+    from controller import ticker
+    barrier = threading.Barrier(3)
+    won = []
+
+    def go(i):
+        c = db_connect()  # sqlite thread affinity: one connection per starter
+        c.execute("PRAGMA busy_timeout=5000")
+        barrier.wait()
+        try:
+            won.append(ticker._claim_owner(c, f"tok{i}", 60.0) is not None)
+        finally:
+            c.close()
+
+    ths = [threading.Thread(target=go, args=(i,)) for i in range(3)]
+    for th in ths:
+        th.start()
+    for th in ths:
+        th.join(timeout=10)
+    assert len(won) == 3
+    assert sum(won) == 1
+
+
+def test_owner_row_gating_rules(db_connect):
+    from controller import ticker
+    conn = db_connect()
+    assert ticker._claim_owner(conn, "t1", 60.0)          # no row -> INSERT wins
+    assert ticker._claim_owner(conn, "t2", 60.0) is None  # live fresh owner (us)
+    child = subprocess.Popen(["true"])
+    child.wait()
+    ts = time.time()
+    conn.execute("UPDATE ctl_ticker_heartbeat SET ts=?, payload=?"
+                 " WHERE kind='owner'",
+                 (ts, ticker._owner_payload_str(child.pid, "dead", ts)))
+    conn.commit()
+    assert ticker._claim_owner(conn, "t3", 60.0)          # dead pid -> take now
+    conn.execute("UPDATE ctl_ticker_heartbeat SET ts=?, payload=?"
+                 " WHERE kind='owner'",
+                 (ts - 121, ticker._owner_payload_str(os.getpid(), "t3", ts)))
+    conn.commit()
+    assert ticker._claim_owner(conn, "t4", 60.0)          # live but stale -> take
+    conn.close()
+
+
+def test_owner_row_refreshed_each_tick(db_connect):
+    from controller import ticker
+    conn = db_connect()
+    payload = ticker._claim_owner(conn, "tok", 60.0)
+    t = ticker.Ticker(gates_path=None)
+    t._owner_payload = payload
+    time.sleep(0.01)
+    t._owner_refresh(conn)
+    row = conn.execute("SELECT ts, payload FROM ctl_ticker_heartbeat"
+                       " WHERE kind='owner'").fetchone()
+    assert row["ts"] > json.loads(payload)["ts"]
+    assert row["payload"] == t._owner_payload
+    # someone else's row (payload moved on) refreshes nothing of theirs
+    t._owner_payload = ticker._owner_payload_str(os.getpid(), "stale-token", 1.0)
+    t._owner_refresh(conn)
+    assert conn.execute("SELECT payload FROM ctl_ticker_heartbeat"
+                        " WHERE kind='owner'").fetchone()["payload"] == row["payload"]
+    conn.close()

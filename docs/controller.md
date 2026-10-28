@@ -218,7 +218,13 @@ cron-тик держат общий pump-lock (`controller.pump_lock`, non-block
 stale-holder takeover): конкурент всегда skip, никогда не ждёт.
 
 Heartbeats пишутся в `ctl_ticker_heartbeat(kind, ts, payload)`:
-ticker-start (`pid`, intervals), pump, watchdog, ticker-stop.
+ticker-start (`pid`, intervals), pump, watchdog, ticker-stop. Плюс
+data-инвариант exactly-once: единственная строка `kind='owner'`
+(payload `{pid, boot_token, ts}`, partial unique index), refresh каждый
+pump-тик; `start_default` поднимает тикер только когда владелец мёртв
+(pid нет) или его `ts` старше 2×интервала — захват одним CAS
+`UPDATE ... WHERE ts < ?` (переживает hot-reload модуля, fork и Windows,
+где flock не работает).
 
 Worker pgid-реестр — состояние нити: при старте открытые runs
 (`ctl_run` starting/running/interrupt_requested с записанными pid/pgid)

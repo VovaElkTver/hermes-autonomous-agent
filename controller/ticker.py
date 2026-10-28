@@ -137,6 +137,51 @@ def _open_scratch_conn():
         return None
 
 
+def _owner_payload_str(pid: int, boot_token: str, ts: float) -> str:
+    """Canonical owner-row payload: fixed key order makes the string itself
+    the CAS token for per-tick refreshes."""
+    return json.dumps({"pid": pid, "boot_token": boot_token, "ts": ts})
+
+
+def _claim_owner(conn, boot_token: str, stale_after_s: float) -> str | None:
+    """Data-level exactly-once for the ticker (audit 28.10 §4: flock is kernel
+    state; this is the DB witness). The single kind='owner' row (kept single
+    by the partial unique index) is read first; starting is allowed only when
+    the recorded pid is dead/absent or the row's ts is older than
+    ``stale_after_s``. The take is one CAS ``UPDATE ... WHERE ts < ?`` against
+    the observed ts; with no row, an INSERT whose UNIQUE violation is the
+    race-loser signal. Returns the stored payload string on success, None when
+    a live owner keeps this process out of the loop."""
+    now = time.time()
+    payload = _owner_payload_str(os.getpid(), boot_token, now)
+    row = conn.execute("SELECT ts, payload FROM ctl_ticker_heartbeat"
+                       " WHERE kind='owner'").fetchone()
+    if row is None:
+        try:
+            conn.execute("INSERT INTO ctl_ticker_heartbeat(ts, kind, payload)"
+                         " VALUES (?,?,?)", (now, "owner", payload))
+            conn.commit()
+            return payload
+        except sqlite3.IntegrityError:  # raced: another starter inserted first
+            conn.rollback()
+            return None
+    prev_ts = row["ts"]
+    try:
+        prev_pid = int(json.loads(row["payload"] or "{}").get("pid"))
+    except (TypeError, ValueError):
+        prev_pid = None
+    if (time.time() - prev_ts <= stale_after_s
+            and prev_pid is not None
+            and pump_lock._pid_liveness(prev_pid) != "dead"):
+        return None
+    cur = conn.execute(
+        "UPDATE ctl_ticker_heartbeat SET ts=?, payload=?"
+        " WHERE kind='owner' AND ts < ?",
+        (now, payload, prev_ts + 1e-6))
+    conn.commit()
+    return payload if cur.rowcount == 1 else None
+
+
 # ---- the ticker ----------------------------------------------------------------
 
 
@@ -148,7 +193,9 @@ class Ticker:
     def __init__(self, *, intervals: dict | None = None, alert_target: str = "",
                  deliver_fn=None, now_fn=time.time, worker_model: str | None = None,
                  worker_provider: str | None = None, max_steps: int = 50,
-                 gates_path: str | None = None):
+                 gates_path: str | None = None, boot_token: str | None = None):
+        self.boot_token = boot_token or model.new_id("boot")
+        self._owner_payload: str | None = None  # owner row content after claim
         self.intervals = {**INTERVALS, **(intervals or {})}
         self.alert_target = alert_target
         self.deliver_fn = deliver_fn
@@ -253,6 +300,7 @@ class Ticker:
         while not self._stop.is_set():
             now = self._now()
             if now >= next_pump:
+                self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
                 next_pump = max(next_pump, self._now()) + self.intervals["pump"]
             self._stop.wait(max(0.0, next_pump - self._now()))
@@ -601,6 +649,30 @@ class Ticker:
         logger.debug("controller ticker: heartbeat %s skipped (write lock): %s",
                      kind, last_exc)
 
+    def _owner_refresh(self, conn) -> None:
+        """Ownership tick-proof: advance the owner row every pump tick — a
+        ticker that stops advancing it becomes claimable by the next
+        start_default (2× interval later, or immediately if its pid is gone)."""
+        if self._owner_payload is None:
+            return
+        ts = time.time()
+        payload = _owner_payload_str(os.getpid(), self.boot_token, ts)
+        try:
+            cur = conn.execute(
+                "UPDATE ctl_ticker_heartbeat SET ts=?, payload=?"
+                " WHERE kind='owner' AND payload=?",
+                (ts, payload, self._owner_payload))
+            conn.commit()
+            if cur.rowcount == 1:
+                self._owner_payload = payload
+            else:
+                logger.warning("controller ticker: owner row is no longer ours"
+                               " (taken over?) — pump-lock still guards")
+        except sqlite3.Error as exc:
+            with contextlib.suppress(sqlite3.Error):
+                conn.rollback()
+            logger.debug("controller ticker: owner refresh skipped: %s", exc)
+
 
 # ---- process-wide singleton -----------------------------------------------------
 
@@ -620,7 +692,11 @@ def _load_controller_cfg() -> dict:
 
 def start_default() -> Ticker | None:
     """Start the gateway-internal ticker (called from the plugin's register()).
-    Returns the running Ticker, or None when this process must not run it."""
+    Returns the running Ticker, or None when this process must not run it.
+    Two gates: the process flock (kernel singleton) AND the DB owner row —
+    the latter survives module reload/fork/Windows, where flock does not
+    (audit 28.10 §4); start proceeds only when the owner is dead or its ts
+    is older than 2x the pump interval, via one CAS take-over."""
     global _default, _atexit_registered
     with _default_lock:
         if _default is not None and _default.alive():
@@ -636,6 +712,21 @@ def start_default() -> Ticker | None:
             logger.info("controller ticker: another live gateway owns the loop; "
                         "not starting a second one")
             return None
+        conn = _open_scratch_conn()
+        if conn is None:
+            logger.warning("controller ticker: state.db unreadable; not starting")
+            _release_ownership()
+            return None
+        try:
+            payload = _claim_owner(conn, t.boot_token, 2 * t.intervals["pump"])
+        finally:
+            conn.close()
+        if payload is None:
+            logger.info("controller ticker: the owner row is alive; "
+                        "not starting a second loop")
+            _release_ownership()
+            return None
+        t._owner_payload = payload
         _default = t
         if not _atexit_registered:
             atexit.register(stop_default)
