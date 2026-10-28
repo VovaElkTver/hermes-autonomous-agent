@@ -246,10 +246,18 @@ class Ticker:
         return self._thread is not None and self._thread.is_alive()
 
     def stop(self, timeout_s: float = 10.0) -> None:
-        self._stop.set()
-        for th in (self._thread, self._watchdog_thread):
-            if th is not None:
-                th.join(timeout_s)
+        """Idempotent; runs under the same lock as start() so a concurrent
+        start/stop can never observe a half-stopped ticker (audit 28.10).
+        Safe to join under the lock: `_run`'s finally never takes it."""
+        with self._lock:
+            self._stop.set()
+            me = threading.current_thread()
+            for attr in ("_thread", "_watchdog_thread"):
+                th = getattr(self, attr)
+                if th is not None and th is not me:
+                    th.join(timeout_s)
+                    if not th.is_alive():
+                        setattr(self, attr, None)
 
     def _run(self) -> None:
         """Whole body under one guard: a failure at connect/heartbeat/boot —

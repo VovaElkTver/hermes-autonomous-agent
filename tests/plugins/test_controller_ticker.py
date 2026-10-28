@@ -394,3 +394,27 @@ def test_schedule_cadence_survives_frozen_wall_clock(db_connect):
                       " WHERE kind='pump'").fetchone()["m"]
     assert ts is not None and ts > 1_000_000  # heartbeat ts = wall clock, not 0.0
     conn.close()
+
+
+def test_stop_locked_idempotent_restartable(db_connect):
+    """Item 12: concurrent stop() calls cannot deadlock (all take the start
+    lock), threads are joined and cleared, and start() after stop() works."""
+    import threading as th
+    from controller import ticker
+    t = ticker.Ticker(intervals={"pump": 0.05, "watchdog": 0.2}, gates_path=None)
+    t.start()
+    first = t._thread
+    storm = [th.Thread(target=lambda: t.stop(timeout_s=5)) for _ in range(4)]
+    for x in storm:
+        x.start()
+    for x in storm:
+        x.join(15)
+        assert not x.is_alive()  # no deadlock on the stop path
+    assert not first.is_alive()
+    assert t._thread is None and t._watchdog_thread is None
+    t.stop()  # idempotent: stopped ticker stops again without raising
+    t.start()
+    assert t._thread is not None and t._thread is not first
+    assert t._thread.is_alive()
+    t.stop()
+    assert not t.alive()
