@@ -44,10 +44,12 @@ evidence (kind='pump'/'watchdog'/'ticker-start'/'ticker-stop').
 from __future__ import annotations
 
 import atexit
+import contextlib
 import fcntl
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 
@@ -58,6 +60,8 @@ logger = logging.getLogger("controller.ticker")
 INTERVALS = {"pump": 300.0, "watchdog": 1800.0}
 PUMP_STALE_S = 25 * 60   # the watchdog cron's own freshness rule
 MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
+HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
+HB_RETRIES = 3               # then the row is skipped, the tick stays alive
 
 
 # ---- process ownership of the ticker (gateway singleton) ----------------------
@@ -123,6 +127,16 @@ def _release_ownership() -> None:
             pass
 
 
+def _open_scratch_conn():
+    """Short-lived connection for error/fatal heartbeats and alerts: the main
+    ticker connection is the prime suspect exactly when these are written."""
+    try:
+        return model.connect()
+    except Exception:  # the scratch path may also fail; callers log-fallback
+        logger.debug("controller ticker: scratch state.db connect failed", exc_info=True)
+        return None
+
+
 # ---- the ticker ----------------------------------------------------------------
 
 
@@ -172,23 +186,37 @@ class Ticker:
                 th.join(timeout_s)
 
     def _run(self) -> None:
-        owned = _acquire_ownership()
-        if owned is None:
-            logger.info("controller ticker: another live process owns the ticker; "
-                        "this process stays out of the loop (pump lock stays the guard)")
-            return
-        conn = model.connect()
-        self._heartbeat(conn, "ticker-start",
-                        {"pid": os.getpid(), "intervals": self.intervals})
-        self._start_watchdog()
+        """Whole body under one guard: a failure at connect/heartbeat/boot —
+        exactly where the flock is already taken but the loop has not started
+        — must report (heartbeat + log) and put the ownership fd down (audit
+        28.10: the dead thread kept the flock, the loop never respawned)."""
+        conn = None
         try:
+            owned = _acquire_ownership()
+            if owned is None:
+                logger.info("controller ticker: another live process owns the ticker; "
+                            "this process stays out of the loop (pump lock stays the guard)")
+                return
+            conn = model.connect()
+            self._heartbeat(conn, "ticker-start",
+                            {"pid": os.getpid(), "intervals": self.intervals})
+            self._start_watchdog()
             self._adopt_workers(conn)
             self._schedule(conn)
+        except Exception as exc:  # the loop MUST survive, the thread MAY die — loudly
+            logger.exception("controller ticker: fatal: %s", exc)
+            self._isolated_heartbeat("ticker-fatal", {"error": str(exc)[:200]})
         finally:
             self._stop.set()
-            self._heartbeat(conn, "ticker-stop", {"pid": os.getpid()})
-            conn.close()
-            _release_ownership()
+            wd = self._watchdog_thread
+            if wd is not None:
+                wd.join(5.0)
+            if conn is not None:
+                self._heartbeat(conn, "ticker-stop", {"pid": os.getpid()})
+                with contextlib.suppress(Exception):
+                    conn.close()
+            with contextlib.suppress(Exception):
+                _release_ownership()
 
     def _start_watchdog(self) -> None:
         self._watchdog_thread = threading.Thread(
@@ -237,13 +265,43 @@ class Ticker:
             self._tick_error(conn, kind, exc)
 
     def _tick_error(self, conn, kind: str, exc: Exception) -> None:
-        self._heartbeat(conn, f"tick-error:{kind}",
-                        {"error": str(exc)[:200]})
-        line = alerts.maybe_alert(conn, f"tick-error:{kind}", "tick-error",
-                                  kind=kind, error=str(exc)[:120])
-        if line:
-            self._journal_and_deliver(conn, line)
+        """Reporting NEVER raises: a second sqlite failure thrown out of this
+        except-block is what actually killed the loop last time (audit 28.10).
+        The main conn is rolled back first (the half-executed cycle is not a
+        committed fact); the error heartbeat/alert go on a short-lived scratch
+        connection, because the main writer is the suspect."""
         logger.warning("controller ticker: %s tick failed: %s", kind, exc)
+        try:
+            with contextlib.suppress(sqlite3.Error):
+                conn.rollback()
+            econn = _open_scratch_conn()
+            if econn is None:
+                return
+            try:
+                self._heartbeat(econn, f"tick-error:{kind}",
+                                {"error": str(exc)[:200]})
+                line = alerts.maybe_alert(econn, f"tick-error:{kind}", "tick-error",
+                                          kind=kind, error=str(exc)[:120])
+                if line:
+                    self._journal_and_deliver(econn, line)
+            finally:
+                with contextlib.suppress(Exception):
+                    econn.close()
+        except Exception:  # the fallback is the log line, not an exception
+            logger.exception("controller ticker: %s tick-error reporting failed "
+                             "(original failure above)", kind)
+
+    def _isolated_heartbeat(self, kind: str, payload: dict) -> None:
+        """Best-effort liveness row on a scratch conn (the main one may be the
+        very thing that failed)."""
+        conn = _open_scratch_conn()
+        if conn is None:
+            return
+        try:
+            self._heartbeat(conn, kind, payload)
+        finally:
+            with contextlib.suppress(Exception):
+                conn.close()
 
     # -- pump tick -------------------------------------------------------------
 
@@ -519,11 +577,27 @@ class Ticker:
                         "chat delivery absent (no target or hermes send failed)")
 
     def _heartbeat(self, conn, kind: str, payload: dict) -> None:
-        conn.execute(
-            "INSERT INTO ctl_ticker_heartbeat(ts, kind, payload)"
-            " VALUES (?,?,?)",
-            (self._now(), kind, json.dumps(payload, ensure_ascii=False)))
-        conn.commit()
+        """Liveness row against the WAL write-lock: a bounded busy window, a
+        bounded retry count — then the write is SKIPPED (the tick is alive,
+        the row is courtesy), never raised (audit 28.10: 'locked' inside the
+        error path was the second exception that killed the loop)."""
+        row = (time.time(), kind, json.dumps(payload, ensure_ascii=False))
+        last_exc: sqlite3.Error | None = None
+        for attempt in range(HB_RETRIES):
+            try:
+                conn.execute(
+                    f"PRAGMA busy_timeout={HB_BUSY_TIMEOUT_MS * (attempt + 1)}")
+                conn.execute(
+                    "INSERT INTO ctl_ticker_heartbeat(ts, kind, payload)"
+                    " VALUES (?,?,?)", row)
+                conn.commit()
+                return
+            except sqlite3.Error as exc:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.rollback()
+                last_exc = exc
+        logger.debug("controller ticker: heartbeat %s skipped (write lock): %s",
+                     kind, last_exc)
 
 
 # ---- process-wide singleton -----------------------------------------------------
