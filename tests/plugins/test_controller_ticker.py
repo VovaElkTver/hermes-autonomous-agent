@@ -344,3 +344,28 @@ def test_watchdog_prunes_old_heartbeats_keeps_owner(db_connect):
     assert (False, "pump") in left      # fresh pump kept
     assert (False, "watchdog") in left  # this very tick's heartbeat
     conn.close()
+
+
+def test_gates_file_written_atomically_reader_degrades(tmp_path, monkeypatch, caplog):
+    """Item 10: the snapshot is published by os.replace (a SIGTERM mid-write
+    can never leave the cron reader a torn JSON file); a broken file reads as
+    degraded None with a log, not an exception."""
+    import logging
+    from controller import ticker
+    moves = []
+    path = tmp_path / "run" / "pump-gates.json"
+    _real_replace = os.replace
+    monkeypatch.setattr(os, "replace",
+                        lambda src, dst: (moves.append((src, dst)),
+                                          _real_replace(src, dst))[-1])
+    t = ticker.Ticker(gates_path=str(path))
+    t._write_gates_file({"task-1": "needs_human: x"})
+    assert moves == [(str(path) + ".tmp", str(path))]
+    snap = json.loads(path.read_text())
+    assert snap["gates"]["task-1"] == "needs_human: x"
+    assert not (tmp_path / "run" / "pump-gates.json.tmp").exists()
+    path.write_text('{"digest": "abc", "gate')  # a torn survivor
+    with caplog.at_level(logging.WARNING, logger="controller.ticker"):
+        assert ticker.read_gates_file(str(path)) is None
+    assert "unreadable" in caplog.text
+    assert ticker.read_gates_file(str(tmp_path / "gone.json")) is None

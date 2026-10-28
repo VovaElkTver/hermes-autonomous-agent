@@ -183,6 +183,22 @@ def _claim_owner(conn, boot_token: str, stale_after_s: float) -> str | None:
     return payload if cur.rowcount == 1 else None
 
 
+
+def read_gates_file(path: str | None = None) -> dict | None:
+    """Reader for the pump-gates.json external contract: a broken/absent
+    snapshot DEGRADES (logged, returns None) — the residual cron tick must not
+    die on a snapshot the ticker failed to finish writing."""
+    path = path or str(_gates_file_path())
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:  # ValueError covers json.JSONDecodeError
+        logger.warning("controller ticker: pump-gates.json unreadable: %s", exc)
+        return None
+
+
 # ---- the ticker ----------------------------------------------------------------
 
 
@@ -443,17 +459,27 @@ class Ticker:
 
     def _write_gates_file(self, snap: dict) -> None:
         """Keep ~/.hermes/run/pump-gates.json fresh — the external contract the
-        residual cron tick and gate tooling read during the parallel soak."""
+        residual cron tick and gate tooling read during the parallel soak.
+        Written to a tmp file and os.replace-d: a kill mid-write must never
+        hand the reader half a JSON document (audit 28.10)."""
         if not self.gates_path:
             return
+        data = json.dumps({"digest": alerts._digest(
+            json.dumps(snap, sort_keys=True, ensure_ascii=False)),
+            "ts": self._now(), "gates": snap}, ensure_ascii=False)
+        tmp = self.gates_path + ".tmp"
         try:
             os.makedirs(os.path.dirname(self.gates_path), exist_ok=True)
-            with open(self.gates_path, "w", encoding="utf-8") as fh:
-                json.dump({"digest": alerts._digest(
-                    json.dumps(snap, sort_keys=True, ensure_ascii=False)),
-                    "ts": self._now(), "gates": snap}, fh, ensure_ascii=False)
-        except OSError:
-            pass
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, self.gates_path)
+        except OSError as exc:
+            logger.debug("controller ticker: gates snapshot write failed: %s", exc)
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
 
     # -- epoch re-check (per tick) ----------------------------------------------
 
