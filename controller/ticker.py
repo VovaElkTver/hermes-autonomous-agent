@@ -1,13 +1,14 @@
 """controller.ticker — the resident in-thread tick loop of the autonomy loop.
 
-MCU-style scheduler living INSIDE the hermes-gateway process: one daemon
-thread started by the controller plugin (NOT systemd, NOT cron, NOT a separate
-process — vovak 24.10 06:21: "это внутренний thread самого гермес"). It runs
-the pump drain via ``loop.run_cycle`` directly (in-thread), keeps the worker
-pgid registry (adopt open runs from state.db, reap on death), and fires the
-deterministic watchdog checks (pump staleness, machine-park repair) with
-template alerts deduped in state.db. No LLM composes status text anywhere in
-this path.
+MCU-style scheduler living INSIDE the hermes-gateway process: daemon threads
+started by the controller plugin (NOT systemd, NOT cron, NOT a separate
+process — vovak 24.10 06:21: "это внутренний thread самого гермес"). The pump
+drain runs via ``loop.run_cycle`` directly in the scheduler thread, which also
+keeps the worker pgid registry (adopt open runs from state.db, reap on death);
+the deterministic watchdog (pump staleness, machine-park repair) ticks on its
+OWN thread with its own DB connection, so a drain wedged inside run_cycle is
+still observed. Template alerts deduped in state.db. No LLM composes status
+text anywhere in this path.
 
 Interval table (monotonic clock, re-anchored after any late tick):
   pump      5 min — drain every workdir that has ready/running tasks
@@ -65,12 +66,12 @@ _ownership_lock = threading.Lock()
 _ownership_fd: int | None = None
 
 
-def _ownership_path() -> "os.PathLike[str]":
+def _ownership_path() -> os.PathLike[str]:
     from hermes_constants import get_hermes_home
     return get_hermes_home() / "run" / "controller-ticker.lock"
 
 
-def _gates_file_path() -> "os.PathLike[str]":
+def _gates_file_path() -> os.PathLike[str]:
     """The gate snapshot file the residual cron tick and gate tooling read
     (external contract kept fresh by the in-thread ticker during the soak)."""
     from hermes_constants import get_hermes_home
@@ -126,9 +127,9 @@ def _release_ownership() -> None:
 
 
 class Ticker:
-    """One scheduler: pump drain + watchdog, on a monotonic-ish (wall-clock,
-    re-anchored) cadence, single-threaded so its DB use needs no locking of
-    its own."""
+    """Pump drain in this thread, watchdog on its OWN daemon thread with its own
+    DB connection — a pump wedged inside ``loop.run_cycle`` never regains the
+    thread, so a watchdog sharing it could not see the silence (audit 28.10)."""
 
     def __init__(self, *, intervals: dict | None = None, alert_target: str = "",
                  deliver_fn=None, now_fn=time.time, worker_model: str | None = None,
@@ -147,6 +148,7 @@ class Ticker:
         self._epochs: dict[str, tuple] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._watchdog_thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
     # -- lifecycle -----------------------------------------------------------
@@ -165,8 +167,9 @@ class Ticker:
 
     def stop(self, timeout_s: float = 10.0) -> None:
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout_s)
+        for th in (self._thread, self._watchdog_thread):
+            if th is not None:
+                th.join(timeout_s)
 
     def _run(self) -> None:
         owned = _acquire_ownership()
@@ -177,31 +180,52 @@ class Ticker:
         conn = model.connect()
         self._heartbeat(conn, "ticker-start",
                         {"pid": os.getpid(), "intervals": self.intervals})
+        self._start_watchdog()
         try:
             self._adopt_workers(conn)
             self._schedule(conn)
         finally:
+            self._stop.set()
             self._heartbeat(conn, "ticker-stop", {"pid": os.getpid()})
             conn.close()
             _release_ownership()
 
+    def _start_watchdog(self) -> None:
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_run, name="controller-ticker-watchdog",
+            daemon=True)
+        self._watchdog_thread.start()
+
+    def _watchdog_run(self) -> None:
+        """Watchdog cadence on its own thread + connection: the pump tick can
+        wedge in run_cycle and never return; this thread still ticks, still
+        sees the aging 'pump' heartbeat and alerts."""
+        conn = model.connect()
+        try:
+            next_tick = time.monotonic() + self.intervals["watchdog"]
+            while not self._stop.is_set():
+                delay = next_tick - time.monotonic()
+                if delay > 0:
+                    self._stop.wait(delay)
+                if self._stop.is_set():
+                    break
+                self._guard("watchdog", conn, self.run_watchdog)
+                next_tick = (max(next_tick, time.monotonic())
+                             + self.intervals["watchdog"])
+        finally:
+            conn.close()
+
     def _schedule(self, conn) -> None:
-        """The tick loop: first pump tick immediately, then the interval table,
-        re-anchored after any late tick (a slow drain never collapses the
-        cadence into a busy loop)."""
+        """The pump tick: the interval table, re-anchored after any late tick
+        (a slow drain never collapses the cadence into a busy loop)."""
         now = self._now()
         next_pump = now
-        next_watch = now + self.intervals["watchdog"]
         while not self._stop.is_set():
             now = self._now()
-            if now >= next_watch:
-                self._guard("watchdog", conn, self.run_watchdog)
-                next_watch = max(next_watch, self._now()) + self.intervals["watchdog"]
             if now >= next_pump:
                 self._guard("pump", conn, self.run_pump)
                 next_pump = max(next_pump, self._now()) + self.intervals["pump"]
-            target = min(next_watch, next_pump)
-            self._stop.wait(max(0.0, target - self._now()))
+            self._stop.wait(max(0.0, next_pump - self._now()))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
@@ -209,7 +233,7 @@ class Ticker:
         incident, in-thread edition)."""
         try:
             fn(conn)
-        except Exception as exc:  # noqa: BLE001 - the loop MUST survive any tick
+        except Exception as exc:  # the loop MUST survive any tick
             self._tick_error(conn, kind, exc)
 
     def _tick_error(self, conn, kind: str, exc: Exception) -> None:
@@ -335,9 +359,9 @@ class Ticker:
 
     def run_watchdog(self, conn) -> None:
         # 1) pump staleness (watchdog rule 2): no 'pump' heartbeat within the
-        #    freshness window => the tick went quiet. This also covers a
-        #    wedged in-thread drain: the watchdog tick is independent of the
-        #    pump tick inside this same thread.
+        #    freshness window => the tick went quiet. The watchdog runs on its
+        #    own thread, so a drain wedged inside run_cycle (which never reaches
+        #    _schedule again) is still caught here by heartbeat age.
         last = conn.execute("SELECT MAX(ts) m FROM ctl_ticker_heartbeat"
                             " WHERE kind='pump'").fetchone()["m"]
         if last is not None:

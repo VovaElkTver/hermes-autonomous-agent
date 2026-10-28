@@ -59,6 +59,28 @@ def _kill_tree(proc) -> None:
         pass
 
 
+def kill_worker_tree(pid: int, pgid: int | None = None) -> bool:
+    """SIGKILL a worker by pid/pgid (the pump_lock takeover's reach: the
+    holder's Popen handle lives in ANOTHER process, only numbers survive).
+    True when at least one signal landed."""
+    if pgid is None:
+        try:
+            pgid = os.getpgid(pid)
+        except (OSError, AttributeError):
+            pgid = None
+    if pgid is not None and pgid != 0:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+            return True
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+
+
 def _preempt_signal(conn, *, run_id: str, step_id: str | None) -> bool:
     """True when an out-of-band preempt landed on this run/step since dispatch:
     the scheduler either flagged the run row ``interrupt_requested`` (the durable
@@ -81,7 +103,8 @@ def _preempt_signal(conn, *, run_id: str, step_id: str | None) -> bool:
 
 
 def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
-                  timeout_s: float | None, poll_s: float, grace_s: float = 60.0):
+                  timeout_s: float | None, poll_s: float, grace_s: float = 60.0,
+                  on_poll=None):
     """Bounded wait for the worker with out-of-band preempt polling.
 
     ``timeout_s=None`` removes the wall-clock bound entirely: the wait is only
@@ -94,6 +117,8 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
     calls, so the final call still returns everything the worker printed."""
     deadline = None if timeout_s is None else time.monotonic() + timeout_s + grace_s
     while True:
+        if on_poll is not None:
+            on_poll()
         remaining = None if deadline is None else deadline - time.monotonic()
         if remaining is not None and remaining <= 0:
             raise subprocess.TimeoutExpired(getattr(proc, "args", ""), timeout_s or 0)
@@ -112,7 +137,8 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
 def make_worker(conn, *, timeout_s: float | None = None,
                 hermes_bin: str | None = None, extra_env: dict | None = None,
                 preempt_poll_s: float = 2.0, grace_s: float = 60.0,
-                model_id: str | None = None, provider: str | None = None):
+                model_id: str | None = None, provider: str | None = None,
+                on_poll=None):
     # model_id/provider (config: controller.worker_model / worker_provider) route
     # background steps to a dedicated endpoint (e.g. an idle GPU) so queue work
     # never competes with the interactive model. Unset -> inherit the default,
@@ -152,6 +178,15 @@ def make_worker(conn, *, timeout_s: float | None = None,
                 cwd=task["workdir"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", env=env,
                 **spawn_kwargs)
+            from controller import model
+            try:
+                pgid = os.getpgid(proc.pid)
+            except (OSError, AttributeError):
+                pgid = None
+            try:
+                model.record_run_process(conn, run["run_id"], proc.pid, pgid)
+            except sqlite3.Error as exc:  # locked writer: adoption/takeover lose the number, the drain loses nothing
+                logger.warning("controller worker: run %s pid record failed: %s", run["run_id"], exc)
             try:
                 # Bounded wait with preempt polling: communicate() may be re-entered on
                 # timeout (CPython keeps partial pipe data in internal buffers and the
@@ -162,7 +197,7 @@ def make_worker(conn, *, timeout_s: float | None = None,
                 out, err, preempted = _await_worker(
                     proc, conn=conn, run_id=run["run_id"],
                     step_id=step.get("step_id"), timeout_s=timeout_s,
-                    poll_s=preempt_poll_s, grace_s=grace_s)
+                    poll_s=preempt_poll_s, grace_s=grace_s, on_poll=on_poll)
                 returncode = proc.returncode
             except subprocess.TimeoutExpired:
                 # Budget (explicitly configured) exhausted: take the SAME graceful

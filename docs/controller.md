@@ -198,9 +198,12 @@ $ todo list --status open
 
 ## Ticker — резидентный тик-цикл автономии (controller.ticker)
 
-Нить внутри процесса gateway: плагин controller при `register()` поднимает
-daemon-thread (`ticker.start_default()`); это НЕ systemd, НЕ cron и НЕ
-отдельный процесс. Таблица интервалов — на monotonic clock: pump 5 минут
+Нити внутри процесса gateway: плагин controller при `register()` поднимает
+daemon-треды (`ticker.start_default()`) — планировщик pump и НЕЗАВИСИМЫЙ
+watchdog-тред со своим sqlite-подключением (залипший в run_cycle pump не
+отдаёт управление планировщику; слепой к нему со-тредовой наблюдатель —
+блоккер аудита 28.10); это НЕ systemd, НЕ cron и НЕ отдельный процесс.
+Таблица интервалов — на monotonic clock: pump 5 минут
 (первый тик сразу), watchdog 30 минут; якоря переустанавливаются как
 `max(next_anchor, now) + interval` — запоздавший тик не схлопывает каденцию
 в busy-loop. Эпоха прав перепроверяется на каждом тике
@@ -222,8 +225,9 @@ Worker pgid-реестр — состояние нити: при старте о
 освобождается, событие `worker-reaped`. Восстановление после рестарта
 gateway — то же принятие из БД (`reconcile.recover` остаётся входом плагина).
 
-Watchdog — детерминированный код (перенос правил watchdog-cron
-df527e45e5e2): протухший pump-heartbeat (>25 мин) → «pump замолчал»;
+Watchdog — детерминированный код на своём треде (перенос правил watchdog-cron
+df527e45e5e2): протухший pump-heartbeat (>25 мин) → «pump замолчал» —
+детектируется даже когда pump-поток не возвращается из run_cycle;
 machine-park дольше 30 минут на основании `verify:` без вопросов о revise со
 всеми шагами done и passing-review → возврат задачи в ready. Человеческие
 гейты (`needs_human` не по `verify:`) детерминика не трогает. Gate-digest

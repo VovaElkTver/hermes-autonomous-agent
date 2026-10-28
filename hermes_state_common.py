@@ -838,6 +838,7 @@ CREATE TABLE IF NOT EXISTS ctl_run (
   attempt INTEGER NOT NULL DEFAULT 1, worker_id TEXT, contract_version INTEGER NOT NULL,
   execution_epoch INTEGER NOT NULL, input_artifacts TEXT NOT NULL DEFAULT '[]',
   authority TEXT NOT NULL DEFAULT '[]', run_status TEXT NOT NULL DEFAULT 'starting',
+  worker_pid INTEGER, worker_pgid INTEGER,
   started_at REAL, ended_at REAL
 );
 CREATE TABLE IF NOT EXISTS ctl_artifact_revision (
@@ -879,6 +880,21 @@ CREATE TABLE IF NOT EXISTS ctl_todo (
 CREATE INDEX IF NOT EXISTS idx_ctl_run_task_status ON ctl_run(task_id, run_status);
 CREATE INDEX IF NOT EXISTS idx_ctl_event_task ON ctl_event(task_id, ts);
 CREATE INDEX IF NOT EXISTS idx_ctl_todo_status ON ctl_todo(status, owner);
+-- Ticker liveness rows (controller/ticker.py): insert-only heartbeats plus the
+-- single owner row (kind='owner', payload {pid, boot_token, ts}) — the partial
+-- unique index makes the owner claim a one-row CAS target.
+CREATE TABLE IF NOT EXISTS ctl_ticker_heartbeat (
+  ts REAL NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ctl_ticker_owner_idx
+  ON ctl_ticker_heartbeat(kind) WHERE kind='owner';
+CREATE INDEX IF NOT EXISTS idx_ctl_ticker_hb_kind_ts ON ctl_ticker_heartbeat(kind, ts);
+-- Dedup state for template alerts (controller/alerts.py); count drives the
+-- growing re-alert backoff for a persisting (same-digest) condition.
+CREATE TABLE IF NOT EXISTS ctl_alert_state (
+  alert_key TEXT PRIMARY KEY, digest TEXT NOT NULL, last_ts REAL NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0
+);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).
