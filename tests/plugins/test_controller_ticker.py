@@ -418,3 +418,30 @@ def test_stop_locked_idempotent_restartable(db_connect):
     assert t._thread.is_alive()
     t.stop()
     assert not t.alive()
+
+def test_watchdog_connect_failure_is_loud_not_silent(db_connect, monkeypatch, caplog):
+    """Re-check finding 2.1: a model.connect() failure at watchdog startup
+    must not be a silent thread death (24.10 in miniature): the thread logs
+    the failure loudly and exits clean; the pump thread is unaffected."""
+    import logging
+    from controller import model, ticker
+
+    t = ticker.Ticker(intervals={"pump": 3600, "watchdog": 0.05},
+                      deliver_fn=lambda s: None, gates_path=None)
+    calls = {"n": 0}
+    real = model.connect
+
+    def flaky(db_path=None):
+        calls["n"] += 1
+        if calls["n"] == 1:  # the watchdog's own connect is the first one here
+            raise sqlite3.OperationalError("database is locked")
+        return real(db_path)
+
+    monkeypatch.setattr(model, "connect", flaky)
+    with caplog.at_level(logging.ERROR):
+        t._start_watchdog()
+        t._watchdog_thread.join(5)
+    assert not t._watchdog_thread.is_alive(), "watchdog thread hung, not exited"
+    assert any("watchdog thread cannot connect" in r.getMessage()
+               for r in caplog.records), "silent watchdog death"
+    t.stop()

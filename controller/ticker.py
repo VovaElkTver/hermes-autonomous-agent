@@ -302,7 +302,12 @@ class Ticker:
         """Watchdog cadence on its own thread + connection: the pump tick can
         wedge in run_cycle and never return; this thread still ticks, still
         sees the aging 'pump' heartbeat and alerts. Cadence is monotonic."""
-        conn = model.connect()
+        try:  # a connect failure must be LOUD: silent watchdog death is 24.10 in miniature
+            conn = model.connect()
+        except Exception as exc:
+            self._isolated_heartbeat("watchdog-fatal", {"error": str(exc)[:200]})
+            logger.error("controller ticker: watchdog thread cannot connect: %s", exc)
+            return
         try:
             next_tick = self._mono() + self.intervals["watchdog"]
             while not self._stop.is_set():
