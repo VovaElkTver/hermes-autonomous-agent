@@ -244,10 +244,12 @@ class Ticker:
             conn.close()
 
     def _schedule(self, conn) -> None:
-        """The pump tick: the interval table, re-anchored after any late tick
-        (a slow drain never collapses the cadence into a busy loop)."""
+        """The pump tick: first drain half an interval after boot (an instant
+        full drain storms workers into the gateway warm-up — audit 28.10),
+        then the interval table, re-anchored after any late tick (a slow drain
+        never collapses the cadence into a busy loop)."""
         now = self._now()
-        next_pump = now
+        next_pump = now + self.intervals["pump"] / 2
         while not self._stop.is_set():
             now = self._now()
             if now >= next_pump:

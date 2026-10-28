@@ -169,3 +169,27 @@ def test_heartbeat_retries_then_skips_without_raising(caplog):
     assert not permanent.committed
     assert permanent.attempts == ticker.HB_RETRIES
     assert "skipped" in caplog.text
+
+
+def test_first_pump_tick_waits_half_an_interval(db_connect, monkeypatch):
+    """Item 6: the boot tick must not storm a full drain into the gateway
+    warm-up — first pump tick lands at interval/2, then the full cadence."""
+    from controller import ticker
+
+    start = time.monotonic()
+    first = []
+    t = ticker.Ticker(intervals={"pump": 0.6, "watchdog": 3600}, gates_path=None)
+
+    def fake_pump(conn):
+        if not first:
+            first.append(time.monotonic() - start)
+
+    monkeypatch.setattr(t, "run_pump", fake_pump)
+    t.start()
+    try:
+        time.sleep(0.15)
+        assert first == [], "drain started immediately at boot"
+        assert _wait_for(lambda: bool(first), timeout=3), "pump never ticked"
+        assert first[0] >= 0.25  # interval/2 = 0.3 minus jitter margin
+    finally:
+        t.stop()
