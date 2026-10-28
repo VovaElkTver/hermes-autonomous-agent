@@ -210,13 +210,15 @@ class Ticker:
     def __init__(self, *, intervals: dict | None = None, alert_target: str = "",
                  deliver_fn=None, now_fn=time.time, worker_model: str | None = None,
                  worker_provider: str | None = None, max_steps: int = 50,
-                 gates_path: str | None = None, boot_token: str | None = None):
+                 gates_path: str | None = None, boot_token: str | None = None,
+                 mono_fn=time.monotonic):
         self.boot_token = boot_token or model.new_id("boot")
         self._owner_payload: str | None = None  # owner row content after claim
         self.intervals = {**INTERVALS, **(intervals or {})}
         self.alert_target = alert_target
         self.deliver_fn = deliver_fn
-        self._now = now_fn
+        self._now = now_fn      # wall clock: DB ts fields and ages vs stored ts
+        self._mono = mono_fn    # cadence only: immune to NTP steps (audit 28.10)
         self.worker_model = worker_model
         self.worker_provider = worker_provider
         self.max_steps = max_steps
@@ -291,36 +293,35 @@ class Ticker:
     def _watchdog_run(self) -> None:
         """Watchdog cadence on its own thread + connection: the pump tick can
         wedge in run_cycle and never return; this thread still ticks, still
-        sees the aging 'pump' heartbeat and alerts."""
+        sees the aging 'pump' heartbeat and alerts. Cadence is monotonic."""
         conn = model.connect()
         try:
-            next_tick = time.monotonic() + self.intervals["watchdog"]
+            next_tick = self._mono() + self.intervals["watchdog"]
             while not self._stop.is_set():
-                delay = next_tick - time.monotonic()
+                delay = next_tick - self._mono()
                 if delay > 0:
                     self._stop.wait(delay)
                 if self._stop.is_set():
                     break
                 self._guard("watchdog", conn, self.run_watchdog)
-                next_tick = (max(next_tick, time.monotonic())
-                             + self.intervals["watchdog"])
+                next_tick = max(next_tick, self._mono()) + self.intervals["watchdog"]
         finally:
             conn.close()
 
     def _schedule(self, conn) -> None:
-        """The pump tick: first drain half an interval after boot (an instant
-        full drain storms workers into the gateway warm-up — audit 28.10),
-        then the interval table, re-anchored after any late tick (a slow drain
-        never collapses the cadence into a busy loop)."""
-        now = self._now()
-        next_pump = now + self.intervals["pump"] / 2
+        """The pump tick, on the MONOTONIC clock (audit 28.10: an NTP step
+        must never skip or boost a tick; wall-clock time lives only in the DB
+        ts columns). First drain half an interval after boot (an instant full
+        drain storms workers into the gateway warm-up), then the interval
+        table, re-anchored after any late tick (a slow drain never collapses
+        the cadence into a busy loop)."""
+        next_pump = self._mono() + self.intervals["pump"] / 2
         while not self._stop.is_set():
-            now = self._now()
-            if now >= next_pump:
+            if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
-                next_pump = max(next_pump, self._now()) + self.intervals["pump"]
-            self._stop.wait(max(0.0, next_pump - self._now()))
+                next_pump = max(next_pump, self._mono()) + self.intervals["pump"]
+            self._stop.wait(max(0.0, next_pump - self._mono()))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error

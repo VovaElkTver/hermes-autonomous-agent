@@ -369,3 +369,28 @@ def test_gates_file_written_atomically_reader_degrades(tmp_path, monkeypatch, ca
         assert ticker.read_gates_file(str(path)) is None
     assert "unreadable" in caplog.text
     assert ticker.read_gates_file(str(tmp_path / "gone.json")) is None
+
+
+def test_schedule_cadence_survives_frozen_wall_clock(db_connect):
+    """Item 11: the cadence runs on the monotonic clock — an NTP step or a
+    frozen wall clock can neither skip nor boost ticks — while the DB ts
+    columns keep real wall-clock time."""
+    from controller import ticker
+    t = ticker.Ticker(intervals={"pump": 0.05, "watchdog": 3600},
+                      now_fn=lambda: 0.0, gates_path=None)
+    calls = []
+    t.run_pump = lambda conn: (calls.append(1),
+                               t._heartbeat(conn, "pump", "{}"))
+    t.start()
+    try:
+        deadline = time.monotonic() + 3.0
+        while len(calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(calls) >= 2  # a wall-clock schedule sticks at tick one
+    finally:
+        t.stop()
+    conn = db_connect()
+    ts = conn.execute("SELECT MAX(ts) m FROM ctl_ticker_heartbeat"
+                      " WHERE kind='pump'").fetchone()["m"]
+    assert ts is not None and ts > 1_000_000  # heartbeat ts = wall clock, not 0.0
+    conn.close()
