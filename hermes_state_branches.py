@@ -9,6 +9,7 @@ methods here are additive; sessions without branches never touch this table.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid
@@ -22,19 +23,44 @@ class SessionBranchMixin:
     def create_branch_row(
         self, branch_id: str, parent_session_id: str, child_session_id: str,
         base_message_uid: str | None, created_by_turn: str | None = None,
+        title: str | None = None,
     ) -> None:
-        """Register a new active branch. Idempotent per branch_id."""
+        """Register a new active branch. Idempotent per branch_id.
+
+        ``title`` is stored immutably in ``meta_json`` — the console name a
+        fork speaks with (``⎇ <title>:``).  The session title is display-only
+        and gets re-summarized by the auto-titler, so it cannot be the label.
+        """
+        meta = json.dumps({"title": title}) if title else None
         self._execute_write(
             lambda conn: conn.execute(
                 """INSERT OR IGNORE INTO session_branches (
                        branch_id, parent_session_id, child_session_id, base_message_uid,
-                       created_at, created_by_turn, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'active')""",
+                       created_at, created_by_turn, status, meta_json)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
                 (branch_id, parent_session_id, child_session_id,
-                 base_message_uid, time.time(), created_by_turn),
+                 base_message_uid, time.time(), created_by_turn, meta),
             ),
             patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S,
         )
+
+    def set_branch_title(self, branch_id: str, title: str) -> None:
+        """Merge ``title`` into the branch's meta_json (idempotent)."""
+        def _do(conn: sqlite3.Connection) -> None:
+            row = conn.execute(
+                "SELECT meta_json FROM session_branches WHERE branch_id = ?",
+                (branch_id,)).fetchone()
+            meta = {}
+            if row and row[0]:
+                try:
+                    meta = json.loads(row[0])
+                except Exception:
+                    meta = {}
+            meta["title"] = title
+            conn.execute(
+                "UPDATE session_branches SET meta_json = ? WHERE branch_id = ?",
+                (json.dumps(meta), branch_id))
+        self._execute_write(_do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 
     @staticmethod
     def new_branch_id() -> str:

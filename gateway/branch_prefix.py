@@ -66,9 +66,21 @@ async def resolve_branch_label(session_db, session_id) -> Optional[str]:
     for sid in lineage:
         branch = await _maybe_await(session_db.get_branch_for_child(sid))
         if branch and branch.get("status") == "active":
-            title = await _maybe_await(
-                session_db.get_session_title(branch.get("child_session_id") or sid))
-            name = (title or "").strip()
+            # Branch name is the immutable meta_json title written at fork
+            # time.  The session title is display-only — the auto-titler
+            # re-summarizes it from the first message, which would rename
+            # the console under the user's feet.
+            name = ""
+            try:
+                import json as _json
+                name = str((_json.loads(branch.get("meta_json") or "{}"))
+                           .get("title") or "").strip()
+            except Exception:
+                name = ""
+            if not name:
+                title = await _maybe_await(
+                    session_db.get_session_title(branch.get("child_session_id") or sid))
+                name = (title or "").strip()
             return name or str(branch.get("branch_id") or "") or MAIN_LABEL
     for sid in lineage:
         if await _maybe_await(session_db.has_active_branches(sid)):

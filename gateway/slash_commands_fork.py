@@ -84,7 +84,8 @@ class GatewayForkCommandsMixin:
 
         branch_id = await self._session_db.new_branch_id()
         await self._session_db.create_branch_row(
-            branch_id, parent_session_id, new_session_id, last_uid)
+            branch_id, parent_session_id, new_session_id, last_uid,
+            title=fork_title)
         with contextlib.suppress(Exception):
             await self._session_db.set_session_title(new_session_id, fork_title)
         if not in_place:

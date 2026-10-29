@@ -33,6 +33,22 @@ def _sessions_with_fork(db: SessionDB, title: str = "side"):
 
 
 @pytest.mark.asyncio
+async def test_fork_name_survives_auto_titler(db):
+    db.ensure_session("parent", source="test", session_key="k-parent")
+    db.append_messages_batch("parent", [dict(role="user", content="seed")])
+    db.ensure_session("child", source="test", session_key="k-parent@b1",
+                      parent_session_id="parent")
+    bid = db.new_branch_id()
+    # /fork stores the console name immutably in the branch meta...
+    db.create_branch_row(bid, "parent", "child", db.get_last_message_uid("parent"),
+                         title="test")
+    # ...while the auto-titler rewrites the SESSION title from the first message
+    db.set_session_title("child", "проверяем линию форк")
+    assert await resolve_branch_label(db, "child") == "test"
+    assert await decorate_response(db, "child", "ok") == "\u2387 test: ok"
+
+
+@pytest.mark.asyncio
 async def test_plain_session_unlabeled(db):
     db.ensure_session("solo", source="test", session_key="k-solo")
     out = await decorate_response(db, "solo", "hello")

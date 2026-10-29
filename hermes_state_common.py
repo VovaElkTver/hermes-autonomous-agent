@@ -764,7 +764,9 @@ CREATE TABLE IF NOT EXISTS session_branches (
     created_by_turn TEXT,
     join_strategy TEXT,
     joined_at REAL,
-    status TEXT NOT NULL DEFAULT 'active'
+    status TEXT NOT NULL DEFAULT 'active',
+    -- immutable branch facts (console name given at /fork time, etc.)
+    meta_json TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_branches_child
     ON session_branches(child_session_id);
