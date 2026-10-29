@@ -1,5 +1,5 @@
 """Process-local callback provenance; private snapshots are revalidated, not grants."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import copy
 from contextvars import ContextVar
 from pathlib import Path
@@ -97,6 +97,25 @@ def carry_callback(event, rewritten):
         bound = bound_var.get()
         if bound is not None and bound[1] is event and rewritten.source is event.source:
             bound_var.set((bound[0], rewritten, *bound[2:]))
+
+
+def rescued_callback(event):
+    """The FIFO orphan rescue admits a PREVIOUSLY staged event while the ambient native_callback is
+    bound to the message whose arrival triggered the swap, so the identity check refuses it with
+    ``authorization_home_without_provenance`` even though the stamp proves its ownership. Re-bind
+    the identity slot for the rescued event iff its source carries exactly this callback's home
+    stamp — the same authenticated connector/home, no forged grant (#29.11 refusals chat=!yzPjOSd)."""
+    bound = _callback.get()
+    if bound is None or bound[1] is event:
+        return nullcontext()
+    stamped = getattr(event.source, '_authorization_profile_home', None)
+    try:
+        same_home = stamped is not None and Path(stamped).resolve() == bound[2]
+    except OSError:
+        same_home = False
+    if not same_home:
+        return nullcontext()
+    return native_callback(bound[0], event, bound[2], bound[3])
 
 
 _PREFIX_PRODUCERS = ('webhook', 'api_server', 'msgraph_webhook')
