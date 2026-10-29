@@ -1247,7 +1247,9 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
                     return True, None  # a /stop or /new came after its command, as it clears the slot
                 # A failed admit stays the authority's answer (refusal notice or turn error), never a
                 # pending legacy turn: that would run unadmitted, outside the FIFO's order.
-                return True, await admit_message(authority, event)
+                from gateway.session_ingress_context import rescued_callback
+                with rescued_callback(event):  # an orphan-rescue swap admits the staged event, not
+                    return True, await admit_message(authority, event)  # the callback's own (29.10)
         if (authority is None and not is_internal and not event.get_command()
                 and getattr(self, 'session_authority', None) is not None):
             # Scoped to a home this process does not serve: never fall back to the launch ledger.
