@@ -179,3 +179,24 @@ Every former god file is a **facade** (public entry points + the names other pac
 
 Long-form background: `website/docs/developer-guide/`. Workflow rules (PR/issue/review/salvage
 process) live in the `hermes-agent-dev` skill, not here.
+
+## hermes autonomous (elk) — operating rules (Vl 27.10–29.10)
+
+- **Architecture stance.** hermes' architecture is crooked; we are on the long path of fixing it,
+  not making candy out of manure. Existing crooked wiring is a replacement candidate, and finding
+  it is not an argument for keeping it.
+- **Evidence.** The only reliable record of what a human actually sent is the Matrix message log.
+  hermes' own journals and databases are circumstantial evidence; verify ingress/loss claims against
+  the Matrix log before believing (or refuting) them.
+- **Time and events.** The ticker is Hermes' internal clock (1 Hz); pump ticks, watchdogs and
+  "in a minute" are tick counters only. Deferred work is an event, not a timer: home = `hermes_events`
+  (wake seam floor-1: a due event becomes a session wake turn through the FIFO). Executing an event
+  consumes it — single execution is the processor's own guarantee; do not hang per-tick watchdog
+  scripts over predicates. `cron` is banned as a scheduler of agent steps.
+- **write-dialog (fork model).** A branch REPORTS ("I consider saving to X necessary") — it never
+  asks permission and never holds a pending question as state. Execution happens only on a human
+  decision (record / forget / rephrase), by @vovak or a human at the CLI; the right to write never
+  travels into the branch.
+- **ToDo.** `ToDo.md` at the repo root: work proceeds in stages named stageNNN in order; a defect
+  found mid-stage is appended to ToDo.md and reorders measures as needed.
+
