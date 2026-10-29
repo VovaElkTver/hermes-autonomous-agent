@@ -42,7 +42,7 @@ async def test_plain_session_unlabeled(db):
 @pytest.mark.asyncio
 async def test_main_prefixed_only_with_active_forks(db):
     bid = _sessions_with_fork(db)
-    assert await decorate_response(db, "parent", "hello") == f"\u23e7 {MAIN_LABEL}: hello"
+    assert await decorate_response(db, "parent", "hello") == f"\u2387 {MAIN_LABEL}: hello"
     db.set_branch_status(bid, "joined")
     assert await decorate_response(db, "parent", "hello") == "hello"
 
@@ -51,7 +51,7 @@ async def test_main_prefixed_only_with_active_forks(db):
 async def test_fork_child_carries_fork_name(db):
     _sessions_with_fork(db, title="audit")
     out = await decorate_response(db, "child", "result text")
-    assert out == "\u23e7 audit: result text"
+    assert out == "\u2387 audit: result text"
 
 
 @pytest.mark.asyncio
@@ -63,8 +63,8 @@ async def test_nested_child_speaks_own_name_not_main(db):
     db.create_branch_row(db.new_branch_id(), "child", "grand", base)
     db.set_session_title("grand", "deep")
     # audit itself has an active fork: still speaks as "audit", never "main"
-    assert await decorate_response(db, "child", "x") == "\u23e7 audit: x"
-    assert await decorate_response(db, "grand", "y") == "\u23e7 deep: y"
+    assert await decorate_response(db, "child", "x") == "\u2387 audit: x"
+    assert await decorate_response(db, "grand", "y") == "\u2387 deep: y"
     assert bid  # keep linter honest
 
 
@@ -122,11 +122,11 @@ async def test_labels_survive_compression_rotation(db):
                       parent_session_id="parent")
     db.ensure_session("child-v2", source="test", session_key="k-parent@b1",
                       parent_session_id="child")
-    assert await decorate_response(db, "parent-v2", "hello") == "\u23e7 main: hello"
+    assert await decorate_response(db, "parent-v2", "hello") == "\u2387 main: hello"
     # child-side rotation: name comes from the BRANCH row's child title, so it
     # holds even when the rotated row itself never had a title
     assert await resolve_branch_label(db, "child-v2") == "audit"
     # rotation two hops up still resolves
     db.ensure_session("parent-v3", source="test", session_key="k-parent",
                       parent_session_id="parent-v2")
-    assert await decorate_response(db, "parent-v3", "x") == "\u23e7 main: x"
+    assert await decorate_response(db, "parent-v3", "x") == "\u2387 main: x"

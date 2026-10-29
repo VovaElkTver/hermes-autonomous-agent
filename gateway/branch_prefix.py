@@ -16,7 +16,7 @@ from __future__ import annotations
 import inspect
 from typing import Optional
 
-BRANCH_GLYPH = "\u23e7"  # ⎇ — git's branch glyph
+BRANCH_GLYPH = "\u2387"  # ⎇ ALT KEY SYMBOL — the multi-console branch marker (not ⏧ U+23E7)  # ⎇ — git's branch glyph
 MAIN_LABEL = "main"
 
 
