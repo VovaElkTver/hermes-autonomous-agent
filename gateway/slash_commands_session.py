@@ -1009,7 +1009,8 @@ class GatewaySessionCommandsMixin:
         titled = [s for s in sessions if s.get("title")][:10]
         return [s for s in titled if await self._resume_row_visible(source, s, allow_all)]
 
-    async def _resolve_resume_target(self, source, session_key: str, name: str, allow_all: bool):
+    async def _resolve_resume_target(self, source, session_key: str, name: str, allow_all: bool,
+                                     current_session_id: str | None = None):
         """``(target_id, name)`` for a numbered choice, session id or title; else the error reply."""
         if name.isdigit():
             try:
@@ -1025,6 +1026,14 @@ class GatewaySessionCommandsMixin:
         else:  # session id first, then title
             session = await self._session_db.get_session(name)
             target_id = session["id"] if session else await self._session_db.resolve_session_by_title(name)
+        if not target_id and current_session_id and name:
+            # Multi-console names: /resume main (root console) or an active
+            # branch name — sessions carry no title, so the plain lookup misses.
+            from gateway.branch_prefix import resolve_console_session
+            try:
+                target_id = await resolve_console_session(self._session_db, current_session_id, name)
+            except Exception as e:
+                logger.debug("console-name resume failed for %r: %s", name, e)
         if not target_id:
             return t("gateway.resume.not_found", name=name)
         # Follow compression continuations to the live transcript (matches CLI /resume).
@@ -1072,7 +1081,13 @@ class GatewaySessionCommandsMixin:
                 logger.debug("Failed to list titled sessions: %s", e)
                 return t("gateway.resume.list_failed", error=e)
 
-        resolved = await self._resolve_resume_target(source, session_key, name, allow_all)
+        try:
+            _cur = await self.async_session_store.get_or_create_session(source)
+            _cur_sid = _cur.session_id if _cur else None
+        except Exception:
+            _cur_sid = None
+        resolved = await self._resolve_resume_target(source, session_key, name, allow_all,
+                                                     current_session_id=_cur_sid)
         if isinstance(resolved, str):
             return resolved
         target_id, name = resolved

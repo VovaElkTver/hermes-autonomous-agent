@@ -130,3 +130,33 @@ async def test_labels_survive_compression_rotation(db):
     db.ensure_session("parent-v3", source="test", session_key="k-parent",
                       parent_session_id="parent-v2")
     assert await decorate_response(db, "parent-v3", "x") == "\u2387 main: x"
+
+
+@pytest.mark.asyncio
+async def test_resume_main_resolves_root_console(db):
+    _sessions_with_fork(db)
+    from gateway.branch_prefix import resolve_console_session
+    assert await resolve_console_session(db, "child", MAIN_LABEL) == "parent"
+
+
+@pytest.mark.asyncio
+async def test_resume_main_survives_compression_rotation(db):
+    _sessions_with_fork(db)
+    db.ensure_session("rotated", source="test", session_key="k-parent@b1",
+                      parent_session_id="child")
+    from gateway.branch_prefix import resolve_console_session
+    assert await resolve_console_session(db, "rotated", MAIN_LABEL) == "parent"
+
+
+@pytest.mark.asyncio
+async def test_resume_by_branch_name(db):
+    _sessions_with_fork(db, title="side")
+    from gateway.branch_prefix import resolve_console_session
+    assert await resolve_console_session(db, "parent", "side") == "child"
+
+
+@pytest.mark.asyncio
+async def test_resume_unknown_console_name(db):
+    _sessions_with_fork(db)
+    from gateway.branch_prefix import resolve_console_session
+    assert await resolve_console_session(db, "parent", "nope") is None

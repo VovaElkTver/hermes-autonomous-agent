@@ -76,6 +76,37 @@ async def resolve_branch_label(session_db, session_id) -> Optional[str]:
     return None
 
 
+async def resolve_console_session(session_db, current_session_id, name) -> Optional[str]:
+    """Resolve a console *name* to a session id, for /resume in the multi-console model.
+
+    ``main`` → the root of the current lineage (the console every fork hangs off);
+    any other name → an active branch whose child carries that title (or branch id).
+    Returns None when nothing matches — callers fall through to the normal
+    id/title lookup and its not_found reply.
+    """
+    if not session_db or not current_session_id or not name:
+        return None
+    lineage = await _lineage_ids(session_db, current_session_id)
+    if name == MAIN_LABEL:
+        return lineage[-1] if lineage else None
+    for sid in reversed(lineage):
+        try:
+            branches = await _maybe_await(session_db.list_active_branches(sid))
+        except Exception:
+            continue
+        for br in branches or []:
+            child = br.get("child_session_id")
+            title = ""
+            if child:
+                try:
+                    title = (await _maybe_await(session_db.get_session_title(child)) or "").strip()
+                except Exception:
+                    title = ""
+            if title == name or str(br.get("branch_id") or "") == name:
+                return child
+    return None
+
+
 async def decorate_response(session_db, session_id, response: str) -> str:
     """Prefix ``response`` with this session's console label (idempotent)."""
     if not response:
