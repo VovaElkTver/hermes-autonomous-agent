@@ -111,3 +111,22 @@ async def test_unnamed_fork_falls_back_to_branch_id(db):
     db.create_branch_row(bid, "parent", "child", db.get_last_message_uid("parent"))
     # no title set: label = branch id, never empty prefix
     assert await resolve_branch_label(db, "child") == bid
+
+
+@pytest.mark.asyncio
+async def test_labels_survive_compression_rotation(db):
+    """A rotation mints a fresh id; the label must follow the lineage, not
+    die with the bare id (this exact gap silently dropped ⎇ main: live)."""
+    _sessions_with_fork(db, title="audit")
+    db.ensure_session("parent-v2", source="test", session_key="k-parent",
+                      parent_session_id="parent")
+    db.ensure_session("child-v2", source="test", session_key="k-parent@b1",
+                      parent_session_id="child")
+    assert await decorate_response(db, "parent-v2", "hello") == "\u23e7 main: hello"
+    # child-side rotation: name comes from the BRANCH row's child title, so it
+    # holds even when the rotated row itself never had a title
+    assert await resolve_branch_label(db, "child-v2") == "audit"
+    # rotation two hops up still resolves
+    db.ensure_session("parent-v3", source="test", session_key="k-parent",
+                      parent_session_id="parent-v2")
+    assert await decorate_response(db, "parent-v3", "x") == "\u23e7 main: x"
