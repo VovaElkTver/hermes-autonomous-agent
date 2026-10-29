@@ -138,3 +138,12 @@ class TestForkJoinHandlers:
             db.create_branch_row(db.new_branch_id(), parent_entry.session_id, child_id, base_uid)
         reply = await runner._handle_join_command(_make_event("/join"))
         assert "branch" in reply.lower() and "," in reply  # ambiguous listing
+
+
+def test_fork_join_wired_into_idle_dispatch_table():
+    """The upstream sync silently dropped fork/join from ``_IDLE_COMMANDS`` once —
+    the handlers stayed mixed in but ``/fork`` fell through to the agent as plain
+    text. Dispatch-table membership is the regression this pins."""
+    from gateway.run_busy import GatewayBusySessionMixin as GatewayRunBusyMixin
+    assert "fork" in GatewayRunBusyMixin._IDLE_COMMANDS
+    assert "join" in GatewayRunBusyMixin._IDLE_COMMANDS
