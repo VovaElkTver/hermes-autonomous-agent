@@ -188,6 +188,8 @@ process) live in the `hermes-agent-dev` skill, not here.
 - **Evidence.** The only reliable record of what a human actually sent is the Matrix message log.
   hermes' own journals and databases are circumstantial evidence; verify ingress/loss claims against
   the Matrix log before believing (or refuting) them.
+- **Remote writes.** All git writes (push, PR, merge) go only to VovaElkTver/* (origin).
+  NousResearch/hermes-agent (upstream) is read-only for us: fetch yes, push/PR never. (Vl 29.10)
 - **Time and events.** The ticker is Hermes' internal clock (1 Hz); pump ticks, watchdogs and
   "in a minute" are tick counters only. Deferred work is an event, not a timer: home = `hermes_events`
   (wake seam floor-1: a due event becomes a session wake turn through the FIFO). Executing an event
