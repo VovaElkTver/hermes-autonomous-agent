@@ -123,6 +123,15 @@ class GatewayTurnPersistenceMixin:
         if not _intentional_silence:
             response = _normalize_empty_agent_response(agent_result, response, history_len=len(history))
             response = _sanitize_gateway_final_response(source.platform, response)
+            # Multi-console labels: a fork child speaks as "⎇ <name>:", a session
+            # with live forks speaks as "⎇ main:", plain sessions stay unlabeled.
+            from gateway.branch_prefix import decorate_response
+            try:
+                response = await decorate_response(
+                    getattr(self, "_session_db", None), session_entry.session_id, response)
+            except Exception:
+                logger.debug("branch_prefix: decorate failed for %s",
+                             session_entry.session_id, exc_info=True)
 
         # The agent thread already updated the contextvar; propagate to SessionEntry + _save() only
         # if the binding still points at the session this run was launched against.
