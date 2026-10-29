@@ -12,10 +12,18 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Frames that belong to a thread doing state.db work: the writer's long transaction is
+# always under one of these files when /proc/locks says the holder is THIS process.
+_WRITER_FRAME_MARKERS = (
+    "hermes_state", "sqlite3", "gateway/session", "gateway.session",
+    "session_store", "scheduler_thread", "state_store",
+)
 
 # sqlite/src/os_unix.c: UNIX_SHM_BASE = (22 + SQLITE_SHM_NLOCK) * 4 = 120; WAL lock i sits at BASE + i.
 _SHM_LOCK_NAMES = {
@@ -112,6 +120,30 @@ def state_db_write_lock_holders(db_path) -> list[str]:
     return lines
 
 
+def candidate_writer_threads(exclude_tid=None, max_threads: int = 8) -> list[str]:
+    """Stack tails of this process's threads that are sitting in state.db code.
+
+    When ``/proc/locks`` names THIS pid as the WAL holder, only the thread stacks say which
+    subsystem's write transaction ran past the deadline. Best-effort: a thread parked inside a
+    long C-level ``executescript`` still shows its caller chain under the marker modules.
+    ``exclude_tid`` drops the waiting writer itself (its stack is in the same modules).
+    """
+    import traceback
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out: list[str] = []
+    for tid, frame in sys._current_frames().items():
+        if exclude_tid is not None and tid == exclude_tid:
+            continue
+        stack = traceback.extract_stack(frame)
+        if not stack or not any(
+            any(marker in (f.filename or "") for marker in _WRITER_FRAME_MARKERS) for f in stack
+        ):
+            continue
+        tail = " <- ".join(f"{f.name}@{f.filename.rsplit('/', 1)[-1]}:{f.lineno}" for f in stack[-3:])
+        out.append(f"[{names.get(tid, tid)}] {tail}")
+    return out[:max_threads]
+
+
 def log_write_lock_holders(db_path, patience_s: float) -> None:
     """One WARNING naming the write-lock holders at the moment a writer gave up waiting."""
     holders = state_db_write_lock_holders(db_path)
@@ -119,6 +151,12 @@ def log_write_lock_holders(db_path, patience_s: float) -> None:
         detail = " | ".join(holders)
     else:
         detail = "no write-class lock held at the deadline (the holder released just before it)"
+    if holders and any(f"PID {os.getpid()} " in line for line in holders):
+        # The lock owner is THIS process: /proc/locks stops at the pid, only thread stacks say
+        # which subsystem's write transaction ran past the deadline (27.10 14:29 self-lock storm).
+        candidates = candidate_writer_threads(exclude_tid=threading.get_ident())
+        if candidates:
+            detail += " || same-PID writer candidates: " + " ;; ".join(candidates)
     logger.warning(
         "state.db write lock unavailable for %.0fs (%s): %s", patience_s, Path(db_path).name, detail
     )

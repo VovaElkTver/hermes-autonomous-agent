@@ -7,6 +7,17 @@ and every root-to-area chain at 30k, so it loads whole on 128k+ models: long for
 
 **Never give up on the right solution.**
 
+## Fleet: before touching a live gateway (read first)
+
+Return-to-base protocol for the running fork. An agent never schedules its own gateway
+restart from a live turn (`sleep N && restart` = orphan death — the turn dies with the
+gateway, no witness survives). Deploy = commit on a fleet branch, rollback =
+`switch_release` (zero git inside the emergency loop). Post-boot health is verified by
+whatever survived the restart (`python -m hermes_rescue run-once --report`), never by a
+dead agent's promise. Wedged boot: read `DEPLOY-NOTE.md` here +
+`docs/design/reanimation-protocol.md`, verify MainPID vs `~/.hermes*/gateway.pid`, run
+rescue, report to the owner-room, then remove the note.
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a messaging

@@ -2,8 +2,10 @@
 
 Run: python -m controller.pump_cli [--scope DIR] (default: every workdir that has
 queued tasks). Invoked by the controller plugin after operator sessions (and safe
-to cron). One worker at a time per scope by construction: the loop processes
-ready->running claims serially and the subprocess dies when the queue empties.
+to cron). The drain goes through the SAME ``controller.pump_lock`` as the in-thread
+ticker: a contender against a live holder prints status «held» and exits without
+run_cycle — one worker at a time per scope by construction, the subprocess dies
+when the queue empties.
 
 To-do layer subcommand:
   python -m controller.pump_cli todo add --owner OWNER --text TEXT
@@ -112,7 +114,7 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
 
-    from controller import model
+    from controller import model, pump_lock
     from controller.loop import run_cycle
     from controller.workers import make_review, make_worker
 
@@ -132,19 +134,35 @@ def main(argv=None) -> int:
         scopes = [r["workdir"] for r in conn.execute(
             "SELECT DISTINCT workdir FROM ctl_task"
             " WHERE state IN ('ready','running')")]
+    # Same single-flight gate as the ticker's pump path (audit 28.10): a live
+    # holder means this invocation exits with status «held», never a second
+    # concurrent drain of the same queue.
+    lock_path = str(pump_lock.default_lock_path())
+    lock = pump_lock.acquire(lock_path, conn=conn)
+    if lock["status"] == "held":
+        print(json.dumps({"status": "held", "holder_pid": lock["holder_pid"],
+                          "detail": lock["detail"]}, ensure_ascii=False))
+        conn.close()
+        return 0
     out = {}
-    for scope in scopes:
-        perm = model.get_permission(conn, scope)
-        if not perm["enabled"]:
-            out[scope] = [{"stop": "permission off"}]
-            continue
-        out[scope] = run_cycle(
-            conn, scope=scope, max_steps=a.max_steps,
-            worker_fn=make_worker(
-                conn,
-                model_id=(cfg_ctl.get("worker_model") or None),
-                provider=(cfg_ctl.get("worker_provider") or None)),
-            review_fn=make_review(conn, judge_cfg=judge_cfg))
+    try:
+        for scope in scopes:
+            perm = model.get_permission(conn, scope)
+            if not perm["enabled"]:
+                out[scope] = [{"stop": "permission off"}]
+                pump_lock.heartbeat(lock_path)
+                continue
+            out[scope] = run_cycle(
+                conn, scope=scope, max_steps=a.max_steps,
+                worker_fn=make_worker(
+                    conn,
+                    model_id=(cfg_ctl.get("worker_model") or None),
+                    provider=(cfg_ctl.get("worker_provider") or None),
+                    on_poll=lambda: pump_lock.heartbeat(lock_path)),
+                review_fn=make_review(conn, judge_cfg=judge_cfg))
+            pump_lock.heartbeat(lock_path)
+    finally:
+        pump_lock.release(lock["handle"])
     print(json.dumps(out, ensure_ascii=False, default=str))
     return 0
 

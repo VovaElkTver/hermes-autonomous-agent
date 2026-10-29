@@ -58,12 +58,52 @@ Use any model you want — [Nous Portal](https://portal.nousresearch.com), OpenR
 <tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
 <tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
 <tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Seven terminal backends — local, Docker, SSH, Singularity, Modal, Daytona, and Vercel Sandbox. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
+<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. In Desktop, choose their provider, model, and limits under Settings → Model → Subagents, then Apply the complete route. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
+<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Six built-in terminal backends — local, Docker, SSH, Modal, Daytona, and Vercel Sandbox — plus plugin backends such as Singularity/Apptainer. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
 <tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
 </table>
 
 ---
+
+## Проект hermes autonomous (elk) — описание и правила
+
+**Область проекта:** автономный контур Hermes на нодах флота — managed-autonomy
+controller и pump, durable approvals, dev-контур `@rtx5000` (комната отладки
+`!yzPjsOSdMSfUfZKtVk`), политика записи в память. Это — дом всех текстов этого
+направления.
+
+**Правила ведения (Вл, 27.10):**
+- Требования и приёмы проекта хранятся только здесь, в описании проекта (README/docs
+  этого репо), а не в глобальной памяти экземпляров Hermes.
+- Отдельные spec-артефакты не плодить: новый текст — разделом сюда. Родовые имена
+  (`spec vN`, `plan`, `final`) без префикса проекта на флоте пересекаются.
+
+**Состояние направления (срезы по датам):**
+- **Memory-gate.** 24.10 включён флаг `memory.write_approval=true` на rtx5090-main
+  (foreground writes из Matrix стаджились в `~/.hermes/pending/`, review-команда
+  `!memory pending|approve|reject`). 27.10 ОТКАЧЁН по команде Вл «на стандартный
+  механизм» — writes прямые. Директива 24.10 «правь косяк для всех» значила «починить
+  баг в коде, чтобы было у всех», а не «включить гейт на всех нодах»; гейт на других
+  нодах никогда не стоял. 28.10 неприменённые memory pending-карточки (очередь +
+  архив `cancelled/`, всего 86) отменены командой Вл и удалены без следа
+  (`!memory pending` = 0). В тот же день по той же команде снесены и skills-
+  карточки (pending 32 + cancelled 15) — вся очередь `~/.hermes/pending/`
+  пуста. Причина отмены, названная Вл: датированные срезы-карточки неразличимы для
+  агента (идентификация), датировки склеиваются в «один проект».
+- **Pump/ticker.** `state='running'` открывает pump — шаги идут в headless
+  `hermes chat --oneshot` (PR#63: budget expiry → graceful pause). Новый workdir
+  задачи требует `ctl_autonomy_permission(enabled=1, epoch)` — без строки pump молчит
+  «permission off». Мандат делегации («го субагенты») живёт только в последнем
+  user-turn; при блокировке — pump-очередь (ready + autonomy_permission),
+  execution_epoch из неё же.
+- **Dev-контур @rtx5000.** `hermes-gateway-dev.service` (не enabled),
+  `HERMES_HOME=~/.hermes-dev`, worktree `~/hermes-dev` @17e581e27b, аккаунт @rtx5000,
+  слушает только комнату отладки, require-mention. WSL-патч `pass` в
+  `runtime_ownership.start_writer` в fleet НЕ закатывать как есть — ломает запуск
+  housekeeping-треда; нужен идемпотентный start_writer.
+- **Обновление живого экземпляра.** Запущенный гейтвей может отставать от кода ветки;
+  накат — только по явной команде владельца («обновись» = checkout + gw_cycle), т.к.
+  рестарт трогает живые сессии.
 
 ## Quick Install
 
@@ -149,7 +189,6 @@ hermes config set   # Set individual config values
 hermes config get   # Print individual config values
 hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
 hermes setup        # Run the full setup wizard (configures everything at once)
-hermes claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
 hermes update       # Update to the latest version
 hermes doctor       # Diagnose any issues
 ```
@@ -221,33 +260,34 @@ All documentation lives at **[hermes-agent.nousresearch.com/docs](https://hermes
 
 ---
 
-## Migrating from OpenClaw
+## Migrating from OpenClaw or another agent
 
-If you're coming from OpenClaw, Hermes can automatically import your settings, memories, skills, and API keys.
+If you're coming from OpenClaw, Claude Code, Codex CLI or Cursor, Hermes can import your settings, memories and skills (and, for OpenClaw, API keys when you ask for them).
 
-**During first-time setup:** The setup wizard (`hermes setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
+**During setup:** `hermes setup` asks whether to import from another agent, pre-selects the ones it finds (`~/.openclaw`, `~/.claude`, `~/.codex`, `~/.cursor`), installs the official `agent-importers` plugin and runs the import with a preview first.
 
 **Anytime after install:**
 
 ```bash
-hermes claw migrate              # Interactive migration (full preset)
-hermes claw migrate --dry-run    # Preview what would be migrated
-hermes claw migrate --preset user-data   # Migrate without secrets
-hermes claw migrate --overwrite  # Overwrite existing conflicts
+hermes plugins install agent-importers          # once per profile
+hermes import-agent openclaw                    # interactive migration (full preset)
+hermes import-agent openclaw --dry-run          # preview what would be migrated
+hermes import-agent openclaw --migrate-secrets  # also bring allowlisted API keys
+hermes import-agent claude-code                 # or codex / cursor
 ```
 
-What gets imported:
+What gets imported from OpenClaw:
 
 - **SOUL.md** — persona file
 - **Memories** — MEMORY.md and USER.md entries
 - **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
 - **Command allowlist** — approval patterns
 - **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
+- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs), only with `--migrate-secrets`
 - **TTS assets** — workspace audio files
 - **Workspace instructions** — AGENTS.md (with `--workspace-target`)
 
-See `hermes claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
+`hermes claw migrate` still works as the older spelling. See the [OpenClaw migration guide](https://hermes-agent.nousresearch.com/docs/guides/migrate-from-openclaw) and [Import from Other Agents](https://hermes-agent.nousresearch.com/docs/user-guide/import-from-other-agents).
 
 ---
 

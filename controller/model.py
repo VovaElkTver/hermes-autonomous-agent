@@ -241,6 +241,14 @@ def set_run_status(conn, run_id: str, status: str) -> None:
     conn.commit()
 
 
+def record_run_process(conn, run_id: str, pid: int, pgid: int | None) -> None:
+    """Stamp the spawned worker's pid/pgid on the run row (DB-anchored: the
+    ticker's adopt/reap and pump_lock takeover read it after a restart)."""
+    conn.execute("UPDATE ctl_run SET worker_pid=?, worker_pgid=? WHERE run_id=?",
+                 (pid, pgid, run_id))
+    conn.commit()
+
+
 # ---- budgets (spec §41) ------------------------------------------------------
 
 def add_budget(conn, task_id: str, metric: str, amount: float = 1) -> dict:

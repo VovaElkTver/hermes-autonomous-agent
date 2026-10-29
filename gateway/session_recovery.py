@@ -54,13 +54,8 @@ class SessionRecoveryMixin:
     @staticmethod
     def _profile_from_session_key(session_key: Optional[str]) -> Optional[str]:
         """Extract the profile namespace encoded in a gateway session key."""
-        if not session_key:
-            return None
-        parts = str(session_key).split(":")
-        if len(parts) < 2 or parts[0] != "agent":
-            return None
-        from gateway.session import profile_from_session_key_namespace
-        return profile_from_session_key_namespace(parts[1] or "main")
+        from hermes_state_keys import profile_from_session_key
+        return profile_from_session_key(session_key)
 
     @staticmethod
     def _active_profile_name() -> str:
@@ -168,12 +163,18 @@ class SessionRecoveryMixin:
         raise_on_lookup_error: bool = False) -> Optional[dict[str, Any]]:
         """Query one durable gateway session row. Scoped Slack lookups disable SessionDB's
         platform/chat/user fallback: that tuple has no workspace id and could revive another team's
-        session; the caller performs one explicit exact lookup of the old unscoped key instead."""
+        session; the caller performs one explicit exact lookup of the old unscoped key instead.
+
+        SAFE boot: identity is only the fresh suffixed key. The peer tuple
+        (chat/user/thread) indexes the possibly-poisoned transcript — recovering
+        by it resurrects exactly the history a sterile boot exists to shed."""
+        from agent.safe_mode import is_safe as _boot_is_safe
+        scoped = allow_peer_fallback and not _boot_is_safe()
         return self._peer_row(
             self._db_for_key(session_key), source=source.platform.value, session_key=session_key,
             user_id=source.user_id,
-            chat_id=source.chat_id if allow_peer_fallback else None,
-            chat_type=source.chat_type if allow_peer_fallback else None,
+            chat_id=source.chat_id if scoped else None,
+            chat_type=source.chat_type if scoped else None,
             thread_id=source.thread_id, raise_on_lookup_error=raise_on_lookup_error)
 
     @staticmethod
@@ -305,6 +306,8 @@ class SessionRecoveryMixin:
                 promote(session_id, reason)
             else:
                 db.end_session(session_id, reason)
+            from gateway.session_bot import release_superseded_bot_chat
+            release_superseded_bot_chat(db, self, session_key, session_id)
             # Stop the departed conversation's schedule in its owning profile, even when
             # the in-memory watch still holds a pre-reset session id.
             heartbeat_key = f"heartbeat:{session_id}"
@@ -336,9 +339,11 @@ class SessionRecoveryMixin:
         recorder = getattr(db, "record_gateway_session_peer", None)
         if not callable(recorder):
             return
+        from gateway.session_api import api_storage_source
+        from gateway.session_a2a import storage_source
         from gateway.session_identity import transport_profile_of
         peer = dict(
-            source=source.platform.value, user_id=source.user_id, session_key=session_key,
+            source=storage_source(db, source, session_id, api_storage_source(db, session_id, source.platform.value)), user_id=source.user_id, session_key=session_key,
             chat_id=source.chat_id, chat_type=source.chat_type, thread_id=source.thread_id)
         try:
             recorder(
@@ -412,6 +417,12 @@ class SessionRecoveryMixin:
                     "self-healing peer refresh on the next turn",
                     create_kwargs.get("session_id"), session_key, during, e),
             )
+
+    def _row_settled(self, session_id: str) -> None:
+        """The route transition that published *session_id* returned (its state.db half done or
+        failed): from here a missing or ended row is real again (see ``_is_session_ended_in_db``)."""
+        with self._lock:
+            self._rows_pending.discard(session_id)
 
     @staticmethod
     def _session_create_kwargs(

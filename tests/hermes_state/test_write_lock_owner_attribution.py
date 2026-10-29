@@ -84,3 +84,69 @@ def test_live_writer_in_another_process_is_named_by_pid(tmp_path):
         holder.kill()
         holder.wait()
     assert state_db_write_lock_holders(db) == []
+
+
+def test_self_held_lock_appends_writer_thread_candidates(caplog, tmp_path, monkeypatch):
+    """/proc/locks stops at the pid; when the holder is this process the WARNING must also name
+    the candidate writer threads, and must not list the waiting writer itself."""
+    import logging
+
+    import hermes_state_lockowners as hsl
+
+    seen = {}
+
+    def fake_holders(_db):
+        return [f"PID {os.getpid()} (hermes gateway run) holds WAL write lock on state.db-shm"]
+
+    def fake_candidates(exclude_tid=None, **_kw):
+        seen["exclude_tid"] = exclude_tid
+        return ["[cron-scheduler] _run@scheduler_thread.py:34"]
+
+    monkeypatch.setattr(hsl, "state_db_write_lock_holders", fake_holders)
+    monkeypatch.setattr(hsl, "candidate_writer_threads", fake_candidates)
+    with caplog.at_level(logging.WARNING, logger="hermes_state_lockowners"):
+        hsl.log_write_lock_holders(tmp_path / "state.db", 20)
+    msg = caplog.text
+    assert "same-PID writer candidates: [cron-scheduler]" in msg
+    assert seen["exclude_tid"] == threading_get_ident()
+
+
+def threading_get_ident():
+    import threading
+
+    return threading.get_ident()
+
+
+@pytest.mark.platforms("linux")
+def test_candidate_writer_threads_finds_a_parked_holder_and_excludes_the_caller(tmp_path):
+    """A thread parked inside a state.db-named module under BEGIN IMMEDIATE is listed; passing
+    its ident as exclude_tid drops it again."""
+    import importlib.util
+    import threading
+
+    from hermes_state_lockowners import candidate_writer_threads
+
+    sim = tmp_path / "hermes_state_sim.py"
+    sim.write_text(
+        "import sqlite3\n"
+        "def hold(db, ev):\n"
+        "    conn = sqlite3.connect(db)\n"
+        "    conn.execute('BEGIN IMMEDIATE')\n"
+        "    conn.execute('CREATE TABLE t(x)')\n"
+        "    ev.wait(10)\n"
+    )
+    spec = importlib.util.spec_from_file_location("hermes_state_sim", sim)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    ev = threading.Event()
+    t = threading.Thread(target=mod.hold, args=(str(tmp_path / "x.db"), ev), name="writer-probe")
+    t.start()
+    try:
+        time.sleep(0.3)
+        found = candidate_writer_threads()
+        assert any("writer-probe" in line for line in found), found
+        assert not any("writer-probe" in line for line in candidate_writer_threads(exclude_tid=t.ident))
+    finally:
+        ev.set()
+        t.join(timeout=5)
