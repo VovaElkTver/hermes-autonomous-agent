@@ -199,6 +199,11 @@ def test_layer_declares_contract_at_register():
     matrix_adapter.register(_Ctx())
     assert _Ctx.kwargs.get("owns_session_fn") is matrix_adapter._proves_same_origin
     assert callable(matrix_adapter.MatrixAdapter.owns_session)
+    # stage001 A2/A3: the wording + scope hooks are declared at the same point.
+    assert _Ctx.kwargs.get("resume_text_fn") is matrix_adapter._resume_layer_text
+    assert callable(matrix_adapter.MatrixAdapter.resume_text)
+    assert _Ctx.kwargs.get("describe_scope_fn") is matrix_adapter._matrix_describe_scope
+    assert callable(matrix_adapter.MatrixAdapter.describe_scope)
 
 
 # ---------------------------------------------------------------------------
@@ -308,3 +313,75 @@ async def test_untyped_hook_answer_is_no_answer(tmp_path):
 
     runner._resume_target_allowed = _allowed
     assert await runner._resume_access_denied_reply(ROOM_A, "sid", "x", False, False) is None
+
+
+# ---------------------------------------------------------------------------
+# stage001 A2/A3: listing scoping and platform wording are LAYER-owned too —
+# no Platform.MATRIX branch, no matrix_* texts, no MATRIX_SESSION_SCOPE read
+# lives in the generic /resume, /sessions or /status code.
+# ---------------------------------------------------------------------------
+
+def test_no_platform_branch_in_listing_and_wording_paths():
+    from gateway.slash_commands_session import GatewaySessionCommandsMixin
+    from gateway.slash_commands_status import GatewayStatusCommandsMixin
+    for fn in (GatewaySessionCommandsMixin._resume_row_visible,
+               GatewaySessionCommandsMixin._handle_resume_command,
+               GatewaySessionCommandsMixin._resume_listing_reply,
+               GatewayStatusCommandsMixin._handle_status_command):
+        src = inspect.getsource(fn)
+        assert "Platform.MATRIX" not in src, fn.__name__
+        assert "matrix" not in src.lower(), fn.__name__
+    assert "MATRIX_SESSION_SCOPE" not in inspect.getsource(GatewayStatusCommandsMixin)
+
+
+@pytest.mark.asyncio
+async def test_resume_row_visible_asks_the_layer(tmp_path):
+    """A2: a foreign-room row is hidden through the layer's refusal verdict, a same-room
+    row is visible through True — without any core-side room comparison."""
+    store = _make_store(tmp_path, {})
+    store._record_session_origin("own", ROOM_A)
+    store._record_session_origin("foreign", ROOM_B)
+    runner = _make_guard_runner(store, _matrix_adapter())
+    runner._resume_caller_is_admin = lambda source: False
+    assert await runner._resume_row_visible(ROOM_A, {"id": "own"}, allow_all=True) is True
+    assert await runner._resume_row_visible(ROOM_A, {"id": "foreign"}, allow_all=True) is False
+
+
+@pytest.mark.asyncio
+async def test_resume_texts_come_from_the_layer(tmp_path):
+    """A3: cross-room success wording, the empty-list hint and the --all room label are
+    produced by the Matrix layer through ONE core question (``resume_text``); a layer that
+    stays silent leaves the generic lines untouched."""
+    store = _make_store(tmp_path, {})
+    runner = _make_guard_runner(store, _matrix_adapter())
+    from plugins.platforms.matrix.adapter import _resume_layer_text
+    assert await runner._layer_resume_text(
+        ROOM_A, "cross_room_success", title="T", msg_count=2, room="Room A") == (
+        _resume_layer_text(ROOM_A, "cross_room_success", title="T", msg_count=2, room="Room A"))
+    assert await runner._layer_resume_text(ROOM_A, "list_empty", allow_all=False) == t(
+        "gateway.resume.matrix_no_named_sessions")
+    assert await runner._layer_resume_text(ROOM_A, "list_empty", allow_all=True) is None
+    labeled = await runner._layer_resume_text(ROOM_A, "list_row", title="T",
+                                              allow_all=True, origin=ROOM_B)
+    assert labeled == "T — Room B"
+    assert await runner._layer_resume_text(ROOM_A, "list_row", title="T",
+                                           allow_all=False, origin=ROOM_B) is None
+    # No layer at all → no opinion, generic text path stays.
+    bare = _make_guard_runner(store)
+    with patch("gateway.platform_registry.platform_registry.get", return_value=None):
+        assert await bare._layer_resume_text(ROOM_A, "list_empty", allow_all=False) is None
+
+
+@pytest.mark.asyncio
+async def test_status_scope_block_is_layer_described(tmp_path):
+    """A3: /status prints what the layer returns (room, room id, thread, mode, key
+    fingerprint) and nothing when the layer has no block."""
+    store = _make_store(tmp_path, {})
+    runner = _make_guard_runner(store, _matrix_adapter())
+    lines = await runner._layer_describe_scope(ROOM_A, "agent:main:matrix:dm:!room-a:hs")
+    assert any("!room-a:hs" in line for line in lines)
+    assert any("sha256:" in line for line in lines)
+    assert any("Room A" in line for line in lines)
+    bare = _make_guard_runner(store)
+    with patch("gateway.platform_registry.platform_registry.get", return_value=None):
+        assert await bare._layer_describe_scope(ROOM_A, "k") == []

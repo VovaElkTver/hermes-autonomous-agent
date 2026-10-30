@@ -251,9 +251,14 @@ def _make_runner(current_source: SessionSource, entries: list[SessionEntry]):
     adapter._matrix_session_scope = "room"
     # stage001 п.3: the /resume origin decision is the LAYER's — the fixture must speak with the
     # real Matrix contract, not the mock's truthy auto-attribute (MagicMock verdicts are untyped
-    # and the guard correctly treats them as "no answer").
-    from plugins.platforms.matrix.adapter import _proves_same_origin
+    # and the guard correctly treats them as "no answer"). stage001 A2/A3: same for wording and
+    # the /status scope block — the core asks, the real layer functions answer.
+    from plugins.platforms.matrix.adapter import (_matrix_describe_scope, _proves_same_origin,
+                                                  _resume_layer_text)
     adapter.owns_session.side_effect = lambda *a, **k: _proves_same_origin(*a, **k)
+    adapter.resume_text.side_effect = lambda *a, **k: _resume_layer_text(*a, **k)
+    adapter.describe_scope.side_effect = lambda source, session_key: _matrix_describe_scope(
+        source, session_key, scope=adapter._matrix_session_scope)
     runner.adapters = {Platform.MATRIX: adapter}
     runner.session_store = MagicMock()
     runner.session_store._entries = {entry.session_key: entry for entry in entries}

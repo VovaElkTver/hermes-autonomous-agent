@@ -80,5 +80,16 @@ current_session_id; hook объявлен в register() Matrix-слоя; нет�
 
 - A2 (`_resume_row_visible`) и A3 (Matrix-тексты в generic-коде) — отдельные ряды
   `docs/design/stage001-platform-leaks.md`, к п.3 не относятся и остались как были.
+  ✅ ЗАКРЫТЫ 31.10 (Вл «убрать в ядре зависимость от комнат матрикс»): ряды A2/A3 закрыты тем же
+  слоем-хуков механизмом — общий резолвер `gateway/platform_layers.py::PlatformLayerHooksMixin`
+  (`_layer_hook` → метод живого адаптера → map → `<name>_fn` из `register()`); листинг-видимость
+  (`_resume_row_visible`) спрашивает `owns_session`; платформа-specific тексты `/resume`/`/sessions`
+  идут через `resume_text_fn` (Matrix: `_resume_layer_text`, ключи cross_room_success/list_empty/
+  list_row), блок scope `/status` — через `describe_scope_fn` (Matrix: `_matrix_describe_scope`,
+  `_matrix_session_scope`/env читает сам слой). Из generic-кода удалены `_same_matrix_room`,
+  `_redact_matrix_session_key`, `Platform.MATRIX`-ветки и чтения `MATRIX_SESSION_SCOPE`;
+  в slash-модулях ядра нет ни одного вхождения «matrix» (пин
+  `test_no_platform_branch_in_listing_and_wording_paths`). Поведение для платформ без хуков не
+  изменилось: generic `_resume_target_allowed` / generic-тексты.
 - Live-обкатка п.5 флота: после деплоя ленты комнат должны показать `/resume main` из ветки
   без refusals; натуральное подтверждение — там.

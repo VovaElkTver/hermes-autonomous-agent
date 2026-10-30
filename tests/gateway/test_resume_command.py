@@ -860,48 +860,72 @@ class TestSameOriginChatGroupScoping:
 class TestResumeRowVisibleMatrixAllScoping:
     """Non-admin Matrix `/resume --all` must NOT enumerate every Matrix titled
     session: the cross-room listing short-circuit is admin-only, mirroring the
-    non-Matrix branch. A non-admin `--all` falls back to same-room scoping."""
+    non-Matrix branch. A non-admin `--all` falls back to same-room scoping.
+    Stage001 A2: the room decision is the LAYER's — the core asks ``owns_session``
+    and never compares platform enums."""
 
     @staticmethod
     def _matrix_src(chat_id="!room-a:hs", user_id="@alice:hs"):
         return SessionSource(platform=Platform.MATRIX, chat_id=chat_id,
                              chat_type="group", user_id=user_id)
 
+    @staticmethod
+    def _layer_runner():
+        from plugins.platforms.matrix.adapter import MatrixAdapter
+        runner = _make_runner()
+        runner.adapters = {Platform.MATRIX: object.__new__(MatrixAdapter)}
+        return runner
+
     @pytest.mark.asyncio
     async def test_non_admin_all_does_not_expose_other_room(self):
-        runner = _make_runner()
-        runner._resume_caller_is_admin = lambda src: False
+        runner = self._layer_runner()
+        runner._resume_caller_is_admin = lambda source: False
         # Titled row whose live origin is a DIFFERENT Matrix room.
         other_room = SessionSource(platform=Platform.MATRIX, chat_id="!room-b:hs",
                                    chat_type="group", user_id="@bob:hs")
-        runner._gateway_session_origin_for_id = lambda sid: other_room
+        runner._gateway_session_origin_for_id = lambda session_id: other_room
         row = {"id": "sid_other_room"}
         assert await runner._resume_row_visible(self._matrix_src(), row, allow_all=True) is False
 
+    @pytest.mark.asyncio
+    async def test_same_room_row_is_visible(self):
+        runner = self._layer_runner()
+        runner._resume_caller_is_admin = lambda source: False
+        src = self._matrix_src()
+        runner._gateway_session_origin_for_id = lambda session_id: src
+        assert await runner._resume_row_visible(src, {"id": "sid_same_room"},
+                                                allow_all=True) is True
 
-class TestSameMatrixRoomThreadScoping:
+
+class TestMatrixLayerThreadScoping:
     """Matrix `/resume` (direct and listing) scopes by room AND thread: a live
     session in another thread of the same room is a different session
     (build_session_key appends thread_id), so a caller in thread A must not
     resume/enumerate a target whose origin is in thread B. Non-threaded rooms
-    keep room-level sharing unchanged."""
+    keep room-level sharing unchanged. Stage001 A2: this semantics lives in the
+    Matrix layer's ``owns_session``, not in a core helper."""
 
     @staticmethod
     def _msrc(chat_id="!room-a:hs", user_id="@alice:hs", thread_id=None):
         return SessionSource(platform=Platform.MATRIX, chat_id=chat_id,
                              chat_type="group", user_id=user_id, thread_id=thread_id)
 
+    @staticmethod
+    def _layer():
+        from plugins.platforms.matrix.adapter import _proves_same_origin
+        return _proves_same_origin
+
     def test_same_room_no_thread_still_shared(self):
-        runner = _make_runner()
+        proves = self._layer()
         a = self._msrc(user_id="@alice:hs")
         b = self._msrc(user_id="@bob:hs")
-        assert runner._same_matrix_room(a, b) is True
-
+        assert proves(a, "sid", origin=b, name="x") is True
 
     def test_cross_thread_same_room_blocked(self):
         """The reviewer's probe: caller in thread-a, target origin in thread-b
         of the same room → must not match."""
-        runner = _make_runner()
+        proves = self._layer()
         caller = self._msrc(thread_id="thread-a")
         victim_origin = self._msrc(thread_id="thread-b")
-        assert runner._same_matrix_room(caller, victim_origin) is False
+        verdict = proves(caller, "sid", origin=victim_origin, name="x")
+        assert isinstance(verdict, str) and verdict  # refusal text, not permission

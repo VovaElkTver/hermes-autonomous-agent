@@ -3300,6 +3300,17 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         return _proves_same_origin(source, session_id, origin=origin, name=name,
                                    allow_cross_room=allow_cross_room)
 
+    def resume_text(self, source, key: str, **ctx):
+        """Wording hook for /resume and /sessions lines (stage001 A3) — the contract is on
+        ``_resume_layer_text`` beside ``register()``, where the layer declares it."""
+        return _resume_layer_text(source, key, **ctx)
+
+    def describe_scope(self, source, session_key: str):
+        """The /status scope block (stage001 A3): the layer's own topology lines, read from this
+        adapter's ``_matrix_session_scope`` (env fallback) — no core code holds those fields."""
+        return _matrix_describe_scope(source, session_key,
+                                      scope=getattr(self, "_matrix_session_scope", None))
+
 
 def _proves_same_origin(source, session_id: str, *, origin=None, name: str = "",
                         allow_cross_room: bool = False) -> bool | str:
@@ -3326,6 +3337,49 @@ def _proves_same_origin(source, session_id: str, *, origin=None, name: str = "",
         return True
     return t("gateway.resume.matrix_blocked_other_room", name=name,
              room=origin.chat_name or origin.chat_id)
+
+
+def _resume_layer_text(source, key: str, *, title: str = "", msg_count: int = 0,
+                       room: str = "", allow_all: bool = False, origin=None):
+    """Matrix-layer wording for /resume and /sessions lines (stage001 A3).
+
+    Declared on the platform entry (``resume_text_fn`` in ``register()``) and mirrored by the
+    adapter's ``resume_text``; the core asks instead of holding Matrix texts. Keys:
+    ``cross_room_success`` (explicit ``--cross-room`` resume succeeded), ``list_empty`` (no named
+    sessions — the room-scoped hint only applies without admin ``--all``), ``list_row`` (under
+    admin ``--all`` every row carries its room signature). ``None`` = no layer opinion, the core
+    prints its generic line."""
+    if key == "cross_room_success":
+        msg_part = (t("gateway.resume.msg_count_one" if msg_count == 1
+                      else "gateway.resume.msg_count_other", count=msg_count)
+                    if msg_count else "")
+        return t("gateway.resume.matrix_cross_room_success", title=title, room=room,
+                 msg_part=msg_part)
+    if key == "list_empty":
+        return t("gateway.resume.matrix_no_named_sessions") if not allow_all else None
+    if key == "list_row":
+        if allow_all and origin is not None:
+            return f"{title} — {getattr(origin, 'chat_name', None) or getattr(origin, 'chat_id', '')}"
+        return None
+    return None
+
+
+def _matrix_describe_scope(source, session_key: str, *, scope=None):
+    """The /status "Matrix scope" block (stage001 A3), owned by the layer: room, room id, thread,
+    session-scope mode (live adapter field, env fallback), and a stable key fingerprint so a
+    shared room can show which console is live without leaking the raw session key."""
+    import hashlib
+    scope = scope or os.getenv("MATRIX_SESSION_SCOPE", "auto")
+    digest = hashlib.sha256(str(session_key or "").encode("utf-8")).hexdigest()[:12]
+    return [
+        t("gateway.status.matrix_scope_header"),
+        t("gateway.status.matrix_scope_room", room=source.chat_name or source.chat_id),
+        t("gateway.status.matrix_scope_room_id", room_id=source.chat_id),
+        t("gateway.status.matrix_scope_thread",
+          thread_id=source.thread_id or t("gateway.shared.none_value")),
+        t("gateway.status.matrix_scope_mode", scope=scope),
+        t("gateway.status.matrix_scope_key", session_key=f"sha256:{digest}"),
+    ]
 
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
@@ -3497,4 +3551,8 @@ def register(ctx) -> None:
         # stage001 п.3: the layer declares its origin-registry contract here — the core /resume
         # IDOR guard asks this instead of branching on Platform.MATRIX itself.
         owns_session_fn=_proves_same_origin,
+        # stage001 A2/A3: room-scoped listing + the layer's own /resume, /sessions and /status
+        # wording — the core keeps no Matrix texts, no MATRIX_SESSION_SCOPE read, no room math.
+        resume_text_fn=_resume_layer_text,
+        describe_scope_fn=_matrix_describe_scope,
     )

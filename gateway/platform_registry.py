@@ -109,6 +109,16 @@ class PlatformEntry:
     # text; False = proven foreign (generic refusal); None = defer to the core owner check.
     # A live adapter's ``owns_session`` method takes precedence. Consumer: /resume IDOR guard.
     owns_session_fn: Optional[Callable[..., Any]] = None
+    # Layer-owned /resume and /sessions wording (stage001 A3): ``(source, key, **ctx) -> Optional[str]``.
+    # Keys: "cross_room_success" (title, msg_count, room), "list_empty" (allow_all),
+    # "list_row" (title, allow_all, origin). None = no layer opinion; the core prints its generic text.
+    # A live adapter's ``resume_text`` method takes precedence. Consumers: /resume, /sessions.
+    resume_text_fn: Optional[Callable[..., Any]] = None
+    # Extra /status block describing the layer's own chat-space scope (stage001 A3):
+    # ``(source, session_key) -> Optional[list[str]]``; None/[] = no block. The core renders the
+    # returned lines verbatim and holds no platform semantics. Consumer: /status.
+    # A live adapter's ``describe_scope`` method takes precedence.
+    describe_scope_fn: Optional[Callable[..., Any]] = None
     # Whole-request delivery ``(args, normalized_chat_id, platform_name, pconfig)``, sync or
     # async; prefer standalone_sender_fn when the standard send contract suffices.
     send_message_handler: Optional[Callable[[dict, str, str, Any], Any]] = None

@@ -40,6 +40,9 @@ IDOR-тест «stranger block» остаётся.
 Discord-форум-сообщество).
 Способ удаления: единый вопрос слою `layer.scopes_listing(source) -> Predicate[row]`; отсутствие слоя =
 generic-владелец. Никакого enum-сравнения в ядре.
+✅ Закрыто (31.10): `_resume_row_visible` спрашивает `owns_session` (тот же хук, что guard) — True
+видно, строка-отказ/False — скрыто, нет ответа → generic `_resume_target_allowed`. `_same_matrix_room`
+удалён из ядра; thread/room-семантика целиком в `_proves_same_origin` слоя.
 
 **A3. Location: gateway/slash_commands_session.py:1146-1150, 1164-1165, 1171-1174; gateway/slash_commands_status.py:303-315**
 Знание: Matrix-специальные тексты resume («cross-room success», «no named sessions», подпись комнаты в
@@ -49,6 +52,12 @@ generic-владелец. Никакого enum-сравнения в ядре.
 Способ удаления: hook `layer.describe_scope(source) -> Optional[list[str]]` и `layer.resume_notes(...)`;
 generic-код печатает то, что вернул слой; `getattr(adapters.get(Platform.MATRIX), '_matrix_session_scope')`
 уходит вместе с приватным полем.
+✅ Закрыто (31.10): два хука объявлены в `register()` — `resume_text_fn` (ключи `cross_room_success`,
+`list_empty`, `list_row`) и `describe_scope_fn` (`_matrix_describe_scope`, читает `_matrix_session_scope`
+/ env уже сам слой). Ядро печатает вернутое слово в слово; `_redact_matrix_session_key`, `hashlib`/`os`
+и все `gateway.resume.matrix_*`/`gateway.status.matrix_scope_*` ссылки вынесены из generic-кода в слой.
+Резолвер хуков — общий (`gateway/platform_layers.py::PlatformLayerHooksMixin`), ветки по enum платформы
+в `/resume`, `/sessions`, `/status` больше нет (пин: test_no_platform_branch_in_listing_and_wording_paths).
 
 **A4. Location: gateway/slash_commands_session.py:826-870 (`_handle_topic_command`)**
 Знание: команда `/topic` целиком — Telegram-forum-механика (DM-gate `platform != TELEGRAM or chat_type != "dm"`,
