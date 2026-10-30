@@ -385,3 +385,33 @@ async def test_status_scope_block_is_layer_described(tmp_path):
     bare = _make_guard_runner(store)
     with patch("gateway.platform_registry.platform_registry.get", return_value=None):
         assert await bare._layer_describe_scope(ROOM_A, "k") == []
+
+
+# ---------------------------------------------------------------------------
+# pre-ledger provenance: the live bug's exact shape after deploy — a parent born
+# before the ledger existed and already rotated away by a fork switch has no
+# ledger entry; the persisted birth row (sessions.origin_json) still proves it.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pre_ledger_parent_resumable_from_birth_row(tmp_path):
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.ensure_session("parent-pre-ledger", source="matrix", chat_id=ROOM_A.chat_id,
+                          user_id=ROOM_A.user_id, chat_type="group",
+                          origin_json=json.dumps(ROOM_A.to_dict()))
+        store = _make_store(tmp_path, {})  # empty ledger: the parent predates it
+        runner = _make_guard_runner(store, _matrix_adapter())
+        runner._session_db = db
+        assert runner._gateway_session_origin_for_id("parent-pre-ledger") == ROOM_A
+        assert await runner._resume_access_denied_reply(
+            ROOM_A, "parent-pre-ledger", "main", False, False) is None
+        # Same store, a caller from another room: the birth row proves, but not for them.
+        denied = await runner._resume_access_denied_reply(
+            ROOM_B, "parent-pre-ledger", "main", False, False)
+        assert denied == t("gateway.resume.matrix_blocked_other_room", name="main", room="Room A")
+        # Nothing proves an unknown handle — still fail-closed.
+        assert runner._gateway_session_origin_for_id("never-seen") is None
+    finally:
+        db.close()
