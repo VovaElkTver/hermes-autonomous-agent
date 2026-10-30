@@ -40,6 +40,22 @@ async def _maybe_await(result):
     return await result if inspect.isawaitable(result) else result
 
 
+def branch_display_name(branch: dict) -> str:
+    """The human name of a branch row: immutable meta_json title, else hex id.
+
+    Names are the UI of the fork line (Вл 30.10: "писать /join с хексами —
+    издевательство, для этого имена вводили"); hex stays as fallback identity
+    and in machine-readable payloads only.
+    """
+    import json as _json
+    try:
+        name = str((_json.loads(branch.get("meta_json") or "{}"))
+                   .get("title") or "").strip()
+    except Exception:
+        name = ""
+    return name or str(branch.get("branch_id") or "?")
+
+
 def format_branch_prefix(name: str) -> str:
     return f"{BRANCH_GLYPH} {name}: "
 

@@ -41,14 +41,16 @@ def session_fork(name: str = "", db=None, current_session_id: str = "") -> str:
     db.ensure_session(child_id, source="agent-fork", session_key=f"{current_session_id}:fork",
                       parent_session_id=current_session_id)
     branch_id = db.new_branch_id()
-    db.create_branch_row(branch_id, current_session_id, child_id, base_uid)
+    db.create_branch_row(branch_id, current_session_id, child_id, base_uid,
+                         title=(str(name)[:80] if name else None))
     if name:
         try:
             db.set_session_title(child_id, str(name)[:80])
         except Exception:
             pass
     logger.info("session_fork: %s forked from %s as %s", child_id, current_session_id, branch_id)
-    return _json.dumps({"ok": True, "branch_id": branch_id, "child_session_id": child_id,
+    return _json.dumps({"ok": True, "branch_id": branch_id, "name": name or branch_id,
+                        "child_session_id": child_id,
                         "base_message_uid": base_uid})
 
 
@@ -62,7 +64,7 @@ JOIN_SCHEMA: dict[str, Any] = {
     "parameters": {
         "type": "object",
         "properties": {
-            "branch_id": {"type": "string", "description": "Branch id from session_fork ('b…'). Omit to list active branches."},
+            "branch_id": {"type": "string", "description": "Branch name (from session_fork 'name') or id ('b…'). Omit to list active branches."},
             "strategy": {"type": "string", "enum": ["note", "append", "discard"], "description": "Default note."},
         },
         "required": [],
@@ -80,13 +82,21 @@ def session_join(branch_id: str = "", strategy: str = "note", db=None,
         active = db.list_active_branches(current_session_id)
         return _json.dumps({"ok": True, "branches": active})
     branch = db.get_branch(branch_id)
-    if not branch:
-        return _json.dumps({"ok": False, "error": f"no such branch {branch_id}"})
+    if branch is None or branch.get("parent_session_id") != current_session_id:
+        # Names, not hex (Вл 30.10): resolve against this session's active
+        # branches by immutable branch title.
+        arg = str(branch_id).lower()
+        branch = next((b for b in db.list_active_branches(current_session_id)
+                       if str(_json.loads(b.get("meta_json") or "{}").get("title")
+                             or "").lower() == arg), None)
+        if branch is None:
+            return _json.dumps({"ok": False, "error": f"no such active branch {branch_id!r}"})
     if branch["parent_session_id"] != current_session_id:
         return _json.dumps({"ok": False,
                             "error": "branch does not belong to this session"})
     if branch["status"] != "active":
         return _json.dumps({"ok": False, "error": f"branch already {branch['status']}"})
+    branch_id = branch["branch_id"]
     if strategy == "append":
         moved = db._move_branch_rows_to_parent_sync(branch)
         if not moved:

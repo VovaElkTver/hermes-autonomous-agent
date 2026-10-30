@@ -21,6 +21,7 @@ import uuid
 from datetime import datetime
 
 from agent.i18n import t
+from gateway.branch_prefix import branch_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class GatewayForkCommandsMixin:
     # ------------------------------------------------------------------ /join
 
     async def _handle_join_command(self, event) -> str:
-        """/join [branch-id] [--discard|--append] - merge a forked branch back."""
+        """/join [name|branch-id] [--discard|--append] - merge a forked branch back."""
         if not self._session_db:
             return self._session_db_unavailable_reply()
         positional, flags = parse_join_args(event.get_command_args())
@@ -117,12 +118,24 @@ class GatewayForkCommandsMixin:
             return t("gateway.join.none_active")
         target = None
         if positional:
-            wanted = positional[0].lstrip("b")
-            target = next((b for b in branches if b["branch_id"].lstrip("b") == wanted), None)
+            # Names first (the fork UI speaks names, Вл 30.10); hex id is the
+            # fallback identity.  Exact title match, then branch-id (with or
+            # without the leading 'b').
+            arg = positional[0]
+            target = next((b for b in branches
+                           if branch_display_name(b).lower() == arg.lower()
+                           and branch_display_name(b) != b["branch_id"]), None)
             if target is None:
-                return t("gateway.join.not_found", arg=positional[0])
+                wanted = arg.lstrip("b")
+                target = next((b for b in branches if b["branch_id"].lstrip("b") == wanted), None)
+            if target is None:
+                # allow a name that collides with a raw hex-style title
+                target = next((b for b in branches
+                               if branch_display_name(b).lower() == arg.lower()), None)
+            if target is None:
+                return t("gateway.join.not_found", arg=arg)
         elif len(branches) > 1:
-            listing = ", ".join(b["branch_id"] for b in branches)
+            listing = ", ".join(branch_display_name(b) for b in branches)
             return t("gateway.join.ambiguous", branches=listing)
         else:
             target = branches[0]
@@ -137,13 +150,14 @@ class GatewayForkCommandsMixin:
         Shared by the /join command and agent tools.
         """
         child_id = branch["child_session_id"]
+        name = branch_display_name(branch)
         if strategy == "append":
             moved = await self._session_db.move_branch_rows_to_parent(branch)
             if not moved:
-                return t("gateway.join.append_unavailable", branch=branch["branch_id"])
+                return t("gateway.join.append_unavailable", branch=name)
         elif strategy == "note":
             summary_text = await self._summarize_branch(child_id)
-            note = (f"[work-note from branch {branch['branch_id']}] {summary_text}")[:JOIN_NOTE_MAX_CHARS]
+            note = (f"[work-note from branch {name}] {summary_text}")[:JOIN_NOTE_MAX_CHARS]
             await self._session_db.append_messages_batch(parent_session_id, [
                 dict(role="user", content=note)])
         # discard falls through: just close the branch
@@ -151,7 +165,7 @@ class GatewayForkCommandsMixin:
         child_key = await self._session_db.get_session_key(child_id)
         if child_key:
             self._evict_cached_agent(child_key)
-        return t("gateway.join.joined", branch=branch["branch_id"], strategy=strategy)
+        return t("gateway.join.joined", branch=name, strategy=strategy)
 
     async def _summarize_branch(self, child_id: str) -> str:
         """Compress the branch transcript into a short summary for the work-note."""
