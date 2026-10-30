@@ -1045,13 +1045,25 @@ class GatewaySessionCommandsMixin:
         return target_id, name
 
     async def _resume_access_denied_reply(self, source, target_id: str, name: str, allow_all: bool,
-                                          allow_cross_room: bool) -> Optional[str]:
+                                          allow_cross_room: bool,
+                                          current_session_id: str | None = None) -> Optional[str]:
         """IDOR guard: a session id/title is a routing handle, not authority — bind /resume to the
         caller's own room (Matrix) or platform/user/chat (other adapters)."""
         if source.platform == Platform.MATRIX:
             target_origin = self._gateway_session_origin_for_id(target_id)
             if self._same_matrix_room(source, target_origin) or allow_cross_room:
                 return None
+            # Console names (/resume main, branch names) resolve THROUGH the current session's
+            # lineage — a target inside that family is the same room by construction.  The fork
+            # switch evicts the parent's routing entry, so origin lookup alone falsely reads
+            # "no recorded room origin" for the room's own root console.
+            if current_session_id and self._session_db is not None:
+                from gateway.branch_prefix import _lineage_ids
+                try:
+                    if target_id in await _lineage_ids(self._session_db, current_session_id):
+                        return None
+                except Exception:
+                    logger.debug("resume lineage check failed for %s", target_id, exc_info=True)
             if target_origin is None:
                 return t("gateway.resume.matrix_blocked_no_origin", name=name)
             return t("gateway.resume.matrix_blocked_other_room", name=name,
@@ -1097,7 +1109,8 @@ class GatewaySessionCommandsMixin:
         authority, local_owner, head = await conversation_head(self, target_id)
         if local_owner is not None:
             target_id = head
-        denied = await self._resume_access_denied_reply(source, target_id, name, allow_all, allow_cross_room)
+        denied = await self._resume_access_denied_reply(source, target_id, name, allow_all, allow_cross_room,
+                                                        current_session_id=_cur_sid)
         if denied is not None:
             return denied
         current_entry = await self.async_session_store.get_or_create_session(source)
