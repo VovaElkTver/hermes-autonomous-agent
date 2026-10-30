@@ -172,6 +172,16 @@ class SessionBranchMixin:
             return None
         return row["session_key"] if row else None
 
+    def move_branch_rows_to_parent(self, branch: dict) -> bool:
+        """Public join-append entry point (stage001 п.5).
+
+        ``gateway.slash_commands_fork.join_branch`` awaits this name through the
+        AsyncSessionDB facade; only the ``_…_sync`` implementation existed, so
+        ``/join <name> --append`` died on AttributeError. Pure alias — same
+        semantics, same guardrails as ``_move_branch_rows_to_parent_sync``.
+        """
+        return self._move_branch_rows_to_parent_sync(branch)
+
     def _move_branch_rows_to_parent_sync(self, branch: dict) -> bool:
         """Append strategy: reparent the branch's own rows onto the parent.
 

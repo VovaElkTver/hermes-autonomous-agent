@@ -1475,6 +1475,10 @@ class SessionMessagesMixin(SessionDetachedResultsMixin, SessionTodoResultMixin):
                         f"  AND {_sql_json_extract('child.model_config', '$._branched_from')} IS NULL "
                         f"  AND {_sql_json_extract('child.model_config', '$._delegate_from')} IS NULL "
                         f"  AND {_sql_json_extract('child.model_config', '$._reset_from')} IS NULL "
+                        # lazy-fork children (gateway /fork, write-dialog v8) carry _forked_from:
+                        # they are separate consoles, not this conversation's continuation —
+                        # /resume main must not hijack onto an active branch (stage001 п.5 grid).
+                        f"  AND {_sql_json_extract('child.model_config', '$._forked_from')} IS NULL "
                         f"  AND NOT {_legacy_reset_child_sql('child', _RESET_END_REASONS_SQL)} "
                         "  AND COALESCE(child.source, '') != 'tool' "
                         "ORDER BY child.started_at DESC, child.id DESC LIMIT 1", (current,)).fetchone()

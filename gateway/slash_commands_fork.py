@@ -19,6 +19,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from typing import Any
 
 from agent.i18n import t
 from gateway.branch_prefix import branch_display_name
@@ -232,14 +233,44 @@ class GatewayForkCommandsMixin:
         return await self._return_or_leave(event, close=False)
 
     async def _summarize_branch(self, child_id: str) -> str:
-        """Compress the branch transcript into a short summary for the work-note."""
+        """Compress the branch transcript into a short summary for the work-note.
+
+        ``ContextCompressor`` takes the canonical ``(model, base_url=..., api_key=...)``
+        construction (gateway/session_mutation_compress.py) — an earlier draft passed a
+        ``config=`` kwarg it never had, so the note path silently fell to the tail
+        fallback on every join (stage001 п.5). ``compress()`` returns the compressed
+        MESSAGE LIST, not a string: the note is the summary block it embeds; short
+        transcripts (below the compress window) keep the raw tail.
+        """
         history = await self.async_session_store.load_transcript(child_id)
         focus = await self._session_db.get_session_title(child_id) or "branch discussion"
+        gw: Any = self
         try:
-            from agent.context_compressor import ContextCompressor
-            compressor = ContextCompressor(config=self.config)
+            from agent.context_compressor import ContextCompressor, SUMMARY_PREFIX
+            model, base_url, api_key, provider = "", "", "", ""
+            resolver = getattr(gw, "_hmwa_hygiene_settings", None)
+            if callable(resolver):
+                with contextlib.suppress(Exception):
+                    session_key = await gw._session_db.get_session_key(child_id) or ""
+                    hs = await resolver(None, session_key)
+                    model = hs.model or ""
+                    base_url, api_key, provider = hs.base_url or "", hs.api_key or "", hs.provider or ""
+            if not model and isinstance(gw.config, dict):
+                model = str(((gw.config.get("model") or {}).get("default")) or "")
+            compressor = ContextCompressor(
+                model, base_url=base_url, api_key=api_key, provider=provider, quiet_mode=True)
             result = compressor.compress(history, focus_topic=focus, force=True)
-            text = result if isinstance(result, str) else getattr(result, "text", "") or ""
+            text = ""
+            if isinstance(result, str):
+                text = result
+            elif isinstance(result, list):
+                for m in result:
+                    content = str(m.get("content") or "") if isinstance(m, dict) else ""
+                    if SUMMARY_PREFIX in content:
+                        text = content
+                        break
+            if not text:
+                text = "\n".join(str(m.get("content"))[:300] for m in history[-4:])
         except Exception as e:
             logger.warning("fork-join: compressor failed (%s); using tail fallback", e)
             text = "\n".join(str(m.get("content"))[:300] for m in history[-4:])
