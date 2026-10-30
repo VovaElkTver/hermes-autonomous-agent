@@ -1,6 +1,6 @@
-"""write-dialog v8.1 — диалог записки как ЯДРЕННЫЙ ФОРК (stage001 п.4, Вл 30.10).
+"""write-dialog — диалог записки как ЯДРЕННЫЙ ФОРК (stage001 п.4, Вл 30.10).
 
-v8.1 (Вл 30.10, «такого не могло быть. просто НЕВОЗМОЖНО»): инвариант
+(Вл 30.10, «такого не могло быть. просто НЕВОЗМОЖНО»): инвариант
 ВИДИМОСТИ. Открытый диалог = видимый в комнате вопрос. Анонс пишется с
 read-back подтверждением; не подтвердился — откат заморозки (запись не
 исполнена, тихого невидимого диалога нет). Тик-watchdog перепроверяет
@@ -31,7 +31,7 @@ read-back подтверждением; не подтвердился — отк
     watcher-поток, 5 с) читает ЛОГ MATRIX (аксиома Вл: единственный
     достоверный источник): GET /_matrix/client/v1/rooms/{room}/threads/{root}/
     events с фолбэком /messages; при E2EE — ещё и дешифрованный поток
-    гейтвея (v7 паттерн _stream_thread_texts). Токены первой строки:
+    гейтвея (паттерн _stream_thread_texts). Токены первой строки:
     «записать» / «не пиши» / «правка: <текст>».
 
   * исполнение замороженной записи — в РОДИТЕЛЕ с обходом гейта
@@ -78,7 +78,6 @@ from typing import Any
 
 logger = logging.getLogger("hermes.plugins.write_dialog")
 
-WD_VERSION = "v8"
 NAME_PREFIX = "wd:"                 # имя ветки = wd:<ключ> — метка консоли
 FROZEN_OPEN = "<wd-frozen>"         # маркер замороженного payload'а в сообщении ветки
 FROZEN_CLOSE = "</wd-frozen>"
@@ -116,7 +115,7 @@ def _stats(event: str, **fields) -> None:
         from hermes_constants import get_hermes_home
         p = get_hermes_home() / _STATS_PATH
         p.parent.mkdir(parents=True, exist_ok=True)
-        rec = {"ts": round(time.time(), 3), "event": event, "v": WD_VERSION,
+        rec = {"ts": round(time.time(), 3), "event": event,
                **{k: (v if isinstance(v, (int, float, bool, str)) or v is None else str(v))
                   for k, v in fields.items()}}
         with p.open("a", encoding="utf-8") as fh:
@@ -582,7 +581,7 @@ def _mx_thread_texts(ch: dict, root: str, since_ts: float, *,
 
 
 def _stream_thread_texts(rec: dict, since_ts: float) -> list[dict]:
-    """E2EE-путь (v7): в зашифрованной комнате REST отдаёт только
+    """E2EE-путь: в зашифрованной комнате REST отдаёт только
     m.room.encrypted — тред читается из дешифрованного потока гейтвея
     (sessions/messages в state.db). Отправитель — владелец сессии треда."""
     out: list[dict] = []
@@ -1488,7 +1487,7 @@ def install() -> None:
     _ensure_wraps()
     _WatchThread.start()
     _reannounce_open()
-    logger.info("write-dialog v8.2: core-fork dialog + execution gate installed")
+    logger.info("write-dialog: core-fork dialog + execution gate installed")
 
 
 def reload_plugin() -> None:
@@ -1540,7 +1539,7 @@ def pre_tool_call(tool_name: str = "", args=None, **kw) -> dict | None:
 def _tool_handler(args=None, **kw) -> str:
     # Контракт диспетчера: handler(dict_args) первым позиционным параметром,
     # НЕ kwargs. Прямая передача write_dialog рождала «action = весь dict» —
-    # отсюда «нет такого действия» / «key required» (ошибка с v8.0, Вл 30.10).
+    # отсюда «нет такого действия» / «key required» (ошибка, Вл 30.10).
     a = dict(args or {})
     a.update(kw)
     return write_dialog(action=str(a.get("action") or "list"), key=a.get("key"))
