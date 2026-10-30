@@ -1,0 +1,4 @@
+name: write-dialog
+version: "8.1.0"
+description: "Write dialog v8 on core fork primitives — a frozen write opens a session branch (session_fork), the human decides in the room, the predicate tick reads the Matrix log, execution runs in the parent with gate bypass, closure is a session_join work-note. No cards, no JSON store, no RAM state."
+manifest_version: 2
