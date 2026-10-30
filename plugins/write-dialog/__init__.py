@@ -1488,17 +1488,41 @@ def install() -> None:
     _ensure_wraps()
     _WatchThread.start()
     _reannounce_open()
-    logger.info("write-dialog v8: core-fork dialog installed")
+    logger.info("write-dialog v8.2: core-fork dialog + execution gate installed")
 
 
 def reload_plugin() -> None:
     _WatchThread.stop()
 
 
+_EXECUTE_TOOLS = ("execute_code", "terminal", "subprocess")
+
+
 def pre_tool_call(tool_name: str = "", args=None, **kw) -> dict | None:
     """Канонический шов: agent-loop дёргает хук до dispatch на любом профиле.
-    block-сообщение и есть ответ ветки; ядро запись не исполняет."""
-    subsys = _subsystem_for(tool_name, args if isinstance(args, dict) else {})
+    block-сообщение и есть ответ ветки; ядро запись не исполняет.
+    WD — состояние: если открыта хоть одна wd-ветка, исполнение (execute_code,
+    terminal) блокируется structurally, не поведенчески. Читающие тулзы свободны."""
+    args_dict = args if isinstance(args, dict) else {}
+    # — исполнение блокируется открытой веткой —
+    if tool_name in _EXECUTE_TOOLS and not _exec_armed():
+        try:
+            db = _db()
+            try:
+                active = _wd_branches(db)
+            finally:
+                db.close()
+            if active:
+                key = _branch_name(active[0]).removeprefix(NAME_PREFIX)
+                return {"action": "block",
+                        "message": f"⎇ {_fork_name(str(key))}: WD — состояние, "
+                                   f"открыт диалог; исполнение заблокировано. "
+                                   "Закрой ветку («записать» / «не пиши» в ветке) "
+                                   "или реши через write_dialog(execute/discard)."}
+        except Exception:
+            logger.debug("write-dialog: exec-block check failed", exc_info=True)
+    # — write-гейт (память/скилл/защищённые файлы) —
+    subsys = _subsystem_for(tool_name, args_dict)
     if subsys is None:
         return None
     out = _dialog(subsys, tool_name, args if isinstance(args, dict) else {})
