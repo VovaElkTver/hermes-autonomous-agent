@@ -3287,6 +3287,46 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
             result = result.replace(f"\x00PROTECTED{idx}\x00", original)
         return result
 
+    def owns_session(self, source, session_id: str, *, origin=None, name: str = "",
+                     allow_cross_room: bool = False):
+        """Origin-реестр hook (stage001 п.3) — the contract is documented on
+        ``_proves_same_origin`` beside ``register()``, where the layer declares it.
+
+        The core /resume IDOR guard asks the PLATFORM LAYER instead of branching on the platform
+        itself: is this session one of the consoles of the room the caller speaks from, including
+        every console of its lineage? The registry DATA (session → room origin, registered at
+        creation, never evicted by switch_session/fork/resume) is the core session-store ledger;
+        the room SEMANTICS — chat_id + thread_id scope — are ours and live here."""
+        return _proves_same_origin(source, session_id, origin=origin, name=name,
+                                   allow_cross_room=allow_cross_room)
+
+
+def _proves_same_origin(source, session_id: str, *, origin=None, name: str = "",
+                        allow_cross_room: bool = False) -> bool | str:
+    """Matrix-layer answer to «does *session_id* belong to *source*'s room?» (stage001 п.3).
+
+    Declared on the platform entry (``owns_session_fn`` in ``register()``) and mirrored by the
+    adapter's ``owns_session``; the core's /resume guard consumes whichever it can reach.
+    True = allow; non-empty str = refusal shown to the caller. The room scope mirrors the session
+    key: thread_id is part of the key, so another thread of the SAME room is a DIFFERENT session;
+    non-threaded rooms compare "" == "". ``--cross-room`` is an explicit human override — always
+    allows. A target with NO recorded origin fails closed: an id is a routing handle, not
+    authority (IDOR); only the registry may prove a room, never the caller's word."""
+    if allow_cross_room:
+        return True
+    if origin is None:
+        return t("gateway.resume.matrix_blocked_no_origin", name=name)
+    same_room = (
+        getattr(origin, "platform", None) == Platform.MATRIX
+        and getattr(origin, "chat_id", None) == getattr(source, "chat_id", None)
+        and str(getattr(origin, "thread_id", "") or "")
+        == str(getattr(source, "thread_id", "") or "")
+    )
+    if same_room:
+        return True
+    return t("gateway.resume.matrix_blocked_other_room", name=name,
+             room=origin.chat_name or origin.chat_id)
+
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
     """standalone_sender_fn: out-of-process delivery via the Client-Server API (cron without gateway)."""
@@ -3454,4 +3494,7 @@ def register(ctx) -> None:
         display_tier="medium",
         env_overrides=gateway_env.ENV_OVERRIDES,
         env_enable_credentials=gateway_env.ENV_ENABLE_CREDENTIALS, **gateway_env.AUTHZ,
+        # stage001 п.3: the layer declares its origin-registry contract here — the core /resume
+        # IDOR guard asks this instead of branching on Platform.MATRIX itself.
+        owns_session_fn=_proves_same_origin,
     )

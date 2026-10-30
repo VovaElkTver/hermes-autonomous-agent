@@ -864,6 +864,11 @@ class SessionStore(
         # session_id -> owning key for ids proven but not yet published in ``_entries`` (a
         # compression child row is written before its reroute is published).
         self._session_owner_hints: dict[str, str] = {}
+        # session_id -> origin, registered the first time a route names the session (stage001 п.3:
+        # origin is NON-EVICTABLE). The routing index answers "where does this key point NOW"; the
+        # ledger answers the different question the /resume guard asks — "where does this session
+        # COME FROM" — and survives switch_session/fork/resume repoints and restarts (state.db meta).
+        self._origin_ledger: dict[str, SessionSource] = {}
         from gateway.session_db_recovery import RecoverableHandleCache
 
         self._db_handle_cache = RecoverableHandleCache(
@@ -1065,6 +1070,9 @@ class SessionStore(
         self._reopen_session_row(session_key, recovered.session_id)
         with self._lock:
             decision.entry = self._entries.setdefault(session_key, recovered)
+        # A recovered route was born before this process (or before the ledger existed): adopt its
+        # origin so the non-evictable answer does not depend on having watched the creation.
+        self._record_session_origin(recovered.session_id, recovered.origin)
         decision.needs_save = True
 
     def _route_create(
@@ -1091,6 +1099,8 @@ class SessionStore(
             if current is None or (force_new and current is observed):
                 self._entries[session_key] = current = candidate
                 self._rows_pending.add(session_id)  # the caller settles it once create_kwargs land
+                # stage001 п.3: origin is registered AT CREATION and never evicted afterwards.
+                self._record_session_origin(session_id, source)
         decision.entry = current
         decision.needs_save = True
         return create_kwargs if current is candidate else None
@@ -1203,6 +1213,9 @@ class SessionStore(
             transport_profile=old_entry.transport_profile, **fields,
         )
         self._entries[session_key] = new_entry
+        # stage001 п.3: a repoint (switch_session/resume/fork/auto-reset) registers the TARGET's
+        # origin when none was ever proven; it can never overwrite a proven one (first wins).
+        self._record_session_origin(session_id, new_entry.origin)
         self._save()
         self._rows_pending.add(session_id)  # after the save: a raising save leaves nothing pending
         return new_entry
@@ -1351,6 +1364,59 @@ class SessionStore(
         # Legacy local timestamps and canonical UTC timestamps can coexist after recovery.
         entries.sort(key=lambda e: e.updated_at.timestamp(), reverse=True)
         return entries
+
+    # ------------------------------------------------ origin ledger (stage001 п.3)
+
+    _ORIGIN_META_PREFIX = "gateway_session_origin:"
+
+    def _record_session_origin(self, session_id: str, origin: Optional["SessionSource"]) -> None:
+        """Register ``session_id`` → *origin*; the FIRST registration wins and is never evicted
+        (switch_session/fork/resume repoints, stale-prune pops, profile purges). Safe to call with
+        ``_lock`` held: ``dict.setdefault`` is atomic and the meta write mirrors the ``_save``
+        those lock-held paths already perform. Persisted as routing-store meta when a state.db
+        handle is available, so the answer survives restarts; JSONL-fallback stores keep it
+        in-process only."""
+        if not session_id or not isinstance(origin, SessionSource):
+            return
+        if self._lazy("_origin_ledger", dict).setdefault(session_id, origin) is not origin:
+            return  # an earlier turn already proved the provenance: a repoint must not forge it
+        try:
+            setter = self._routing_db_method("set_meta")
+            if setter is not None:
+                setter(self._ORIGIN_META_PREFIX + session_id, json.dumps(origin.to_dict()))
+        except Exception:
+            logger.debug("gateway.session: origin-ledger write failed for %s", session_id,
+                         exc_info=True)
+
+    def lookup_session_origin(self, session_id: str) -> Optional["SessionSource"]:
+        """Where *session_id* was born — as registered at creation, NOT evicted by
+        switch_session/fork/resume rotation (stage001 п.3). None = the session was never routed
+        by this routing layer, so no origin is proven (callers fail closed)."""
+        if not session_id:
+            return None
+        ledger = self._lazy("_origin_ledger", dict)
+        origin = ledger.get(session_id)
+        if isinstance(origin, SessionSource):
+            return origin
+        try:
+            getter = self._routing_db_method("get_meta")
+            if getter is None:
+                return None
+            raw = getter(self._ORIGIN_META_PREFIX + session_id)
+        except Exception:
+            logger.debug("gateway.session: origin-ledger read failed for %s", session_id,
+                         exc_info=True)
+            return None
+        if not isinstance(raw, str) or not raw:
+            return None
+        try:
+            parsed = SessionSource.from_dict(json.loads(raw))
+        except Exception:
+            return None
+        if isinstance(parsed, SessionSource):
+            ledger.setdefault(session_id, parsed)
+            return parsed
+        return None
 
     def lookup_by_session_id(self, session_id: str) -> Optional[SessionEntry]:
         """Return the active session entry for a persisted session ID, if any."""

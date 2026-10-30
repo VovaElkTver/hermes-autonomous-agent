@@ -101,6 +101,14 @@ class PlatformEntry:
     parse_target_ref_fn: Optional[Callable[[str], Optional[tuple[str, Optional[str]]]]] = None
     # Post-resolution validation: True accept, False reject, non-empty str = reject + diagnostic.
     validate_target_ref_fn: Optional[Callable[[str], bool | str]] = None
+    # Platform-layer origin registry (stage001 п.3):
+    # ``(source, session_id, *, origin, name, allow_cross_room) -> True | str | False | None`` —
+    # answers whether *session_id* is a console of the caller's own chat-space (room/channel),
+    # including every lineage console whose origin was registered at session creation and is
+    # never evicted by switch/fork/resume. True = allow; non-empty str = the layer's own refusal
+    # text; False = proven foreign (generic refusal); None = defer to the core owner check.
+    # A live adapter's ``owns_session`` method takes precedence. Consumer: /resume IDOR guard.
+    owns_session_fn: Optional[Callable[..., Any]] = None
     # Whole-request delivery ``(args, normalized_chat_id, platform_name, pconfig)``, sync or
     # async; prefer standalone_sender_fn when the standard send contract suffices.
     send_message_handler: Optional[Callable[[dict, str, str, Any], Any]] = None

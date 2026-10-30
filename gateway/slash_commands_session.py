@@ -12,7 +12,7 @@ import dataclasses
 import logging
 import os
 import shlex
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from agent.i18n import t
 from agent.turn_context import extract_api_content_sidecar
@@ -137,6 +137,12 @@ async def discard_lost_turns(authority, session_id) -> str:
 
 class GatewaySessionCommandsMixin:
     """Session-transcript slash commands (/new, /resume, /sessions, /branch, /title, /save, /undo, /retry, /topic, /compress)."""
+
+    if TYPE_CHECKING:  # provided by the composite GatewayRunner
+        session_store: Any
+        async_session_store: Any
+        _session_db: Any
+        adapters: Any
 
     # ------------------------------------------------------------------ /new, /reset
 
@@ -292,15 +298,30 @@ class GatewaySessionCommandsMixin:
     # ------------------------------------------------------- origin / ownership guards
 
     def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
-        """Best-effort origin lookup for gateway session IDs."""
+        """Best-effort origin lookup for gateway session IDs. The live routing entry answers while
+        the key still points at the session; the session store's origin ledger (stage001 п.3)
+        keeps answering after switch_session/fork/resume repointed the route, and after restarts."""
         lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
         if callable(lookup):
             entry = lookup(self.session_store, session_id)
-            return getattr(entry, "origin", None) if entry is not None else None
+            origin = getattr(entry, "origin", None) if entry is not None else None
+            if isinstance(origin, SessionSource):
+                return origin
         # Test doubles / older stores lack the public lookup; fail closed when nothing resolves.
         entries = getattr(self.session_store, "_entries", {}) or {}
-        return next((getattr(e, "origin", None) for e in entries.values()
+        live = next((getattr(e, "origin", None) for e in entries.values()
                      if getattr(e, "session_id", None) == session_id), None)
+        if isinstance(live, SessionSource):
+            return live
+        ledger = getattr(self.session_store, "lookup_session_origin", None)
+        if callable(ledger):
+            try:
+                origin = ledger(session_id)
+            except Exception:
+                origin = None
+            if isinstance(origin, SessionSource):
+                return origin
+        return None
 
     @staticmethod
     def _same_matrix_room(current: SessionSource, origin: Optional[SessionSource]) -> bool:
@@ -1044,30 +1065,68 @@ class GatewaySessionCommandsMixin:
             logger.debug("Failed to resolve resume continuation for %s: %s", target_id, e)
         return target_id, name
 
+    async def _layer_proves_same_origin(self, source, target_id: str, *, name: str,
+                                        allow_cross_room: bool):
+        """Ask the caller's PLATFORM LAYER whether *target_id* is one of its own consoles — the
+        stage001 axiom-2 boundary: the core does not know what a room/thread/channel is and never
+        answers this itself. Resolution order: the live adapter's ``owns_session`` method (the
+        receiving bot), then the routing adapters map, then the ``owns_session_fn`` the layer
+        declared at ``register()``. Verdict contract: ``True`` allow, non-empty ``str`` the
+        layer's own refusal text, ``False`` proven foreign, ``None``/anything else = no answer —
+        the caller falls through to the platform-agnostic owner check (fail-closed there)."""
+        hook = None
+        for probe in (
+            lambda: getattr(self, "_delivery_adapter_for", lambda _s: None)(source),
+            lambda: (getattr(self, "adapters", None) or {}).get(getattr(source, "platform", None)),
+        ):
+            try:
+                candidate = getattr(probe(), "owns_session", None)
+            except Exception:
+                candidate = None
+            if callable(candidate):
+                hook = candidate
+                break
+        if hook is None:
+            try:
+                from gateway.platform_registry import platform_registry
+                entry = platform_registry.get(getattr(source.platform, "value", None) or "")
+            except Exception:
+                entry = None
+            declared = getattr(entry, "owns_session_fn", None) if entry is not None else None
+            hook = declared if callable(declared) else None
+        if hook is None:
+            return None
+        try:
+            verdict = hook(source, target_id,
+                           origin=self._gateway_session_origin_for_id(target_id),
+                           name=name, allow_cross_room=allow_cross_room)
+            import inspect
+            if inspect.isawaitable(verdict):
+                verdict = await verdict
+        except Exception:
+            logger.debug("origin-layer hook failed for %s", target_id, exc_info=True)
+            return None
+        if verdict is True or verdict is False or (isinstance(verdict, str) and verdict):
+            return verdict
+        return None  # untyped answer (test doubles included): treat as "no answer", fall to generic
+
     async def _resume_access_denied_reply(self, source, target_id: str, name: str, allow_all: bool,
-                                          allow_cross_room: bool,
-                                          current_session_id: str | None = None) -> Optional[str]:
+                                          allow_cross_room: bool) -> Optional[str]:
         """IDOR guard: a session id/title is a routing handle, not authority — bind /resume to the
-        caller's own room (Matrix) or platform/user/chat (other adapters)."""
-        if source.platform == Platform.MATRIX:
-            target_origin = self._gateway_session_origin_for_id(target_id)
-            if self._same_matrix_room(source, target_origin) or allow_cross_room:
-                return None
-            # Console names (/resume main, branch names) resolve THROUGH the current session's
-            # lineage — a target inside that family is the same room by construction.  The fork
-            # switch evicts the parent's routing entry, so origin lookup alone falsely reads
-            # "no recorded room origin" for the room's own root console.
-            if current_session_id and self._session_db is not None:
-                from gateway.branch_prefix import _lineage_ids
-                try:
-                    if target_id in await _lineage_ids(self._session_db, current_session_id):
-                        return None
-                except Exception:
-                    logger.debug("resume lineage check failed for %s", target_id, exc_info=True)
-            if target_origin is None:
-                return t("gateway.resume.matrix_blocked_no_origin", name=name)
-            return t("gateway.resume.matrix_blocked_other_room", name=name,
-                     room=target_origin.chat_name or target_origin.chat_id)
+        caller's own origin. Which consoles (incl. every lineage console, origin registered at
+        session creation and NON-EVICTABLE across switch_session/fork/resume) belong to a
+        chat-space is platform-LAYER property (stage001 п.3): the caller's layer answers
+        ``owns_session`` and may return its own refusal text; layers that do not answer — every
+        platform without the hook — keep the platform-agnostic owner check below. No platform
+        enum branch lives here."""
+        verdict = await self._layer_proves_same_origin(
+            source, target_id, name=name, allow_cross_room=allow_cross_room)
+        if verdict is True:
+            return None
+        if isinstance(verdict, str) and verdict:
+            return verdict
+        if verdict is False:
+            return t("gateway.resume.blocked_not_owner", name=name)
         if await self._resume_target_allowed(source, target_id, allow_override=(allow_all or allow_cross_room)):
             return None
         return t("gateway.resume.blocked_not_owner", name=name)
@@ -1109,8 +1168,7 @@ class GatewaySessionCommandsMixin:
         authority, local_owner, head = await conversation_head(self, target_id)
         if local_owner is not None:
             target_id = head
-        denied = await self._resume_access_denied_reply(source, target_id, name, allow_all, allow_cross_room,
-                                                        current_session_id=_cur_sid)
+        denied = await self._resume_access_denied_reply(source, target_id, name, allow_all, allow_cross_room)
         if denied is not None:
             return denied
         current_entry = await self.async_session_store.get_or_create_session(source)

@@ -40,6 +40,10 @@ def _is_live_system_guard(exc: BaseException) -> bool:
 class SessionPersistenceMixin:
     """SessionStore storage plumbing: SessionDB handle resolution and routing-index load/save."""
 
+    if TYPE_CHECKING:  # implemented on the composite SessionStore (stage001 п.3 origin ledger)
+        def _record_session_origin(self, session_id: str,
+                                   origin: Optional[SessionSource]) -> None: ...
+
     def retire_runtime_sessions(self, session_ids):
         """Publish committed retirement; durable fences reject delayed saves."""
         with self._lock:
@@ -324,6 +328,9 @@ class SessionPersistenceMixin:
                 entry = self._routing_entry_from_json(key, entry_json)
                 if entry is not None:
                     self._entries[key] = entry
+                    # stage001 п.3: routes restored from state.db seed the non-evictable origin
+                    # ledger (first-writer-wins; a persisted meta row already beats this).
+                    self._record_session_origin(entry.session_id, entry.origin)
             return True
         except Exception as e:
             logger.warning("gateway.session: state.db routing load failed: %s", e)
@@ -402,6 +409,9 @@ class SessionPersistenceMixin:
                         retired += 1
                         continue
                     self._entries[key] = SessionEntry.from_dict(entry_data)
+                    # stage001 п.3: legacy-mirror routes also seed the origin ledger.
+                    self._record_session_origin(self._entries[key].session_id,
+                                                self._entries[key].origin)
                     imported += 1
                 except (ValueError, KeyError, TypeError) as e:
                     logger.warning("Skipping invalid session entry %r: %s", key, e)

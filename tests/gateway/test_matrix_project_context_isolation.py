@@ -249,6 +249,11 @@ def _make_runner(current_source: SessionSource, entries: list[SessionEntry]):
     runner.config = GatewayConfig(platforms={Platform.MATRIX: PlatformConfig(enabled=True)})
     adapter = MagicMock()
     adapter._matrix_session_scope = "room"
+    # stage001 п.3: the /resume origin decision is the LAYER's — the fixture must speak with the
+    # real Matrix contract, not the mock's truthy auto-attribute (MagicMock verdicts are untyped
+    # and the guard correctly treats them as "no answer").
+    from plugins.platforms.matrix.adapter import _proves_same_origin
+    adapter.owns_session.side_effect = lambda *a, **k: _proves_same_origin(*a, **k)
     runner.adapters = {Platform.MATRIX: adapter}
     runner.session_store = MagicMock()
     runner.session_store._entries = {entry.session_key: entry for entry in entries}
