@@ -1513,9 +1513,18 @@ def pre_tool_call(tool_name: str = "", args=None, **kw) -> dict | None:
     return {"action": "block", "message": msg}
 
 
+def _tool_handler(args=None, **kw) -> str:
+    # Контракт диспетчера: handler(dict_args) первым позиционным параметром,
+    # НЕ kwargs. Прямая передача write_dialog рождала «action = весь dict» —
+    # отсюда «нет такого действия» / «key required» (ошибка с v8.0, Вл 30.10).
+    a = dict(args or {})
+    a.update(kw)
+    return write_dialog(action=str(a.get("action") or "list"), key=a.get("key"))
+
+
 def register(ctx) -> None:
     ctx.register_tool(name="write_dialog", toolset="write_dialog",
-                      schema=WRITE_DIALOG_SCHEMA, handler=write_dialog,
+                      schema=WRITE_DIALOG_SCHEMA, handler=_tool_handler,
                       description=WRITE_DIALOG_SCHEMA["description"])
     for hook_name, cb in (("pre_tool_call", pre_tool_call), ("post_tool_call", _post_stats)):
         try:
