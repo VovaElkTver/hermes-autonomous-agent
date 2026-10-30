@@ -176,3 +176,185 @@ async def test_resume_unknown_console_name(db):
     _sessions_with_fork(db)
     from gateway.branch_prefix import resolve_console_session
     assert await resolve_console_session(db, "parent", "nope") is None
+
+
+# ---------------------------------------------------------------------------
+# Option A: decoration at the adapter send boundary (install_outbound_labels).
+# ---------------------------------------------------------------------------
+
+from gateway.branch_prefix import install_outbound_labels
+
+GLYPH = "\u2387 "  # "⎇ "
+
+
+class _RecordingAdapter:
+    """Stand-in for a platform adapter: records exactly what reaches the wire."""
+    name = "fake"
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, chat_id, content, reply_to=None, metadata=None):
+        self.sent.append(("send", chat_id, content))
+        return {"ok": True}
+
+    async def edit_message(self, chat_id, message_id, content, *, finalize=False):
+        self.sent.append(("edit", chat_id, content))
+        return {"ok": True}
+
+    async def send_draft(self, chat_id, draft_id, content, **kw):
+        self.sent.append(("draft", chat_id, content))
+        return {"ok": True}
+
+
+class _FakeOrigin:
+    def __init__(self, chat_id):
+        self.chat_id = chat_id
+
+
+class _FakeEntry:
+    def __init__(self, session_id, chat_id, updated_at):
+        self.session_id = session_id
+        self.origin = _FakeOrigin(chat_id)
+        self.updated_at = updated_at
+
+
+class _FakeStore:
+    def __init__(self, entries):
+        self._e = entries
+
+    def list_sessions(self, active_minutes=None):
+        return list(self._e)
+
+
+class _FakeGateway:
+    def __init__(self, db, store=None):
+        self._session_db = db
+        self.session_store = store
+
+
+def _ctx(session_id, chat_id="!room:example"):
+    from gateway.session_context import set_session_vars
+    return set_session_vars(platform="matrix", chat_id=chat_id, session_id=session_id)
+
+
+@pytest.mark.asyncio
+async def test_boundary_labels_interim_progress_and_edit_sends(db):
+    # The tape audit (2026-10-30) found only finalize-decorated finals carried
+    # the label; every other dispatch point must gain it at the send boundary.
+    from gateway.session_context import clear_session_vars
+    _sessions_with_fork(db, title="audit")
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(db), adapter)
+
+    tokens = _ctx("child")
+    try:
+        await adapter.send("!room:example", "interim reply")
+        await adapter.send(chat_id="!room:example", content="kwarg interim")
+        await adapter.edit_message("!room:example", "$ev1", "progress bubble")
+        await adapter.send_draft("!room:example", 7, "draft bubble")
+    finally:
+        clear_session_vars(tokens)
+
+    assert adapter.sent == [
+        ("send", "!room:example", GLYPH + "audit: interim reply"),
+        ("send", "!room:example", GLYPH + "audit: kwarg interim"),
+        ("edit", "!room:example", GLYPH + "audit: progress bubble"),
+        ("draft", "!room:example", GLYPH + "audit: draft bubble"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_boundary_idempotent_plain_sessions_and_empties(db):
+    from gateway.session_context import clear_session_vars
+    _sessions_with_fork(db, title="audit")
+    db.ensure_session("solo", source="test", session_key="k-solo")
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(db), adapter)
+
+    tokens = _ctx("child")
+    try:
+        already = GLYPH + "audit: final answer"  # finalize-decorated final
+        await adapter.send("!room:example", already)
+        tokens2 = _ctx("solo")
+        await adapter.send("!room:example", "plain hello")
+        clear_session_vars(tokens2)
+        await adapter.send("!room:example", "")  # redaction-artifact drafts
+    finally:
+        clear_session_vars(tokens)
+
+    assert adapter.sent[0][2] == already  # untouched, not re-prefixed
+    assert adapter.sent[1][2] == "plain hello"
+    assert adapter.sent[2][2] == ""
+
+
+@pytest.mark.asyncio
+async def test_boundary_chat_fallback_without_turn_context(db):
+    # Slash dispatch outside a bound turn resolves the chat's active session
+    # through the routing store (most recently updated entry for the chat).
+    from datetime import UTC, datetime, timedelta
+    from gateway.session_context import clear_session_vars
+    _sessions_with_fork(db, title="audit")
+    now = datetime.now(UTC)
+    store = _FakeStore([
+        _FakeEntry("parent", "!room:example", now - timedelta(hours=1)),
+        _FakeEntry("child", "!room:example", now),
+    ])
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(db, store=store), adapter)
+
+    clear_session_vars([])
+    await adapter.send("!room:example", "slash answer")
+    assert adapter.sent[0][2] == GLYPH + "audit: slash answer"
+
+
+@pytest.mark.asyncio
+async def test_boundary_main_console_labels_parent_sends(db):
+    from gateway.session_context import clear_session_vars
+    _sessions_with_fork(db, title="audit")
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(db), adapter)
+    tokens = _ctx("parent")
+    try:
+        await adapter.send("!room:example", "main interim")
+    finally:
+        clear_session_vars(tokens)
+    assert adapter.sent[0][2] == GLYPH + "main: main interim"
+
+
+@pytest.mark.asyncio
+async def test_boundary_survives_broken_resolution(db):
+    # A failing label lookup sends the message unchanged, never drops it.
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    class _Boom:
+        async def get_branch_for_child(self, sid):
+            raise RuntimeError("db exploded")
+
+        def get_session(self, sid):
+            raise RuntimeError("db exploded")
+
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(_Boom()), adapter)
+    tokens = set_session_vars(platform="matrix", chat_id="!r", session_id="x")
+    try:
+        await adapter.send("!r", "must still arrive")
+    finally:
+        clear_session_vars(tokens)
+    assert adapter.sent == [("send", "!r", "must still arrive")]
+
+
+@pytest.mark.asyncio
+async def test_boundary_install_is_idempotent_per_adapter(db):
+    from gateway.session_context import clear_session_vars
+    _sessions_with_fork(db, title="audit")
+    adapter = _RecordingAdapter()
+    install_outbound_labels(_FakeGateway(db), adapter)
+    install_outbound_labels(_FakeGateway(db), adapter)  # reconnect, same instance
+    tokens = _ctx("child")
+    try:
+        await adapter.send("!room:example", "one label only")
+    finally:
+        clear_session_vars(tokens)
+    assert adapter.sent[0][2].count(GLYPH) == 1
+    assert adapter.sent[0][2] == GLYPH + "audit: one label only"

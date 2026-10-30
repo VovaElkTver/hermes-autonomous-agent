@@ -891,6 +891,16 @@ class GatewayAdapterLifecycleMixin:
     def _publish_primary_adapter(self, platform, adapter) -> None:
         """Register a connected primary adapter and wire voice mode/input (transcription without /voice join)."""
         self.adapters[platform] = adapter
+        # Multi-console branch labels: decorate at the printing boundary itself,
+        # so interim/progress/slash/approval sends carry the label too (the
+        # finalize decoration stays for the transcript and non-adapter surfaces;
+        # the boundary is idempotent against it).
+        try:
+            from gateway.branch_prefix import install_outbound_labels
+            install_outbound_labels(self, adapter)
+        except Exception:
+            logger.debug("branch_prefix: outbound labeling not installed for %s",
+                         platform, exc_info=True)
         if platform == Platform.API_SERVER:
             from gateway.session_api_turn import recover_api_turns
             recover_api_turns(adapter)
