@@ -308,3 +308,31 @@ async def test_untyped_hook_answer_is_no_answer(tmp_path):
 
     runner._resume_target_allowed = _allowed
     assert await runner._resume_access_denied_reply(ROOM_A, "sid", "x", False, False) is None
+
+
+# ---------------------------------------------------------------------------
+# pre-ledger provenance (hotfix): a parent born before the ledger existed and
+# already rotated away by a fork switch has no ledger entry; the persisted
+# birth row (sessions.origin_json) still proves its room.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pre_ledger_parent_resumable_from_birth_row(tmp_path):
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.ensure_session("parent-pre-ledger", source="matrix", chat_id=ROOM_A.chat_id,
+                          user_id=ROOM_A.user_id, chat_type="group",
+                          origin_json=json.dumps(ROOM_A.to_dict()))
+        store = _make_store(tmp_path, {})
+        runner = _make_guard_runner(store, _matrix_adapter())
+        runner._session_db = db
+        assert runner._gateway_session_origin_for_id("parent-pre-ledger") == ROOM_A
+        assert await runner._resume_access_denied_reply(
+            ROOM_A, "parent-pre-ledger", "main", False, False) is None
+        denied = await runner._resume_access_denied_reply(
+            ROOM_B, "parent-pre-ledger", "main", False, False)
+        assert denied == t("gateway.resume.matrix_blocked_other_room", name="main", room="Room A")
+        assert runner._gateway_session_origin_for_id("never-seen") is None
+    finally:
+        db.close()

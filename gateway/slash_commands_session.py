@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import json
 import logging
 import os
 import shlex
@@ -321,6 +322,24 @@ class GatewaySessionCommandsMixin:
                 origin = None
             if isinstance(origin, SessionSource):
                 return origin
+        # Pre-ledger birth provenance: the sessions row persists origin_json written at creation,
+        # so a session born before the ledger existed — or rotated away before it went live — is
+        # still provably from its own room (stage001 п.3 closure note: no lineage is unprovable).
+        db = getattr(self._session_db, "_db", self._session_db)
+        getter = getattr(db, "get_session", None)
+        if callable(getter):
+            try:
+                row = getter(session_id)
+            except Exception:
+                row = None
+            raw = row.get("origin_json") if isinstance(row, dict) else None
+            if isinstance(raw, str) and raw:
+                try:
+                    parsed = SessionSource.from_dict(json.loads(raw))
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, SessionSource):
+                    return parsed
         return None
 
     @staticmethod
