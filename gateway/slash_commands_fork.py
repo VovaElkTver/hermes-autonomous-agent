@@ -167,6 +167,70 @@ class GatewayForkCommandsMixin:
             self._evict_cached_agent(child_key)
         return t("gateway.join.joined", branch=name, strategy=strategy)
 
+    async def _return_or_leave(self, event, close: bool) -> str:
+        """Shared body of /return (close=True) and /leave (close=False).
+
+        Finds the active branch whose CHILD is the session this chat stands on
+        (walking compression-rotated ids via the parent chain), then merges it
+        into its parent (join strategies as /join) and switches the console
+        back to the parent — or just switches back, leaving the branch open.
+        """
+        source = event.source
+        entry = await self.async_session_store.get_or_create_session(source)
+        session_id = entry.session_id
+
+        # walk up our own rotation chain: current id -> (post-compression) fork child id
+        branch = None
+        visited, cur = set(), session_id
+        while cur and cur not in visited:
+            visited.add(cur)
+            row_branch = await self._session_db.get_branch_for_child(cur)
+            if row_branch is not None:
+                # first branch row on our chain owns this console; if it is
+                # already closed there is nothing to walk back to
+                if row_branch.get("status") == "active":
+                    branch = row_branch
+                break
+            row = await self._session_db.get_session(cur)
+            nxt = (row or {}).get("parent_session_id")
+            if not nxt or nxt == cur:
+                break
+            cur = nxt
+        if branch is None:
+            return t("gateway.leave.not_in_branch")
+
+        name = branch_display_name(branch)
+        parent_id = branch["parent_session_id"]
+        result = None
+        if close:
+            _pos, flags = parse_join_args(event.get_command_args())
+            strategy = ("append" if "--append" in flags
+                        else "discard" if "--discard" in flags else "note")
+            result = await self.join_branch(parent_id, branch, strategy)
+
+        # move this chat's console back to the parent
+        session_key = self._session_key_for_source(source)
+        new_entry = await self.async_session_store.switch_session(session_key, parent_id)
+        if not new_entry:
+            return t("gateway.branch.switch_failed")
+        self._clear_session_boundary_security_state(session_key)
+        self._evict_cached_agent(session_key)
+        if result is not None:
+            return result
+        return t("gateway.leave.left", branch=name)
+
+    async def _handle_return_command(self, event) -> str:
+        """/return [--discard|--append] — close the branch I stand in, back to parent."""
+        if not self._session_db:
+            return self._session_db_unavailable_reply()
+        return await self._return_or_leave(event, close=True)
+
+    async def _handle_leave_command(self, event) -> str:
+        """/leave — step out of the branch I stand in; it stays open."""
+        if not self._session_db:
+            return self._session_db_unavailable_reply()
+        return await self._return_or_leave(event, close=False)
+
     async def _summarize_branch(self, child_id: str) -> str:
         """Compress the branch transcript into a short summary for the work-note."""
         history = await self.async_session_store.load_transcript(child_id)

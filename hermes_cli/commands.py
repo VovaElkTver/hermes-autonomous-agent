@@ -111,8 +111,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="<platform>", cli_only=True, argument_mode="options"),
     CommandDef("branch", "Branch the current session (new thread on Discord/Telegram/Slack/Matrix; --here stays here)",
                "Session", args_hint="[--here] [name]"),
-    CommandDef("fork", "Fork the conversation into a lazy branch sharing the parent history (join with /join)",
+    CommandDef("fork", "Fork the conversation into a lazy branch sharing the parent history (merge back with /join, step out with /return or /leave)",
                "Session", aliases=("branch-lazy",), args_hint="[name]"),
+    CommandDef("return", "Close the fork branch you are standing in: merge it into its parent (work-note by default) and return the console to the parent",
+               "Session", args_hint="[--discard|--append]", busy_policy="dispatch"),
     CommandDef("join", "Join a forked branch back into this session (default: work-note summary)",
                "Session", args_hint="[branch-id] [--discard] [--append]", busy_policy="dispatch"),
     CommandDef("worktree", "Show, list, create, or prune isolated git worktrees", "Session",
@@ -360,7 +362,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
 
     # Exit
     CommandDef("quit", "Exit the CLI (use --delete to also remove session history)", "Exit",
-               cli_only=True, aliases=("exit",), args_hint="[--delete]", desktop="terminal")]
+               cli_only=True, args_hint="[--delete]", desktop="terminal"),
+    CommandDef("leave", "Leave the fork branch you are standing in without closing it (console returns to the branch's parent)",
+               "Session", busy_policy="dispatch")]
 
 
 # Distinguishes ``mixed`` (subcommands plus free-text) from ``options``; no subcommands => ``text``.
