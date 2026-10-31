@@ -336,3 +336,27 @@ async def test_pre_ledger_parent_resumable_from_birth_row(tmp_path):
         assert runner._gateway_session_origin_for_id("never-seen") is None
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_birth_row_beats_repointed_gateway_routing(tmp_path):
+    """Kernel independence: the durable birth row (sessions.origin_json) outranks mutable
+    gateway routing state. A fork switch repointed the live route to another room and the
+    ledger learned that repoint; /resume proof must still say the session is from its BIRTH
+    room, not from whatever the routing currently claims."""
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.ensure_session("born-in-a", source="matrix", chat_id=ROOM_A.chat_id,
+                          user_id=ROOM_A.user_id, chat_type="group",
+                          origin_json=json.dumps(ROOM_A.to_dict()))
+        store = _make_store(tmp_path, {"k": ROOM_B})          # route now points at Room B
+        store._record_session_origin("born-in-a", ROOM_B)      # ledger agrees with the route
+        runner = _make_guard_runner(store, _matrix_adapter())
+        runner._session_db = db
+        assert runner._gateway_session_origin_for_id("born-in-a") == ROOM_A
+        # Room A caller: birth proves it theirs, even though the route says B.
+        assert await runner._resume_access_denied_reply(
+            ROOM_A, "born-in-a", "main", False, False) is None
+    finally:
+        db.close()
