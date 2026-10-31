@@ -360,3 +360,46 @@ async def test_birth_row_beats_repointed_gateway_routing(tmp_path):
             ROOM_A, "born-in-a", "main", False, False) is None
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_broken_birth_row_falls_through_to_ledger(tmp_path):
+    """Critic Q1 [средне]: unparseable origin_json must not poison resolution — the guard
+    falls through to the advisory ledger (never worse than ledger-only behaviour)."""
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.ensure_session("junk-birth", source="matrix", chat_id=ROOM_A.chat_id,
+                          user_id=ROOM_A.user_id, chat_type="group",
+                          origin_json="{not json at all")
+        store = _make_store(tmp_path, {})
+        store._record_session_origin("junk-birth", ROOM_A)
+        runner = _make_guard_runner(store, _matrix_adapter())
+        runner._session_db = db
+        assert runner._gateway_session_origin_for_id("junk-birth") == ROOM_A
+        assert await runner._resume_access_denied_reply(
+            ROOM_A, "junk-birth", "main", False, False) is None
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_birth_vs_live_conflict_is_logged(tmp_path, caplog):
+    """Critic Top-2: when the live route contradicts the birth row, birth wins AND the
+    conflict is surfaced to the operator (a moved session must be diagnosable)."""
+    import logging
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=tmp_path / "state.db")
+    try:
+        db.ensure_session("moved-away", source="matrix", chat_id=ROOM_A.chat_id,
+                          user_id=ROOM_A.user_id, chat_type="group",
+                          origin_json=json.dumps(ROOM_A.to_dict()))
+        store = _make_store(tmp_path, {})
+        store._entries["k"] = _entry(ROOM_B, "moved-away")   # live route now claims Room B
+        runner = _make_guard_runner(store, _matrix_adapter())
+        runner._session_db = db
+        with caplog.at_level(logging.WARNING, logger="gateway.run"):
+            assert runner._gateway_session_origin_for_id("moved-away") == ROOM_A
+        assert any("resume origin conflict" in rec.message for rec in caplog.records)
+    finally:
+        db.close()
