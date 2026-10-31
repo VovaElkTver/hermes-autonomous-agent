@@ -300,32 +300,12 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
     # ------------------------------------------------------- origin / ownership guards
 
     def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
-        """Best-effort origin lookup for gateway session IDs. The live routing entry answers while
-        the key still points at the session; the session store's origin ledger (stage001 п.3)
-        keeps answering after switch_session/fork/resume repointed the route, and after restarts."""
-        lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
-        if callable(lookup):
-            entry = lookup(self.session_store, session_id)
-            origin = getattr(entry, "origin", None) if entry is not None else None
-            if isinstance(origin, SessionSource):
-                return origin
-        # Test doubles / older stores lack the public lookup; fail closed when nothing resolves.
-        entries = getattr(self.session_store, "_entries", {}) or {}
-        live = next((getattr(e, "origin", None) for e in entries.values()
-                     if getattr(e, "session_id", None) == session_id), None)
-        if isinstance(live, SessionSource):
-            return live
-        ledger = getattr(self.session_store, "lookup_session_origin", None)
-        if callable(ledger):
-            try:
-                origin = ledger(session_id)
-            except Exception:
-                origin = None
-            if isinstance(origin, SessionSource):
-                return origin
-        # Pre-ledger birth provenance: the sessions row persists origin_json written at creation,
-        # so a session born before the ledger existed — or rotated away before it went live — is
-        # still provably from its own room (stage001 п.3 closure note: no lineage is unprovable).
+        """Resolve a gateway session's ORIGIN from durable kernel state first: the sessions row's
+        ``origin_json`` (written at creation) is the birth provenance and the only authority for
+        the resume proof ("where was this session started"). Gateway routing state — the live
+        routing entry and the stage001 п.3 origin ledger — is mutable: switch_session/fork/resume
+        repoint it, restarts prune it, and pre-rotation lineage can contradict it. It therefore
+        stays only as an advisory fallback for sessions whose row has not reached the DB yet."""
         db = getattr(self._session_db, "_db", self._session_db)
         getter = getattr(db, "get_session", None)
         if callable(getter):
@@ -341,6 +321,27 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
                     parsed = None
                 if isinstance(parsed, SessionSource):
                     return parsed
+        # Advisory fallback: live routing entry (still pointing at the session), then test-double
+        # stores, then the ledger — only used when no birth row proves the origin.
+        lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
+        if callable(lookup):
+            entry = lookup(self.session_store, session_id)
+            origin = getattr(entry, "origin", None) if entry is not None else None
+            if isinstance(origin, SessionSource):
+                return origin
+        entries = getattr(self.session_store, "_entries", {}) or {}
+        live = next((getattr(e, "origin", None) for e in entries.values()
+                     if getattr(e, "session_id", None) == session_id), None)
+        if isinstance(live, SessionSource):
+            return live
+        ledger = getattr(self.session_store, "lookup_session_origin", None)
+        if callable(ledger):
+            try:
+                origin = ledger(session_id)
+            except Exception:
+                origin = None
+            if isinstance(origin, SessionSource):
+                return origin
         return None
 
     def _same_origin_chat(self, current: SessionSource, origin: Optional[SessionSource]) -> bool:
