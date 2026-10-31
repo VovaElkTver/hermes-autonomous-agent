@@ -137,6 +137,7 @@ tests/test_investigations.py 25, спека docs/design/investigation-mechanism.
 Приёмка мной независимо: 25/25 + соседние когорты 23/23 пере-прогнаны, 40/40 цитат спеки
 валидны по path:line. Риск R1 спеки (в реестровом пути тула нет `db` kwarg — та же форма,
 что у session_fork): при врезке — INLINE_TOOL_EXECUTORS (agent/inline_tool_executors.py).
+Широкая store-когорта tests/hermes_state/ на feat: 1754 passed / 1 failed / 59 skipped / 2 errors (35 мин). Оба проблемных теста НЕ регрессия: test_storage_health_latch ERROR воспроизводится на базе в main checkout (home_io_guard — env), test_state_db_repair… — только в массовом прогоне, в изоляции зелёный на feat и на detached-базе (teardown-галлюцинация pytest-хуков при 1754 тестах). Итог приёмки подготовки: регрессий от новых таблиц нет.
 НЕ сделано (ждёт «иди»): merge feat/investigation в рабочую ветку; врезка H1-H4; живой прогон
 поведенческого теста (агент меняет гипотезу на опровергающем наблюдении).
 
