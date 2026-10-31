@@ -772,6 +772,85 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_session_branches_child
     ON session_branches(child_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_branches_parent
     ON session_branches(parent_session_id, status);
+-- Investigation self-check mechanism (docs/design/investigation-mechanism.md): an
+-- investigation is the agent's own hypothesis-checking state — question, hypotheses,
+-- probes whose discriminating predictions are written BEFORE the probe runs, observation
+-- candidates captured by the runtime from real tool-calls / joined branch results, and a
+-- model-authored close. The core stores conditions only (provenance, delivery dedup via
+-- the UNIQUE observations.dedup_key, restart settle); it never decides which hypothesis
+-- is right. status lifecycle: investigations open → closed (close refused while any
+-- observation is unassessed: the refusal stays recorded as a meta_json diagnostic);
+-- probes pending → dispatched → observed | unknown_outcome (a dispatched probe whose
+-- result never arrived across a restart is settled to unknown_outcome, never re-run).
+CREATE TABLE IF NOT EXISTS investigations (
+    investigation_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    question TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    revision INTEGER NOT NULL DEFAULT 1,
+    opened_at REAL NOT NULL,
+    closed_at REAL,
+    summary TEXT,
+    constraints TEXT,
+    meta_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigations_open
+    ON investigations(session_id) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_investigations_session
+    ON investigations(session_id, status);
+CREATE TABLE IF NOT EXISTS investigation_hypotheses (
+    hypothesis_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    statement TEXT NOT NULL,
+    -- verdict words are recorded by the model through assess; the core never derives one
+    status TEXT NOT NULL DEFAULT 'standing',
+    created_at REAL NOT NULL,
+    meta_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_hypotheses
+    ON investigation_hypotheses(investigation_id);
+CREATE TABLE IF NOT EXISTS investigation_probes (
+    probe_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at REAL NOT NULL,
+    -- structural provenance of the /fork this probe runs as (no embedding)
+    branch_id TEXT,
+    meta_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_probes
+    ON investigation_probes(investigation_id);
+CREATE TABLE IF NOT EXISTS investigation_predictions (
+    prediction_id TEXT PRIMARY KEY,
+    probe_id TEXT NOT NULL REFERENCES investigation_probes(probe_id),
+    hypothesis_id TEXT NOT NULL REFERENCES investigation_hypotheses(hypothesis_id),
+    expected TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigation_predictions_pair
+    ON investigation_predictions(probe_id, hypothesis_id);
+CREATE TABLE IF NOT EXISTS investigation_observations (
+    observation_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    probe_id TEXT REFERENCES investigation_probes(probe_id),
+    -- 'tool' (runtime hook on a real tool-call) | 'branch' (joined /fork result)
+    source TEXT NOT NULL,
+    -- delivery-dedup key: '<session>|call:<call_id>' | '<session>|branch:<branch_id>';
+    -- UNIQUE so a duplicate delivery inserts nothing (Top-1 verdict condition, 01.11)
+    dedup_key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    -- an observation-candidate becomes accounted ONLY through assess
+    assessed INTEGER NOT NULL DEFAULT 0,
+    assessed_at REAL,
+    verdict TEXT,
+    meta_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigation_observations_dedup
+    ON investigation_observations(dedup_key);
+CREATE INDEX IF NOT EXISTS idx_investigation_observations_unassessed
+    ON investigation_observations(investigation_id, assessed);
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
