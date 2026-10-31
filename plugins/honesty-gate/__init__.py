@@ -147,11 +147,16 @@ def handle_stage_open(args: dict, **_kw) -> str:
     if not task:
         return "ОШИБКА: stage_open требует непустой task — задание до исполнения."
     title = str(args.get("title") or "").strip()
+    trigger = str(args.get("trigger") or "").strip()
     stage_id = uuid.uuid4().hex[:8]
     header = f"## STAGE {stage_id} — OPEN — {_ts()}"
     if title:
         header += f" — {title}"
-    _append(f"\n{header}\nЗАДАЧА:\n{task}\n")
+    lines = [f"\n{header}"]
+    if trigger:
+        lines.append(f"TRIGGER: {trigger}")
+    lines.append(f"ЗАДАЧА:\n{task}\n")
+    _append("\n".join(lines))
     return (f"ЭТАП {stage_id} ОТКРЫТ, задание записано в {_reports_path()}. "
             f"По завершении вызови stage_close(stage_id=\"{stage_id}\", result=...) — "
             "задание+результат уйдут критику с фиксированным вопросом, "
@@ -208,6 +213,7 @@ TOOLS = [
         "properties": {
             "task": {"type": "string", "description": "Задание этапа своими словами — ЧТО должно быть сделано и как проверить полноту. Записывается ДО исполнения."},
             "title": {"type": "string", "description": "Короткое название этапа (опционально)."},
+            "trigger": {"type": "string", "description": "Звеньевая связь цепочки: stage_id предшественника + пункт его ОТВЕТА КРИТИКА, породивший это задание. Для первого звена — исходная задача."},
         },
         "required": ["task"],
     }, handle_stage_open, "📋"),
