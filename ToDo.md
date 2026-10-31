@@ -116,6 +116,30 @@
 Косяк по ходу п.5/тред-метки (30.10, харнесс p5_grid_test B.2/B.3/B.5/B.6): **тред-сессии Matrix не входят в форк-lineage комнаты, и guard это воспроизводит как разрыв консолей, а не как единый список.** Минимальный пример: room `!r:x` сидит на root-сессии R; в треде `$threadE` идёт своя линия T (session_key содержит `$threadE`); `/fork thr1` внутри треда создаёт child C (parent_session_id=T). Факты харнесса: `_lineage_ids(R)=[R]`, `_lineage_ids(C)=[C,T]` — пересечения нет (B.2); `_proves_same_origin` из room-консоли на цель C даёт отказ thread_id != "" (B.3/B.5) — то есть `/resume thr1` и `/join thr1` из комнаты не видят ветку, живущую в её же тред-линии; `resolve_console_session(R,'thr1')` → None (B.6). Смысл: `owns_session_fn`/origin-реестр покрывают lineage ТОЙ консоли, откуда форк открыт, а не все консоли комнаты; «комната → все консоли lineage» (аксиома п.3) пока реализуется только форк-деревом одной консоли. Меры (на выбор, не в этот коммит): либо guard доказывает принадлежность по origin-регистру комнаты (пересечение chat_id без thread_id), тогда тред-ветки резолвятся из комнаты; либо `/fork` в треде фиксирует room-anchor и метка наносится room-консолью; либо остаётся разрыв и UX обязан дублировать console-лист по `/sessions` с thread-ключами.
 **Хвост автономности (31.10, Вл «почему после рестарта ничего не делаешь»):** костыль-контур = cron `autonomy-tick` (10m, NO-reply тишина, failure→local). НАЙДЕН НАСТОЯЩИЙ КОРЕНЬ (31.10, вечером): holds_admission в gateway/session_authorities.py проверял наличие ЛЮБОЙ строки session_admissions без фильтра статуса — любая когда-либо admisная мессендж-сессия получала вечное вето на boot auto-resume (drain вешает resume_pending, планировщик проходил мимо, флаг ждал человека). Починено: вето только для живых статусов (queued/started/unknown), terminal не вето; 'unknown' остаётся fail-closed (доктрина operator acknowledgement). Тесты: test_admission_ledger_veto_only_counts_live_rows 6 кейсов, коорта 94 pass. Это событие, не таймер: redelivery = boot + fresh window. Изначальная формулировка: Настоящая мера, не сделанная: событие on_boot гейтвея = redelivery прерванного трона агенту (durable intent вместо таймера; доктрина Вл «отложенное — событие»). Ядро: gateway startup → если был turn-in-progress флаг (ставить на входе трона, снимать на выходе) — вскрыть его на following boot и разбудить сессию владельческим сообщением-продолжением. Пока — tick.
 
+## stage002 — investigation: самопроверка гипотез (внешний разбор 01.11, подготовка по «привлечь omp»)
+
+Механизм (принят): сохраняемое расследование в session DB (5 таблиц по образцу
+session_branches), инструмент `investigation` (open/predict/assess/close), прогноз ДО
+эксперимента, наблюдения прикрепляет runtime (учитываются только через assess), хук
+capture на tool-result и на join (происхождение — структурно investigation_id/probe_id в
+meta_json ветки), однократный напоминатель о неоценённых перед концом хода, при рестарте
+dispatched-без-результата → `unknown_outcome` (НЕ автоповтор), wake = существующий
+boot/resume_pending. Голосов веток нет: согласие не повышает статус гипотезы. Смысловые
+решения — за агентом; ядро хранит условия (критик Top-1 дедуп покрыт на уровне
+наблюдений: UNIQUE dedup_key session|call:<tool_call_id> / session|branch:<branch_id>).
+
+Подготовлено omp в worktree `/home/qwen/work-investigation`, ветка `feat/investigation`,
+коммит `6148378c84` (аддитивно: hermes_state_investigations.py 475 стр, tools/investigation_tool.py,
+tests/test_investigations.py 25, спека docs/design/investigation-mechanism.md 362 строки,
+ wiring в hermes_state.py +2/common +79 SCHEMA_SQL; bump SCHEMA_VERSION НЕ нужен — правило
+репо hermes_state_common.py:284-289, проверено). Хуки H1-H4 в рантайм НЕ врезаны — в спеке
+каждый помечен file:function:line-range; порядок врезки spec §8 (H2→H1→H4→fork-stamp+H3→boot settle).
+Приёмка мной независимо: 25/25 + соседние когорты 23/23 пере-прогнаны, 40/40 цитат спеки
+валидны по path:line. Риск R1 спеки (в реестровом пути тула нет `db` kwarg — та же форма,
+что у session_fork): при врезке — INLINE_TOOL_EXECUTORS (agent/inline_tool_executors.py).
+НЕ сделано (ждёт «иди»): merge feat/investigation в рабочую ветку; врезка H1-H4; живой прогон
+поведенческого теста (агент меняет гипотезу на опровергающем наблюдении).
+
 ## ЖДЁТ ПРИЁМКИ ВЛ (успех определяет только Вл; самопроверка — допуск к приёмке, не вердикт)
 - 31.10 auto-resume: holds_admission status-filter фикс (`30dfa61344`) — деплойнут рестартом 20:4x; awaiting: живой прогон прерванного трона на следующем рестарте.
 - 31.10 sticky /forkb (`a6489c4ae3`) — тесты 14/14; awaiting: живой /forkb в комнате.
