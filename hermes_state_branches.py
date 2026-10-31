@@ -95,6 +95,22 @@ class SessionBranchMixin:
             return None
         return dict(row) if row else None
 
+    def get_bound_active_branch(self, child_session_id: str) -> dict | None:
+        """Branch row for ``child_session_id`` iff it is an ACTIVE branch whose child session is
+        bound to a chat thread (``/forkb``). This row is the sticky lock: while it stays active,
+        the thread's console must not be repointed to another stream except by closing the branch
+        (``/return`` / ``/leave``) — Вл 31.10."""
+        try:
+            row = self._read_one(
+                """SELECT b.* FROM session_branches b
+                   JOIN sessions s ON s.id = b.child_session_id
+                   WHERE b.child_session_id = ? AND b.status = 'active'
+                     AND s.thread_id IS NOT NULL AND s.thread_id <> ''""",
+                (child_session_id,))
+        except Exception:
+            return None
+        return dict(row) if row else None
+
     def list_active_branches(self, parent_session_id: str) -> list[dict]:
         """Active branches of a session, oldest first."""
         try:

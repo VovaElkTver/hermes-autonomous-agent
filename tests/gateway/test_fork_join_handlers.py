@@ -140,10 +140,44 @@ class TestForkJoinHandlers:
         assert "branch" in reply.lower() and "," in reply  # ambiguous listing
 
 
+class TestForkBoundSplit:
+    """`/fork` stays in the room; `/forkb` BOUND opens a chat thread (Вл 30.10:
+    thread-binding every casual /fork is overkill)."""
+
+    @pytest.mark.asyncio
+    async def test_plain_fork_never_opens_thread(self, store):
+        source = _make_source()
+        entry = store.get_or_create_session(source)
+        store._db.append_message(entry.session_id, role="user", content="hi")
+        runner = _make_fork_runner(store)
+        calls: list = []
+
+        async def _spy(src, title):
+            calls.append(title)
+        runner._branch_open_thread = _spy
+        await runner._handle_fork_command(_make_event("/fork plain"))
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_forkb_opens_thread(self, store):
+        source = _make_source()
+        entry = store.get_or_create_session(source)
+        store._db.append_message(entry.session_id, role="user", content="hi")
+        runner = _make_fork_runner(store)
+        calls: list = []
+
+        async def _spy(src, title):
+            calls.append(title)
+        runner._branch_open_thread = _spy
+        await runner._handle_forkb_command(_make_event("/forkb bound"))
+        assert calls == ["bound"]
+
+
 def test_fork_join_wired_into_idle_dispatch_table():
     """The upstream sync silently dropped fork/join from ``_IDLE_COMMANDS`` once —
     the handlers stayed mixed in but ``/fork`` fell through to the agent as plain
     text. Dispatch-table membership is the regression this pins."""
     from gateway.run_busy import GatewayBusySessionMixin as GatewayRunBusyMixin
     assert "fork" in GatewayRunBusyMixin._IDLE_COMMANDS
+    assert "forkb" in GatewayRunBusyMixin._IDLE_COMMANDS
     assert "join" in GatewayRunBusyMixin._IDLE_COMMANDS

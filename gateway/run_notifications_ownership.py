@@ -252,6 +252,19 @@ class GatewayNotificationOwnershipMixin:
                 session_entry.session_key, prior_session_id, target_session_id,
             )
         else:
+            # Sticky /forkb branch (Вл 31.10): a delegation completing must not repoint a bound
+            # thread's console off its branch — inject into the current session instead of switching.
+            try:
+                _branch_lock = await session_db.get_bound_active_branch(str(prior_session_id))
+            except Exception:
+                _branch_lock = None
+            if _branch_lock is not None:
+                logger.info(
+                    "Async-delegation completion for routing key %s kept on bound /forkb branch "
+                    "%s (sticky thread, Вл 31.10); injecting without repointing the route.",
+                    session_entry.session_key, prior_session_id,
+                )
+                return session_entry
             # CAS on the session this completion resolved against: a route replaced meanwhile
             # (/new, /resume) wins over the stale completion.
             switched = await self.async_session_store.switch_session(

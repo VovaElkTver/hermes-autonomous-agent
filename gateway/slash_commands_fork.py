@@ -43,7 +43,36 @@ class GatewayForkCommandsMixin:
     # ------------------------------------------------------------------ /fork
 
     async def _handle_fork_command(self, event) -> str:
-        """/fork [name] - create a lazy branch sharing this session's history."""
+        """`/fork [name]` - lazy branch that stays in this room/console."""
+        return await self._fork_impl(event, bound=False)
+
+    async def _handle_forkb_command(self, event) -> str:
+        """`/forkb [name]` - lazy branch BOUND to its own chat thread.
+
+        Heavy form for write-dialog-like flows and long side-conversations:
+        the branch gets a dedicated Matrix/Telegram thread (Вл 30.10: doing
+        thread-binding for every casual /fork is overkill).
+        """
+        return await self._fork_impl(event, bound=True)
+
+    async def _bound_branch_lock(self, session_id: str) -> dict | None:
+        """The ACTIVE /forkb branch the console on ``session_id`` stands in, if any.
+
+        Sticky-lock predicate (Вл 31.10): while a bound branch is open, the thread's route is
+        its own — resume/new/in-place-fork must not repoint it. Only /return and /leave close it;
+        /forkb from inside spawns a NEW thread route and never touches this one."""
+        if not self._session_db or not session_id:  # type: ignore[attr-defined]
+            return None
+        try:
+            return await self._session_db.get_bound_active_branch(str(session_id))  # type: ignore[attr-defined]
+        except Exception:
+            return None
+
+    def _bound_locked_reply(self, action: str, branch: dict) -> str:
+        return t("gateway.branch.bound_locked", action=action,
+                 name=branch_display_name(branch))
+
+    async def _fork_impl(self, event, bound: bool) -> str:
         if not self._session_db:
             return self._session_db_unavailable_reply()
         source = event.source
@@ -58,10 +87,16 @@ class GatewayForkCommandsMixin:
 
         session_key = self._session_key_for_source(source)
         new_session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        dest_source = await self._branch_open_thread(source, fork_title)
+        dest_source = await self._branch_open_thread(source, fork_title) if bound else None
         in_place = dest_source is None
         if in_place:
             dest_source = source
+            # Sticky /forkb branch (Вл 31.10): an in-place fork (plain /fork, or /forkb whose
+            # thread could not be created) repoints THIS console — while a bound branch is open
+            # the thread keeps its stream; close it with /return or /leave.
+            lock = await self._bound_branch_lock(parent_session_id)
+            if lock is not None:
+                return self._bound_locked_reply("/forkb" if bound else "/fork", lock)
         dest_key = session_key if in_place else self._session_key_for_source(dest_source)
         origin_json = None
         with contextlib.suppress(Exception):

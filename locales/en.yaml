@@ -134,6 +134,7 @@ gateway:
     branched_thread_one: "⑂ Branched to **{title}** in a new thread ({count} message copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     branched_thread_many: "⑂ Branched to **{title}** in a new thread ({count} messages copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     thread_fallback: "No thread could be created here, so the branch replaced this chat's session."
+    bound_locked: "⛔ {action} cannot switch a bound (/forkb) branch thread off its stream. While branch **{name}** is open this thread stays on it; close it with `/return` (into the parent) or `/leave` (step out, branch stays open). For a side branch: `/forkb` from this thread."
   fork:
     created: "⑂ Forked to **{title}** (lazy branch `{branch}`, shares history with `{parent}`)\nFork session: `{new}`\nStep back with `/return` (or `/leave` to keep it open); from the parent: `/join {title}`; full copy: `/branch`."
     no_conversation: "Nothing to fork — the parent has no messages yet."
