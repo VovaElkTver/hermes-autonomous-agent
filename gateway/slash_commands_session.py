@@ -320,20 +320,26 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
                 except Exception:
                     parsed = None
                 if isinstance(parsed, SessionSource):
+                    # Observability (critic Q1): when live routing disagrees with the birth row,
+                    # the two scenarios — stale routing after rotation vs a legitimate /move — are
+                    # indistinguishable here. Birth wins; log the conflict for the operator.
+                    try:
+                        live_origin = self._live_routing_origin_for_id(session_id)
+                    except Exception:
+                        live_origin = None
+                    if isinstance(live_origin, SessionSource) and not self._same_origin_chat(
+                            live_origin, parsed):
+                        logger.warning(
+                            "resume origin conflict: session %s birth chat %r vs live route %r — "
+                            "birth wins (legitimate moves need /resume --cross-room until the "
+                            "move re-stamps provenance)", session_id, parsed.chat_id,
+                            live_origin.chat_id)
                     return parsed
         # Advisory fallback: live routing entry (still pointing at the session), then test-double
         # stores, then the ledger — only used when no birth row proves the origin.
-        lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
-        if callable(lookup):
-            entry = lookup(self.session_store, session_id)
-            origin = getattr(entry, "origin", None) if entry is not None else None
-            if isinstance(origin, SessionSource):
-                return origin
-        entries = getattr(self.session_store, "_entries", {}) or {}
-        live = next((getattr(e, "origin", None) for e in entries.values()
-                     if getattr(e, "session_id", None) == session_id), None)
-        if isinstance(live, SessionSource):
-            return live
+        live_origin = self._live_routing_origin_for_id(session_id)
+        if live_origin is not None:
+            return live_origin
         ledger = getattr(self.session_store, "lookup_session_origin", None)
         if callable(ledger):
             try:
@@ -343,6 +349,20 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
             if isinstance(origin, SessionSource):
                 return origin
         return None
+
+    def _live_routing_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
+        """Mutable gateway routing: the live route while it still points at the session
+        (plus test-double stores exposing ``_entries``). Advisory only — never authority."""
+        lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
+        if callable(lookup):
+            entry = lookup(self.session_store, session_id)
+            origin = getattr(entry, "origin", None) if entry is not None else None
+            if isinstance(origin, SessionSource):
+                return origin
+        entries = getattr(self.session_store, "_entries", {}) or {}
+        live = next((getattr(e, "origin", None) for e in entries.values()
+                     if getattr(e, "session_id", None) == session_id), None)
+        return live if isinstance(live, SessionSource) else None
 
     def _same_origin_chat(self, current: SessionSource, origin: Optional[SessionSource]) -> bool:
         """Platform-agnostic origin check.  Per-participant sessions must be
