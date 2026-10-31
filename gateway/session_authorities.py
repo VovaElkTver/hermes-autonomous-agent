@@ -266,12 +266,21 @@ def admission_owner(authority, session_id):
 
 
 def holds_admission(authority, session_id) -> bool:
-    """Whether *authority*'s store holds a canonical admission for *session_id*. A parked profile's
-    retained (retiring) store that cannot answer counts as holding one: startup auto-resume fails
-    closed for that entry instead of stopping the boot or resuming a turn that FIFO may own."""
+    """Whether *authority*'s store holds a LIVE (non-terminal) canonical admission for
+    *session_id*. A parked profile's retained (retiring) store that cannot answer counts as
+    holding one: startup auto-resume fails closed for that entry instead of stopping the boot or
+    resuming a turn that FIFO may own.
+
+    Terminal rows settle the FIFO's account with the past; only ``queued`` (FIFO will run it),
+    ``started`` (a live turn) and ``unknown`` (never auto-replayed; operator acknowledgement owns
+    it) veto auto-resume. A status-blind veto made every messaging session that ever carried an
+    admission permanently ineligible for restart auto-resume (regression observed 31.10: the
+    drain-time ``resume_pending`` marker survived boot but the scheduler skipped the entry and
+    the turn waited for a human until morning)."""
     try:
         return bool(authority.db._read_one(
-            'SELECT 1 FROM session_admissions WHERE target_session_id IN (?,?) LIMIT 1',
+            "SELECT 1 FROM session_admissions WHERE target_session_id IN (?,?)"
+            " AND status != 'terminal' LIMIT 1",
             (session_id, admission_owner(authority, session_id))))
     except Exception as exc:
         if not getattr(authority, 'retiring', False):
