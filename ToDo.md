@@ -147,7 +147,11 @@ investigation-тула не пишутся как свидетельства) `5
 mark_resume_pending ДО _schedule_resume_pending_sessions) `692b1bc621`. Каждый хук fail-open.
 Тесты: tests/test_investigation_hooks.py 21 (дедуп доставки, эхо/призрак probe, отказоустойчивость,
 гейт один раз, join дважды=один раз, wiring-guard'и порядка в рантайм-файлах) + skeleton 25 +
-fork-когорта = 69 зелёные.
+fork-когорта = 69 зелёные. Широкая когорта (-k stop-gate/persistence/compression/continuation):
+tests/agent = 787 passed / 1 failed / 106 setup-errors — фейл (test_declared_conversation_scope::
+test_the_pre_row_source_matches_persistence) и errors (SessionDB init под systemd без домашних
+гардов) зелёные в изоляции интерактивно (55/55, 1/1) — env-зависимость среды юнита, не регрессия
+хуков; tests/gateway-чанк real-time-медленный, итоги — journalctl coh-g.
 Приёмка мной независимо: 25/25 + соседние когорты 23/23 пере-прогнаны, 40/40 цитат спеки
 валидны по path:line. Риск R1 спеки (в реестровом пути тула нет `db` kwarg — та же форма,
 что у session_fork): при врезке — INLINE_TOOL_EXECUTORS (agent/inline_tool_executors.py).
