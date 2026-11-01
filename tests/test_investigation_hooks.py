@@ -140,6 +140,63 @@ class TestH1Render:
         assert merge < hook < norm
 
 
+class TestH4StopGate:
+    """The gate itself inside apply_stop_gates: fires once, only when the store
+    says observations are unassessed, and its nudge row carries the synthetic flag."""
+
+    def _agent_stub(self, db, monkeypatch):
+        import agent.turn_stop_gates as tsg
+
+        for name in ("_late_lsp_verdicts", "_verify_on_stop_nudge", "_pre_verify_nudge"):
+            monkeypatch.setattr(tsg, name, lambda *a, **k: None)
+        monkeypatch.setattr(tsg, "_kanban_stop_nudge", lambda *a, **k: None)
+        return SimpleNamespace(
+            _session_db=db, session_id="sess-parent", _session_messages=None,
+            _interim_content_was_streamed=lambda text: False,
+            _flush_messages_to_session_db=lambda *a, **k: None,
+            _emit_interim_assistant_message=lambda *a, **k: None,
+            _emit_diagnostic_status=lambda *a, **k: None,
+        )
+
+    def test_gate_nudges_once_then_stays_quiet(self, db, agent, monkeypatch):
+        import agent.turn_stop_gates as tsg
+
+        iid, _pid = _open_inv(db)
+        db.capture_observation(iid, dedup_key="k-g", source="tool", content="r")
+        stub = self._agent_stub(db, monkeypatch)
+        messages: list[dict] = []
+        final_msg = {"role": "assistant", "content": "answer"}
+        verdict = tsg.apply_stop_gates(
+            stub, final_msg, final_response="answer", messages=messages,
+            conversation_history=None, pending_verification_response=None,
+            pending_verification_response_previewed=None)
+        assert verdict.continue_turn is True
+        assert final_msg["finish_reason"] == "investigation_unassessed"
+        nudge = messages[-1]
+        assert nudge["role"] == "user" and nudge["_investigation_stop_synthetic"] is True
+        # second attempt in the same turn: nudged once, then the turn may end
+        verdict2 = tsg.apply_stop_gates(
+            stub, final_msg, final_response="answer", messages=messages,
+            conversation_history=None, pending_verification_response=None,
+            pending_verification_response_previewed=None)
+        assert verdict2.continue_turn is False
+
+    def test_gate_silent_when_assessed(self, db, monkeypatch):
+        iid, _pid = _open_inv(db)
+        oid = db.capture_observation(iid, dedup_key="k-h", source="tool", content="r")
+        db.assess_observation(oid, "supports H1")
+        import agent.turn_stop_gates as tsg
+
+        stub = self._agent_stub(db, monkeypatch)
+        messages: list[dict] = []
+        verdict = tsg.apply_stop_gates(
+            stub, {"role": "assistant", "content": "a"}, final_response="a",
+            messages=messages, conversation_history=None,
+            pending_verification_response=None,
+            pending_verification_response_previewed=None)
+        assert verdict.continue_turn is False and messages == []
+
+
 class TestH4Helpers:
     def test_unassessed_ids_and_nudge(self, db, agent):
         iid, _ = _open_inv(db)

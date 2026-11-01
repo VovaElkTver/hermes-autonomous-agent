@@ -40,6 +40,7 @@ _EPHEMERAL_SCAFFOLDING_FLAGS = (
     "_verification_stop_synthetic",  # verify-on-stop nudge; the assistant candidate itself is NOT synthetic
     "_pre_verify_synthetic",
     "_kanban_stop_synthetic",  # kanban worker stop-guard
+    "_investigation_stop_synthetic",  # investigation H4 nudge; observations themselves live in the store
     "_dropped_toolcall_nudge",  # internal retry instruction; must not replay as user context
 )
 
