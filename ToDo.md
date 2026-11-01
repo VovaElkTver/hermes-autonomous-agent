@@ -158,6 +158,10 @@ write-ahead: нет действия без журнальной записи д
 `systemctl --user restart hermes-gateway.service` вне дерева дочерних процессов. До рестарта
 хуки не исполнялись в проде (аптайм гейтвея 31.10 20:24 < коммиты хуков 01.11 08:52–09:07);
 после — HEAD `96a4c102da`+ (elk-honesty-gate, всё запушено в origin/elk-honesty-gate) = прод.
+ВЕРИФИЦИРОВАНО тиком 01.11 09:3x (обязательство write-ahead «проверить на следующем тике»):
+рестарт состоялся — ExecMainStartTimestamp=09:22:58 > write-ahead коммит `c578f11e01` (09:21),
+гейтвей active/running, в журнале за 15 мин нет Traceback/crash-loop (единственная WARNING —
+штатный паркинг MCP nextcloud). origin/elk-honesty-gate == HEAD (ls-remote сверено).
 НЕ сделано: живой поведенческий прогон (агент открыл исследование → tool-result схвачен → H1 показал →
 assess/пересмотр в том же ходе; отдельный прогон на /fork probe_id → /join note → наблюдение в
 исследовании; прогон рестарта с dispatched-пробником → unknown_outcome + wake).
