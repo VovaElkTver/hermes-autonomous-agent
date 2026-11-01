@@ -151,7 +151,11 @@ fork-когорта = 69 зелёные. Широкая когорта (-k stop-
 tests/agent = 787 passed / 1 failed / 106 setup-errors — фейл (test_declared_conversation_scope::
 test_the_pre_row_source_matches_persistence) и errors (SessionDB init под systemd без домашних
 гардов) зелёные в изоляции интерактивно (55/55, 1/1) — env-зависимость среды юнита, не регрессия
-хуков; tests/gateway-чанк real-time-медленный, итоги — journalctl coh-g.
+хуков; tests/gateway-чанк real-time-медленный, итоги — journalctl coh-g (624 passed / 23 failed:
+два подтверждены PRE-EXISTING воспроизведением на базе 3ca912a96f без хуков
+(worker_persistence::survives_owner_restart_without_repeating_tool, kanban_descendant_scope::
+terminal_descendants_cannot_mutate); остальные — real-time семейства (dispatcher/slack/rotation),
+выборочно зелёные в изоляции при снятой нагрузке).
 Приёмка мной независимо: 25/25 + соседние когорты 23/23 пере-прогнаны, 40/40 цитат спеки
 валидны по path:line. Риск R1 спеки (в реестровом пути тула нет `db` kwarg — та же форма,
 что у session_fork): при врезке — INLINE_TOOL_EXECUTORS (agent/inline_tool_executors.py).
