@@ -195,7 +195,7 @@ process) live in the `hermes-agent-dev` skill, not here.
   (wake seam floor-1: a due event becomes a session wake turn through the FIFO). Executing an event
   consumes it — single execution is the processor's own guarantee; do not hang per-tick watchdog
   scripts over predicates. `cron` is banned as a scheduler of agent steps.
-- **write-dialog (fork model).** A branch REPORTS ("I consider saving to X necessary") — it never
+- **Fork branches (report model).** A branch REPORTS ("I consider saving to X necessary") — it never
   asks permission and never holds a pending question as state. Execution happens only on a human
   decision (record / forget / rephrase), by @vovak or a human at the CLI; the right to write never
   travels into the branch.

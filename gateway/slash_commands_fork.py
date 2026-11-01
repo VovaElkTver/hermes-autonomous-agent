@@ -49,7 +49,7 @@ class GatewayForkCommandsMixin:
     async def _handle_forkb_command(self, event) -> str:
         """`/forkb [name]` - lazy branch BOUND to its own chat thread.
 
-        Heavy form for write-dialog-like flows and long side-conversations:
+        Heavy form for branch-own-thread flows and long side-conversations:
         the branch gets a dedicated Matrix/Telegram thread (Вл 30.10: doing
         thread-binding for every casual /fork is overkill).
         """

@@ -1,6 +1,6 @@
 """`/return` and `/leave` — walk the branch you stand on back to its parent.
 
-Write-dialog doctrine (Вл 30.10): while a `wd:` branch negotiates, the parent
+Branch doctrine (Вл 30.10): while a negotiating branch is open, the parent
 must not move — the branch consumes the console.  Closing must therefore be
 possible FROM the branch, not only from the parent via `/join <id>`:
 `/return` merges the standing branch into its parent (default work-note) and

@@ -113,7 +113,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                "Session", args_hint="[--here] [name]"),
     CommandDef("fork", "Fork the conversation into a lazy branch sharing the parent history — stays in this room (thread-bound variant: /forkb; merge back with /join, step out with /return or /leave)",
                "Session", aliases=("branch-lazy",), args_hint="[name]"),
-    CommandDef("forkb", "Fork bound to its own chat thread: the branch lives in a dedicated thread (write-dialog style isolation); /fork stays in the room",
+    CommandDef("forkb", "Fork bound to its own chat thread: the branch lives in a dedicated thread (own-thread isolation); /fork stays in the room",
                "Session", args_hint="[name]"),
     CommandDef("return", "Close the fork branch you are standing in: merge it into its parent (work-note by default) and return the console to the parent",
                "Session", args_hint="[--discard|--append]", busy_policy="dispatch"),
