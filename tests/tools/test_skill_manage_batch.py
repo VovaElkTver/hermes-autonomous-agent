@@ -276,38 +276,6 @@ class TestSkillManageBatch(unittest.TestCase):
         )
         self.assertTrue(json.loads(raw)["success"])
 
-    def test_batch_stages_as_one_pending_write_when_gated(self):
-        """Approval gate: the whole batch stages as ONE pending record, and
-        apply_skill_pending replays it (operations key round-trips)."""
-        from unittest.mock import patch as _patch
-
-        class _Decision:
-            allow = False
-            blocked = False
-            message = "staged for review"
-
-        staged = {}
-
-        def fake_stage_write(area, payload, summary=None, origin=None):
-            staged.update(payload=payload, summary=summary)
-            return {"id": "pend_1"}
-
-        import tools.write_approval as wa
-
-        with _patch.object(wa, "evaluate_gate", return_value=_Decision()), \
-             _patch.object(wa, "stage_write", side_effect=fake_stage_write):
-            r = self._call("probe", [
-                {"action": "create", "content": SK.format(n="probe")},
-                {"action": "write_file", "file_path": "references/a.md",
-                 "file_content": "a"},
-            ])
-        self.assertTrue(r.get("staged"), r)
-        self.assertEqual(staged["payload"]["action"], "batch")
-        self.assertEqual(len(staged["payload"]["operations"]), 2)
-        # Replay applies the batch (gate bypassed inside).
-        out = json.loads(self.smt.apply_skill_pending(staged["payload"]))
-        self.assertTrue(out["success"], out)
-        self.assertEqual(out["operations_applied"], 2)
 
 
 if __name__ == "__main__":

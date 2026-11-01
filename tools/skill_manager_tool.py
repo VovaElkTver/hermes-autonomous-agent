@@ -7,7 +7,6 @@ existing skills (bundled, hub, user) are modified in place. Layout:
 ``<skills>/[category/]<skill>/SKILL.md`` + optional ``references/ templates/ scripts/ assets/``.
 """
 
-import contextvars as _ctxvars
 import hashlib
 import json
 from contextlib import ExitStack, suppress
@@ -664,43 +663,6 @@ def _remove_file(name: str, file_path: str) -> dict[str, Any]:
 
 # --- Main entry point ---------------------------------------------------------
 
-# Set while replaying an approved staged skill write so skill_manage() does not re-gate it.
-_skill_gate_bypass: _ctxvars.ContextVar[bool] = _ctxvars.ContextVar(
-    "skill_gate_bypass", default=False)
-
-
-def _run_write_gate(build_staging):
-    """Shared write gate: None to proceed, else a JSON tool result (blocked/staged).
-    ``build_staging(wa) -> (payload, gist)`` runs only when staging. Fails open if
-    write_approval cannot be imported."""
-    try:
-        from tools import write_approval as wa
-    except Exception:
-        return None  # fail open
-    decision = wa.evaluate_gate(wa.SKILLS)
-    if decision.allow:
-        return None
-    if decision.blocked:
-        return tool_error(decision.message, success=False)
-    payload, gist = build_staging(wa)
-    record = wa.stage_write(wa.SKILLS, payload, summary=gist, origin=wa.current_origin())
-    return json.dumps({"success": True, "staged": True, "pending_id": record["id"],
-                       "gist": gist, "message": decision.message}, ensure_ascii=False)
-
-
-def _apply_skill_write_gate(action, name, **payload_kwargs):
-    """Flat-shape gate: stage the full kwargs so approval can replay them; bypassed during replay."""
-    if action not in _ACTION_HANDLERS or _skill_gate_bypass.get():
-        return None
-    def _staging(wa):
-        payload = {"action": action, "name": name,
-                   **{k: v for k, v in payload_kwargs.items() if v is not None}}
-        gist_kw = {k: payload_kwargs.get(k) or ""
-                   for k in ("content", "file_path", "old_string", "new_string")}
-        return payload, wa.skill_gist(action, name, **gist_kw)
-    return _run_write_gate(_staging)
-
-
 _FLAT_OP_KEYS = ("content", "category", "file_path", "file_content", "old_string", "new_string",
                  "absorbed_into", "operations")
 
@@ -713,13 +675,6 @@ def _skill_manage_from(payload: dict[str, Any], **extra) -> str:
         **{k: payload.get(k) for k in _FLAT_OP_KEYS}, **extra)
 
 
-def apply_skill_pending(payload: dict[str, Any]) -> str:
-    """Replay a staged skill write, bypassing the gate (the /skills approve handler)."""
-    token = _skill_gate_bypass.set(True)
-    try:
-        return _skill_manage_from(payload)
-    finally:
-        _skill_gate_bypass.reset(token)
 
 
 def _act_patch(a):
@@ -792,13 +747,9 @@ def skill_manage(
             operations, default_name=name or None, task_id=task_id, session_id=session_id)
     if (preflight := _background_review_preflight(action, name)) is not None:
         return json.dumps(preflight, ensure_ascii=False)
-    # Approval gate: skills are too large to review inline, so they always stage regardless
-    # of origin; bypassed when replaying an approved staged write.
     args = dict(content=content, category=category, file_path=file_path, file_content=file_content,
                 old_string=old_string, new_string=new_string, replace_all=replace_all,
                 absorbed_into=absorbed_into)
-    if (gate_result := _apply_skill_write_gate(action, name, **args)) is not None:
-        return gate_result
     if (shape_err := _op_shape_error(action, args)) is not None:
         return tool_error(shape_err, success=False)
     # Validate before the lock is keyed on the name, so a rejected name never touches .locks/
@@ -878,7 +829,7 @@ SKILL_MANAGE_SCHEMA = {
     "name": "skill_manage",
     # ONE advertised call shape (memory-tool pattern): the call IS an operations
     # array. The legacy flat shape (top-level action/name/content/...) is still
-    # ACCEPTED for old transcripts and staged-write replay, but not advertised.
+    # ACCEPTED for old transcripts, but not advertised.
     "description": _skill_manage_description(),
     "parameters": {
         "type": "object",

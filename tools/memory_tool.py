@@ -61,83 +61,11 @@ def load_on_disk_store() -> MemoryStore:
     return store
 
 
-def _pin_matched_entries(store: MemoryStore, payload: dict[str, Any]) -> Optional[str]:
-    """Record on each staged replace/remove the FULL entry its old_text selects now. Approval
-    then applies to exactly the entry the approver reviewed and refuses if it changed:
-    re-running the old_text search at approve time could hit a newer entry that still
-    contains it. Returns the JSON error when the search fails now, as the direct write would."""
-    target = payload.get("target", "memory")
-    if payload.get("action") == "batch":
-        result = store.resolve_batch_entries(target, payload["operations"])
-        if result.get("success"):
-            payload["operations"] = [op if entry is None else {**op, "matched_entry": entry}
-                                     for op, entry in zip(payload["operations"], result["matched_entries"])]
-    elif payload.get("action") in _BG_DELETE_ACTIONS:
-        result = store.resolve_entry(target, payload.get("old_text") or "", payload["action"])
-        if result.get("success"):
-            payload["matched_entry"] = result["matched_entry"]
-    else:
-        return None
-    return None if result.get("success") else json.dumps(result, ensure_ascii=False)
-
-
-def _gate_or_stage(store: MemoryStore, summary: str, detail: str, payload: dict[str, Any]) -> Optional[str]:
-    """JSON tool-result string when the write must NOT proceed (blocked or staged
-    for approval), None to proceed. Fails open if the gate module can't load."""
-    try:
-        from tools import write_approval as wa
-    except Exception:
-        return None
-    decision = wa.evaluate_gate(wa.MEMORY, inline_summary=summary, inline_detail=detail)
-    if decision.allow:
-        return None
-    if decision.blocked:
-        FAILURE_CLASS.set("gate_refused")
-        return tool_error(decision.message, success=False)
-    if (unmatched := _pin_matched_entries(store, payload)) is not None:
-        return unmatched
-    FAILURE_CLASS.set("staged")
-    record = wa.stage_write(wa.MEMORY, payload, summary=f"{summary}: {detail[:120]}", origin=wa.current_origin())
-    return json.dumps({"success": True, "staged": True, "pending_id": record["id"], "message": decision.message},
-                      ensure_ascii=False)
-
-
-# action -> (store call, gate (summary, detail) text) for the live tool path and staged replay
-# ('replace' only replays writes staged before it was removed from the tool).
 _STORE_ACTIONS = {
-    "add": (lambda store, target, content, old_text, entry=None: store.add(target, content),
-            lambda label, content, old_text: (f"add to {label}", content or "")),
-    "replace": (lambda store, target, content, old_text, entry=None: store.replace(target, old_text, content, entry),
-                lambda label, content, old_text: (f"replace in {label}",
-                                                  f"entry matching: {old_text}\nwhole entry becomes: {content}")),
-    "remove": (lambda store, target, content, old_text, entry=None: store.remove(target, old_text, entry),
-               lambda label, content, old_text: (f"remove from {label}", old_text or "")),
-    "patch": (lambda store, target, content, old_text, entry=None: store.patch(target, old_text, content, entry),
-              lambda label, content, old_text: (f"patch in {label}",
-                                                f"entry matching: {old_text}\nspan '{old_text}' becomes: {content} "
-                                                "(rest of the entry is kept)"))}
-
-
-def _batch_op_line(op: dict[str, Any]) -> str:
-    op = op or {}
-    act, content, old = op.get("action", "?"), op.get("content") or op.get("new_text") or "", op.get("old_text", "")
-    if act == "remove":
-        return f"- remove: {old}"
-    if act == "patch":
-        return f"- patch span '{old}' -> '{content}' (rest of the entry is kept)"
-    return f"- {act}: {content}"
-
-
-def _apply_write_gate(store: MemoryStore, action: str, target: str, content: Optional[str],
-                      old_text: Optional[str], operations: Optional[list[dict[str, Any]]] = None) -> Optional[str]:
-    """Gate one mutating op, or (``operations`` set) a whole batch as a single unit."""
-    label = "user profile" if target == "user" else "memory"
-    if operations is not None:
-        return _gate_or_stage(store, f"apply {len(operations)} op(s) to {label}",
-                              "\n".join(_batch_op_line(op) for op in operations),
-                              {"action": "batch", "target": target, "operations": operations})
-    return _gate_or_stage(store, *_STORE_ACTIONS[action][1](label, content, old_text),
-                          {"action": action, "target": target, "content": content, "old_text": old_text})
+    "add": lambda store, target, content, old_text: store.add(target, content),
+    "patch": lambda store, target, content, old_text: store.patch(target, old_text, content),
+    "remove": lambda store, target, content, old_text: store.remove(target, old_text),
+}
 
 
 def _validate_single_op(store, action, target, content, old_text) -> Optional[str]:
@@ -171,19 +99,17 @@ _REPLACE_REMOVED = ("'replace' is not available; use 'patch'. old_text is the ex
 
 
 def destructive_ops(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """The replace/remove ops of a staged memory payload, single-op or batch shape."""
+    """The replace/remove/patch ops of a memory payload, single-op or batch shape."""
     ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
     return [op for op in ops if (op or {}).get("action") in _BG_DELETE_ACTIONS]
 
 
-def _background_delete_gate(store, action, operations, target="memory", content=None,
+def _background_delete_gate(action, operations, target="memory", content=None,
                             old_text=None) -> Optional[str]:
-    """Fail-closed operation gate for unattended background-review forks (#105921): ``add``
-    stays available (it is all any review prompt asks for), while ``patch``/``remove`` —
-    single or inside a batch — are never applied unattended. The op is staged in the pending
-    store instead of merely denied: the fork's own review summary is never published back, so
-    a plain denial would drop the consolidation request with no surfacing path at all. A
-    staging failure fails closed to a plain denial."""
+    """Fail-closed operation gate for unattended background-review forks (#105921):
+    ``add`` stays available (it is all any review prompt asks for), while destructive
+    ``patch``/``remove`` — single or inside a batch — are denied outright. Memory writes
+    are direct: there is no pending-review store to stage them into."""
     from tools.skill_provenance import is_unattended_review
 
     if not is_unattended_review():
@@ -193,31 +119,10 @@ def _background_delete_gate(store, action, operations, target="memory", content=
                {"action": action, "target": target, "content": content, "old_text": old_text})
     if not destructive_ops(payload):
         return None
-    detail = ("; ".join(_batch_op_line(op) for op in operations) if operations is not None
-              else _batch_op_line({"action": action, "content": content, "old_text": old_text}))
-    try:
-        if (unmatched := _pin_matched_entries(store, payload)) is not None:
-            return unmatched
-        from tools import write_approval as wa
-        FAILURE_CLASS.set("staged")
-        record = wa.stage_write(
-            wa.MEMORY, payload,
-            summary=(f"background review consolidation ({'batch' if operations is not None else action} "
-                     f"on {target}): {detail}")[:200],
-            origin=wa.current_origin())
-        return json.dumps({
-            "success": True, "staged": True, "proposal_staged": True, "pending_id": record["id"],
-            "message": ("Background review may not delete memory entries unattended. The proposed "
-                        f"{'batch' if operations is not None else action} was staged for your approval — "
-                        f"review it with {wa.review_command(wa.MEMORY)} "
-                        "(approve to apply, discard to drop)."),
-        }, ensure_ascii=False)
-    except Exception:
-        logger.warning("Failed to stage background-review consolidation; denying", exc_info=True)
-        FAILURE_CLASS.set("gate_refused")
-        return tool_error(
-            "Background review may not delete memory entries ('patch'/'remove', including in a "
-            "batch); 'add' is still available.", success=False)
+    FAILURE_CLASS.set("gate_refused")
+    return tool_error(
+        "Background review may not delete memory entries ('patch'/'remove', including in a "
+        "batch); 'add' is still available.", success=False)
 
 
 def memory_tool(action: str | None = None, target: str = "memory", content: str | None = None, old_text: str | None = None,
@@ -261,13 +166,9 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
             return _invalid("operations must be a list of {action, content?, old_text?} objects.")
         if any(isinstance(op, dict) and op.get("action") == "replace" for op in operations):
             return _invalid(_REPLACE_REMOVED)
-        denied = _background_delete_gate(store, action, operations, target)
+        denied = _background_delete_gate(action, operations, target)
         if denied is not None:
             return "rejected", denied
-        # Approval gate: stages (background/gateway) or prompts inline (CLI); off by default.
-        gate_result = _apply_write_gate(store, "batch", target, None, None, operations)
-        if gate_result is not None:
-            return "rejected", gate_result
         return _applied(store.apply_batch(target, operations))
     # Reject calls with neither operations[] nor the legacy top-level action.
     # Without this guard the dispatch falls through to the generic
@@ -283,11 +184,10 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
     if action not in _STORE_ACTIONS:
         return _invalid(f"Unknown action '{action}'. Use: add, patch, remove")
     invalid = (_validate_single_op(store, action, target, content, old_text)
-               or _background_delete_gate(store, action, None, target, content, old_text)
-               or _apply_write_gate(store, action, target, content, old_text))
+               or _background_delete_gate(action, None, target, content, old_text))
     if invalid is not None:
         return "rejected", invalid
-    return _applied(_STORE_ACTIONS[action][0](store, target, content, old_text))
+    return _applied(_STORE_ACTIONS[action](store, target, content, old_text))
 
 
 def get_builtin_memory_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -322,13 +222,13 @@ def check_memory_requirements() -> bool:
 def _memory_target_error(
     store: MemoryStore, target: str | None, operations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Validate one explicit store before writing, staging, or replaying a batch."""
+    """Validate one explicit store before writing, validating a batch."""
     if target is None:
         FAILURE_CLASS.set("invalid_args")
         return {"success": False, "error": (
             "Missing required target. Retry with target='memory' or target='user' at the top level. "
             "For a batch, remove target from every operation; use separate calls for different stores. "
-            "Nothing was written or staged.")}
+            "Nothing was written.")}
     if not isinstance(target, str) or target not in {"memory", "user"}:
         from tools.registry import _bound_error_text
         FAILURE_CLASS.set("invalid_args")
@@ -343,32 +243,12 @@ def _memory_target_error(
                 return {"success": False, "error": (
                     f"Operation {index} names a different target than the one at the top level. "
                     "One call writes one store: retry with separate calls for different stores. "
-                    "Nothing was written or staged.")}
+                    "Nothing was written.")}
     if store.target_enabled(target):
         return None
     label = "USER.md" if target == "user" else "MEMORY.md"
     FAILURE_CLASS.set("disabled")
     return {"success": False, "error": f"Built-in {label} writes are disabled in memory config.", "target": target}
-
-
-def apply_memory_pending(payload: dict[str, Any], store: MemoryStore) -> dict[str, Any]:
-    """Replay a staged write against the store, bypassing the gate (/memory approve). A
-    replace/remove applies to exactly its pinned ``matched_entry`` or is refused; a record
-    staged before pinning has no verifiable target, so it is refused rather than replayed by
-    old_text (which could hit a newer entry the approver never saw)."""
-    action, target = payload.get("action"), payload.get("target")
-    target_error = _memory_target_error(store, target, payload.get("operations"))
-    if target_error is not None:
-        return target_error
-    if any(not op.get("matched_entry") for op in destructive_ops(payload)):
-        return {"success": False, "error": "This destructive pending write predates entry pinning and cannot be "
-                                           "verified; nothing was applied. Reject it and recreate the change."}
-    if action == "batch":
-        return store.apply_batch(target, payload.get("operations") or [])
-    if action not in _STORE_ACTIONS:
-        return {"success": False, "error": f"Unknown staged action '{action}'."}
-    return _STORE_ACTIONS[action][0](store, target, payload.get("content") or "", payload.get("old_text") or "",
-                                     payload.get("matched_entry"))
 
 
 MEMORY_SCHEMA = {
