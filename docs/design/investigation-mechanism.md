@@ -1,7 +1,12 @@
 # Investigation mechanism — implementation spec (fork anchors)
 
-Status: skeleton merged (state mixin + tool + tests); the four loop hooks below
-are MARKED insertion points, not yet cut into the runtime files. Doctrine (Вл,
+Status: INSTALLED (01.11). Skeleton merged `3ca912a96f`; all hooks cut into the
+runtime per §8 order — H2+R1 `5373052628`, H1 `6e80dc11aa`, H4 `913ecab3fe`,
+fork-stamp+H3+boot-settle `692b1bc621`. Each hook carries one
+``INVESTIGATION-HOOK:`` marked call site; logic lives in
+``agent/investigation_hooks.py`` (fail-open). Tests: tests/test_investigation_hooks.py.
+Deploy: effective after a cold gateway restart; remaining = live behavioral run.
+Doctrine (Вл,
 ToDo 01.11): the core stores conditions only — provenance, delivery dedup,
 restart recovery; hypothesis choice / experiment choice / verdict belong to the
 agent, no external critic, no cron, no human arbitration point. State = rows in
