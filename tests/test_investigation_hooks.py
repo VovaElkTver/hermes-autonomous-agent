@@ -197,6 +197,80 @@ class TestH4StopGate:
         assert verdict.continue_turn is False and messages == []
 
 
+class TestForkStampAndJoinCapture:
+    """H3 both halves at the store level: fork declares the probe (structural
+    bind + meta stamp), join delivers the note (one branch-deduped observation
+    in the investigation the probe belongs to)."""
+
+    def _fork_with_probe(self, db):
+        from tools.session_fork_tool import session_fork
+        import json as _json
+
+        db.append_messages_batch("sess-parent", [dict(role="user", content="seed")])
+        iid, pid = _open_inv(db)
+        out = _json.loads(session_fork(name="check eviction", probe_id=pid,
+                                       db=db, current_session_id="sess-parent"))
+        return iid, pid, out
+
+    def test_fork_binds_probe_and_stamps_meta(self, db):
+        iid, pid, out = self._fork_with_probe(db)
+        assert out["ok"] and out["investigation"]["investigation_id"] == iid
+        assert db.get_probe(pid)["branch_id"] == out["branch_id"]
+        branch = db.get_branch(out["branch_id"])
+        meta = __import__("json").loads(branch["meta_json"])
+        assert meta["investigation_id"] == iid and meta["probe_id"] == pid
+
+    def test_fork_without_or_bogus_probe_stays_plain(self, db):
+        from tools.session_fork_tool import session_fork
+        import json as _json
+
+        db.append_messages_batch("sess-parent", [dict(role="user", content="seed")])
+        _open_inv(db)
+        out = _json.loads(session_fork(name="plain", probe_id="prb-ghost",
+                                       db=db, current_session_id="sess-parent"))
+        assert out["ok"] and "investigation" not in out
+
+    def test_join_note_lands_as_one_deduped_branch_observation(self, db):
+        import asyncio
+
+        iid, pid, out = self._fork_with_probe(db)
+        branch = db.get_branch(out["branch_id"])
+        branch["meta_json"] = __import__("json").dumps(
+            __import__("json").loads(branch["meta_json"]))
+        note = "[work-note from branch check eviction] no eviction line found"
+
+        async def run():
+            await investigation_hooks.capture_branch_join(db, branch, "note", note)
+            # second delivery of the SAME join: dedup key says once
+            await investigation_hooks.capture_branch_join(db, branch, "note", note)
+
+        asyncio.run(run())
+        obs = [o for o in db.list_observations(iid) if o["source"] == "branch"]
+        assert len(obs) == 1 and obs[0]["probe_id"] == pid
+
+    def test_join_without_stamp_records_nothing(self, db):
+        import asyncio
+
+        _open_inv(db)
+        branch = {"branch_id": "b9", "parent_session_id": "sess-parent", "meta_json": "{}"}
+        asyncio.run(investigation_hooks.capture_branch_join(db, branch, "note", "x"))
+        # no stamped investigation: no observations anywhere
+        assert db.list_observations(db.get_open_investigation("sess-parent")["investigation_id"]) == []
+
+    def test_gateway_join_and_boot_wiring_guards(self):
+        import inspect
+
+        import gateway.run_startup as rs
+        import gateway.slash_commands_fork as sc
+
+        assert "INVESTIGATION-HOOK: H3" in inspect.getsource(sc.join_branch if hasattr(sc, "join_branch") else sc)
+        src = inspect.getsource(rs)
+        assert "INVESTIGATION-HOOK: boot settle" in src
+        # settle must run BEFORE the resume scheduler consumes candidates
+        assert src.index("INVESTIGATION-HOOK: boot settle") < src.index("_schedule_resume_pending_sessions()",
+                                                                        src.index("INVESTIGATION-HOOK: boot settle") - 2000)
+
+
 class TestH4Helpers:
     def test_unassessed_ids_and_nudge(self, db, agent):
         iid, _ = _open_inv(db)

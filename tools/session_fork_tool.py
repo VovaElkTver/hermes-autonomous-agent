@@ -22,13 +22,16 @@ FORK_SCHEMA: dict[str, Any] = {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Optional short title for the branch."},
+            "probe_id": {"type": "string", "description": (
+                "Optional investigation probe this branch will run (prb…). Structural "
+                "binding only — results still need investigation(op='assess').")},
         },
         "required": [],
     },
 }
 
 
-def session_fork(name: str = "", db=None, current_session_id: str = "") -> str:
+def session_fork(name: str = "", probe_id: str = "", db=None, current_session_id: str = "") -> str:
     """Create a lazy fork branch of ``current_session_id``; returns JSON status."""
     import json as _json
 
@@ -48,10 +51,17 @@ def session_fork(name: str = "", db=None, current_session_id: str = "") -> str:
             db.set_session_title(child_id, str(name)[:80])
         except Exception:
             pass
+    # INVESTIGATION-HOOK: fork-side probe stamp (spec §3 H3, fork half) — the model
+    # declared which probe this branch answers; bind structurally, record nothing
+    # when the declaration does not resolve. The read stays plain lazy fork.
+    from agent import investigation_hooks
+    stamp = investigation_hooks.stamp_fork_probe(db, current_session_id, branch_id,
+                                                 probe_id, name)
     logger.info("session_fork: %s forked from %s as %s", child_id, current_session_id, branch_id)
     return _json.dumps({"ok": True, "branch_id": branch_id, "name": name or branch_id,
                         "child_session_id": child_id,
-                        "base_message_uid": base_uid})
+                        "base_message_uid": base_uid,
+                        **({"investigation": stamp} if stamp else {})})
 
 
 JOIN_SCHEMA: dict[str, Any] = {
@@ -120,7 +130,8 @@ registry.register(
     toolset="sessions",
     schema=FORK_SCHEMA,
     handler=lambda args, **kw: session_fork(
-        name=args.get("name") or "", db=kw.get("db"),
+        name=args.get("name") or "", probe_id=args.get("probe_id") or "",
+        db=kw.get("db"),
         current_session_id=kw.get("current_session_id") or ""),
     emoji="⑂")
 

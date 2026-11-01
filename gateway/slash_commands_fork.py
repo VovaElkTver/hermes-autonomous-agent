@@ -187,6 +187,7 @@ class GatewayForkCommandsMixin:
         """
         child_id = branch["child_session_id"]
         name = branch_display_name(branch)
+        note = None
         if strategy == "append":
             moved = await self._session_db.move_branch_rows_to_parent(branch)
             if not moved:
@@ -198,6 +199,14 @@ class GatewayForkCommandsMixin:
                 dict(role="user", content=note)])
         # discard falls through: just close the branch
         await self._session_db.set_branch_status(branch["branch_id"], "joined", join_strategy=strategy)
+        # INVESTIGATION-HOOK: H3 capture (docs/design/investigation-mechanism.md §3 H3) —
+        # a joined branch's result lands as evidence in the investigation its probe
+        # forked from (structural meta_json, never embedding); whether it confirms or
+        # refutes is the model's ``assess`` call. Fail-open, deduped by branch.
+        with contextlib.suppress(Exception):
+            from agent import investigation_hooks
+            await investigation_hooks.capture_branch_join(
+                self._session_db, branch, strategy, note)
         child_key = await self._session_db.get_session_key(child_id)
         if child_key:
             self._evict_cached_agent(child_key)

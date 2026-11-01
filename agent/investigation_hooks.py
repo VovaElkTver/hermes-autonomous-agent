@@ -151,20 +151,25 @@ async def capture_branch_join(db, branch: dict, strategy: str, note: str | None)
     """H3: a joined branch's result lands as evidence in the investigation its probe
     forked from. Provenance is structural (meta_json stamped at fork time). Branch
     agreement upgrades nothing — a join is one more observation needing its own
-    ``assess``; there is no vote counter in the schema."""
+    ``assess``; there is no vote counter in the schema. Duck-typed for both the raw
+    SessionDB (tests) and the gateway's async facade (awaitable offload)."""
+    import inspect
+
     try:
         meta = json.loads(branch.get("meta_json") or "{}")
         inv_id = str(meta.get("investigation_id") or "")
         if not inv_id or strategy != "note" or not note:
             return
         parent = branch["parent_session_id"]
-        await db.capture_observation(
+        res = db.capture_observation(
             inv_id,
             dedup_key=db.observation_dedup_key_branch(parent, branch["branch_id"]),
             source="branch", content=note,
             probe_id=(str(meta.get("probe_id") or "") or None),
             meta={"branch_id": branch["branch_id"], "purpose": meta.get("purpose")},
         )
+        if inspect.isawaitable(res):
+            await res
     except Exception as exc:
         logger.debug("investigation H3 join capture skipped: %s", exc)
 

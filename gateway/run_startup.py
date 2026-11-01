@@ -1588,6 +1588,19 @@ class GatewayStartupMixin:
         # written first would get a lower row id than them for good.
         with _log_suppressed(logging.WARNING, "Pending-message recovery failed: %s"):
             recover_gateway_pending(self)
+        # INVESTIGATION-HOOK: boot settle (docs/design/investigation-mechanism.md § Restart) —
+        # probes dispatched before the crash have an unknown outcome source: record that,
+        # never re-run them (a re-run could double a side-effect). Sessions holding an open
+        # investigation ride the standard restart-resume channel below; the model decides
+        # what a lost probe means once the H1 render shows it again.
+        with suppress(Exception):
+            await self._session_db.settle_unresolved_probes()
+            for _inv_sid in await self._session_db.list_open_investigation_unknown_sessions():
+                _inv_key = await self._session_db.get_session_key(_inv_sid)
+                if _inv_key:
+                    with suppress(Exception):
+                        await self.async_session_store.mark_resume_pending(
+                            _inv_key, reason="investigation_probe_unknown")
         # Auto-resume restart-interrupted sessions (ledger-answered ones were cleared above); a failed
         # auto-resume stays visible on the next user message.
         self._schedule_resume_pending_sessions()
