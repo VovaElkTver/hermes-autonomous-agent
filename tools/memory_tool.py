@@ -131,7 +131,7 @@ def memory_tool(action: str | None = None, target: str = "memory", content: str 
     """Tool entry point; returns a JSON string. Single op (action + content/old_text)
     or batch (``operations``, atomic against the final budget). ``new_text``
     aliases ``content``."""
-    if store is None:
+    if store is None and target != "task":
         return tool_error("Memory is not available. It may be disabled in config or this environment.", success=False)
     token = FAILURE_CLASS.set("other")
     try:
@@ -169,6 +169,9 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
         denied = _background_delete_gate(action, operations, target)
         if denied is not None:
             return "rejected", denied
+        if target == "task":  # stage003 step 3: SQL-backed topic scope, no char budget
+            from tools.topic_memory_bridge import apply_task_ops
+            return _applied(apply_task_ops(operations))
         return _applied(store.apply_batch(target, operations))
     # Reject calls with neither operations[] nor the legacy top-level action.
     # Without this guard the dispatch falls through to the generic
@@ -183,6 +186,13 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
         return _invalid(_REPLACE_REMOVED)
     if action not in _STORE_ACTIONS:
         return _invalid(f"Unknown action '{action}'. Use: add, patch, remove")
+    if target == "task":  # stage003 step 3: bridge handles its own validation
+        from tools.topic_memory_bridge import apply_task_ops
+        denied = _background_delete_gate(action, None, target, content, old_text)
+        if denied is not None:
+            return "rejected", denied
+        return _applied(apply_task_ops([{"action": action, "content": content,
+                                         "old_text": old_text}]))
     invalid = (_validate_single_op(store, action, target, content, old_text)
                or _background_delete_gate(action, None, target, content, old_text))
     if invalid is not None:
@@ -226,14 +236,15 @@ def _memory_target_error(
     if target is None:
         FAILURE_CLASS.set("invalid_args")
         return {"success": False, "error": (
-            "Missing required target. Retry with target='memory' or target='user' at the top level. "
+            "Missing required target. Retry with target='memory', target='user' or "
+            "target='task' at the top level. "
             "For a batch, remove target from every operation; use separate calls for different stores. "
             "Nothing was written.")}
-    if not isinstance(target, str) or target not in {"memory", "user"}:
+    if not isinstance(target, str) or target not in {"memory", "user", "task"}:
         from tools.registry import _bound_error_text
         FAILURE_CLASS.set("invalid_args")
         return {"success": False,
-                "error": _bound_error_text(f"Invalid memory target '{target}'. Use 'memory' or 'user'.")}
+                "error": _bound_error_text(f"Invalid memory target '{target}'. Use 'memory', 'user' or 'task'.")}
     if isinstance(operations, list):
         for index, op in enumerate(operations, 1):
             # A nested target equal to the call's (or null) is redundant, not wrong; only a
@@ -244,7 +255,27 @@ def _memory_target_error(
                     f"Operation {index} names a different target than the one at the top level. "
                     "One call writes one store: retry with separate calls for different stores. "
                     "Nothing was written.")}
+    if target == "task":
+        # stage003 step 3: SQL-backed topic scope. Available only inside a
+        # controller-managed run (HERMES_SCOPE_*); independent of store flags.
+        from tools.topic_memory_bridge import available as task_available
+        if task_available():
+            return None
+        FAILURE_CLASS.set("invalid_args")
+        return {"success": False, "target": "task", "error": (
+            "Target 'task' is only available in controller-managed runs: this process has no "
+            "HERMES_SCOPE_KIND/HERMES_SCOPE_ID. Write your local reasoning into the task's own "
+            "artifacts instead of raising any global store silently.")}
     if store.target_enabled(target):
+        from tools.topic_memory_bridge import (restrict_globals_for_scoped_workers,
+                                               task_scope_from_env)
+        scope = task_scope_from_env()
+        if scope and restrict_globals_for_scoped_workers():
+            FAILURE_CLASS.set("disabled")
+            return {"success": False, "target": target, "error": (
+                "This controller-scoped session treats the built-in stores (MEMORY.md/USER.md) "
+                "as read-only policy (memory.task_restrict_globals). Record task-local facts via "
+                "target='task'; propose a generalization instead of writing it globally yourself.")}
         return None
     label = "USER.md" if target == "user" else "MEMORY.md"
     FAILURE_CLASS.set("disabled")
@@ -335,12 +366,26 @@ def _build_memory_schema_overrides() -> dict[str, Any]:
     targets = [t for t, on in zip(("memory", "user"), flags) if on]
     parameters = copy.deepcopy(MEMORY_SCHEMA["parameters"])
     target_schema, description = parameters["properties"]["target"], MEMORY_SCHEMA["description"]
-    target_schema["enum"] = targets
-    if narrowed := _SINGLE_TARGET_TEXT.get(tuple(targets)):
+    narrowed = _SINGLE_TARGET_TEXT.get(tuple(targets))
+    if narrowed:
         target_schema["description"], replacement = narrowed
         description = description.replace(
             "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
             "notes (environment, conventions, tool quirks, lessons).", replacement)
+    # stage003 step 3: a third, SQL-backed target that exists ONLY inside a
+    # controller-managed run (HERMES_SCOPE_*); schema bytes for every other
+    # session stay byte-identical to the pre-stage003 surface.
+    from tools.topic_memory_bridge import available as task_available
+    if task_available():
+        targets.append("task")
+        target_schema["enum"] = targets
+        description += ("\n\nTARGET 'task' = this run's topic scope in the controller DB "
+                        "(kind ∈ fact|constraint|decision|preference; defaults to an unconfirmed "
+                        "agent-proposal — it becomes a rule only after human acceptance, and it "
+                        "never leaks outside the task/project chain).")
+        target_schema["description"] = (
+            "Which memory store: 'memory' personal notes, 'user' user profile, "
+            "'task' this controller run's topic scope.")
     return {"description": description, "parameters": parameters}
 
 

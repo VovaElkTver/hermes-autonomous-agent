@@ -735,6 +735,20 @@ def _join_tier(parts: list[Optional[str]]) -> str:
     return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
+def _topic_memory_part() -> Optional[str]:
+    """Stage003 step 4: the task-scoped topic-memory block, volatile band.
+
+    Rendered ONLY in controller-managed runs (HERMES_SCOPE_* present); every
+    other session gets None and a byte-identical prompt. Snapshot is per
+    process build (worker = one-shot), so no mid-session staleness. Fail-open:
+    a topic-memory outage must never break prompt assembly."""
+    try:
+        from tools.topic_memory_bridge import render_prompt_block
+        return render_prompt_block()
+    except Exception:
+        return None
+
+
 def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) -> dict[str, str]:
     """Assemble the system prompt as three ordered cache tiers: ``stable`` (identity,
     guidance and the coding brief), ``context`` (caller ``system_message``, project
@@ -785,6 +799,10 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # Skills are runtime-mutable, so the index leads the volatile band: on a longest-prefix
     # backend an unchanged index stays inside the reused prefix; a changed one re-prefills from here.
     volatile_parts: list[str] = [skills_prompt, *_memory_parts(agent)]
+    # Stage003 step 4: task-scoped topic memory rides right after the built-in
+    # memory blocks; env-gated → None (and zero bytes) outside controller runs.
+    if topic_block := _topic_memory_part():
+        volatile_parts.append(topic_block)
     # Plugin sections are confined to one coarse anchor in the volatile tail so
     # a resumed process can reconstruct the stable prefix without re-running plugins.
     volatile_parts.extend(_plugin_section_blocks(_frozen_plugin_prompt_sections(agent), "after_memory"))
