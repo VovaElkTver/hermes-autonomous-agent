@@ -167,6 +167,16 @@ def confirm(conn, item_id: str) -> bool:
     return bool(cur.rowcount)
 
 
+def supersede_subject(conn, scope_id: str, subject: str) -> bool:
+    """Retire every ACTIVE item with this subject in this scope without a
+    replacement (the tool-level ``remove``). Returns True when something retired."""
+    cur = conn.execute(
+        "UPDATE ctl_mem_item SET status='superseded'"
+        " WHERE scope_id=? AND subject=? AND status='active'", (scope_id, subject))
+    conn.commit()
+    return bool(cur.rowcount)
+
+
 def import_item(conn, src_item_id: str, dst_scope_id: str,
                 run_id: str | None = None, as_subject: str | None = None) -> str:
     """Copy an item into another scope with provenance (ctl_mem_import row).
