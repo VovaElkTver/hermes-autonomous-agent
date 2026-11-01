@@ -976,6 +976,56 @@ CREATE TABLE IF NOT EXISTS ctl_alert_state (
   alert_key TEXT PRIMARY KEY, digest TEXT NOT NULL, last_ts REAL NOT NULL,
   count INTEGER NOT NULL DEFAULT 0
 );
+-- Ports from dsh-superagent-prototype @6337fc8 (audit 2026-11-01, mechanism donor,
+-- runtime NOT adopted). Writers: the controller package only (same invariant as ctl_*).
+-- ctl_effect — durable side-effect queue (controller/effects.py): coalescing upsert
+-- inside the caller's transaction, generation guards a running attempt's finish-up
+-- against a fresher payload, Later() retries without growing the failure count.
+CREATE TABLE IF NOT EXISTS ctl_effect (
+  kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL DEFAULT '',
+  seq INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL,
+  since REAL NOT NULL, error TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (kind, key)
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_effect_kind_due ON ctl_effect(kind, due);
+-- ctl_outbox — outbound-message receipts (controller/outbox.py): idempotent message
+-- ids (INSERT OR IGNORE), per-conversation ordering barrier over still-pending
+-- earlier messages, dropped messages keep why forever and never queue again.
+CREATE TABLE IF NOT EXISTS ctl_outbox (
+  msg_id TEXT PRIMARY KEY, task_id TEXT, conv_key TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'reply', text TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','sent','dropped')),
+  dropped_reason TEXT, created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_outbox_conv ON ctl_outbox(conv_key, status);
+-- ctl_mandate — immutable authorization a task entered running under
+-- (controller/mandate.py): recorded by transitions.py at every ready->running,
+-- revalidated against the CURRENT policy before blocked/failed/needs_human resume;
+-- a policy change delivers effects, it does not silently retro-authorize.
+CREATE TABLE IF NOT EXISTS ctl_mandate (
+  task_id TEXT PRIMARY KEY, strength TEXT NOT NULL,
+  policy_version TEXT NOT NULL, basis TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '',
+  issued_at REAL NOT NULL, withdrawn_at REAL
+);
+-- ctl_event_disposition — where an absorbed event went (controller/disposition.py):
+-- unit of audit next to ctl_event idempotency (donor TriggerDisposition).
+CREATE TABLE IF NOT EXISTS ctl_event_disposition (
+  event_id TEXT PRIMARY KEY, fanout TEXT NOT NULL DEFAULT '[]',
+  context TEXT NOT NULL DEFAULT '[]', handbacks TEXT NOT NULL DEFAULT '[]',
+  acked TEXT NOT NULL DEFAULT '[]', requeued INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
+);
+-- ctl_input_receipt — read-receipt discipline for inputs handed to a run
+-- (controller/receipts.py): delivered_at marks executor take-up, read_at marks the
+-- step actually consuming it; an interrupted run requeues only what no step took.
+CREATE TABLE IF NOT EXISTS ctl_input_receipt (
+  run_id TEXT NOT NULL, event_id TEXT NOT NULL,
+  delivered_at REAL, read_at REAL,
+  PRIMARY KEY (run_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_input_receipt_run ON ctl_input_receipt(run_id);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).
