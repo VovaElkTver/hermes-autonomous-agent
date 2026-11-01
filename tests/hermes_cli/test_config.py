@@ -940,7 +940,6 @@ class TestConfigSupportFloor:
             "platforms": {"telegram": {"tool_progress": "verbose"}},
             "tool_progress_overrides": {"telegram": "verbose"},
         },
-        "memory": {"write_approval": True},
         "model": {"default": "openai/gpt-5.4", "provider": "openrouter"},
         # v25 lowered the old 24h default to 1h; v40 drops that 1h default so
         # the shipped ttl_minutes (20) applies.
@@ -1458,48 +1457,24 @@ class TestEnvWriteDenylist:
 
 
 
-class TestWriteApprovalMigration:
-    """Version 28→29 renames memory/skills write_mode → write_approval (bool).
+class TestLegacyWriteModeDropped:
+    """A v28 config carrying ``memory/skills.write_mode`` sheds it through the
+    whole chain: the rename step is history, and the key leaves the file when
+    the review-queue subsystem is dropped."""
 
-    Only an explicit ``approve`` carried gating intent and maps to ``True``;
-    ``on``/``off``/unset map to ``False`` (gate off). The old ``write_mode`` key
-    is removed. Only a persisted key is rewritten — never invented.
-    """
-
-    def _write(self, tmp_path, body: str):
-        (tmp_path / "config.yaml").write_text(body)
-
-    def test_approve_maps_to_true(self, tmp_path):
+    def test_write_mode_never_survives_the_chain(self, tmp_path):
+        (tmp_path / "config.yaml").write_text(
+            "_config_version: 28\nmemory:\n  write_mode: approve\n"
+            "skills:\n  write_mode: approve\n")
         with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            self._write(tmp_path,
-                        "_config_version: 28\nmemory:\n  write_mode: approve\n"
-                        "skills:\n  write_mode: approve\n")
             migrate_config(interactive=False, quiet=True)
             raw = yaml.safe_load((tmp_path / "config.yaml").read_text())
-            assert raw["memory"]["write_approval"] is True
-            assert raw["skills"]["write_approval"] is True
-            assert "write_mode" not in raw["memory"]
-            assert "write_mode" not in raw["skills"]
-
-    def test_on_and_off_map_to_false(self, tmp_path):
-        with patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}):
-            # YAML 1.1 parses bare on/off as bools — write_mode could be either
-            # the string or the bool; both legacy "not gating" values → False.
-            self._write(tmp_path,
-                        "_config_version: 28\nmemory:\n  write_mode: 'on'\n"
-                        "skills:\n  write_mode: 'off'\n")
-            migrate_config(interactive=False, quiet=True)
-            raw = yaml.safe_load((tmp_path / "config.yaml").read_text())
-            loaded = load_config()
-            # write_approval=False equals the schema default, so it is NOT
-            # materialised to disk (lean-config invariant) — the legacy
-            # write_mode key is gone and the effective value resolves to False
-            # via load_config()'s deep-merge.
-            assert "write_mode" not in raw.get("memory", {})
-            assert "write_mode" not in raw.get("skills", {})
-            assert loaded["memory"]["write_approval"] is False
-            assert loaded["skills"]["write_approval"] is False
-
+        for section in ("memory", "skills"):
+            assert "write_mode" not in raw.get(section, {})
+            assert "write_approval" not in raw.get(section, {})
+        loaded = load_config()
+        assert "write_approval" not in loaded["memory"]
+        assert "write_approval" not in loaded["skills"]
 
 class TestMigrationWriteInvariant:
     """Architectural guard: every migration write routes through the single

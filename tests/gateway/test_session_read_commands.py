@@ -14,15 +14,13 @@ import pytest
 from tests.gateway.fixtures.local_recovery_probe import Model, child_env, daemon, rpc, websocket
 
 
-def test_memory_review_verbs_are_local_session_controls():
+def test_memory_verb_forms_are_refused_once_the_queues_are_gone():
     from gateway.session_commands import command_verdict
 
     assert command_verdict('memory', '') == 'read'
-    assert command_verdict('memory', 'pending') == 'read'
-    for args in ('approve entry-1', 'apply entry-1', 'reject all', 'deny entry-1', 'drop entry-1',
-                 'approval on', 'mode off'):
-        assert command_verdict('memory', args) == 'control'
-    assert command_verdict('memory', 'search user') == 'refused'
+    for args in ('pending', 'usage', 'approve entry-1', 'apply entry-1', 'reject all', 'deny entry-1',
+                 'drop entry-1', 'approval on', 'mode off', 'search user'):
+        assert command_verdict('memory', args) == 'refused'
 
 
 @pytest.mark.platforms("linux")
@@ -66,7 +64,7 @@ def test_local_session_reads_report_this_session_and_refuse_their_write_forms(tm
             for command in ('usage', 'insights', 'profile', 'topup', 'diff', 'memory', 'kanban list',
                             'suggestions', 'bundles', 'usage reset', 'kanban create x',
                             'suggestions catalog', 'agents', 'sessions', 'platform',
-                            'toolsets', 'platforms', 'skills pending', 'skills reject nope', 'skills install x',
+                            'toolsets', 'platforms', 'skills', 'skills install x',
                             'memory reject nope'):
                 try:
                     reply = await rpc(ws, 'slash.exec', session_id=sid, command=command)
@@ -93,21 +91,21 @@ def test_local_session_reads_report_this_session_and_refuse_their_write_forms(tm
     # Workspace report: the session's frozen cwd.
     assert 'SESSION_CWD_MARKER.txt' in out['diff'], out['diff']
     # Review queues and boards, read-only views.
-    assert 'No pending memory writes' in out['memory'], out['memory']
+    assert 'MEMORY.md: 0 entries' in out['memory'], out['memory']
     assert out['kanban list'] == '(no matching tasks)', out['kanban list']
     assert 'No suggested automations' in out['suggestions'], out['suggestions']
     assert str(home / 'skill-bundles') in out['bundles'], out['bundles']
     # Reports with no messaging handler: the classic CLI's text for this session's toolsets.
     assert '(*) todo ' in out['toolsets'] and '    web ' in out['toolsets'], out['toolsets']
     assert 'Telegram' in out['platforms'] and 'TELEGRAM_BOT_TOKEN' in out['platforms'], out['platforms']
-    # The skill write-approval queue: the messaging handler's review verbs; the hub stays refused.
-    assert 'No pending' in out['skills pending'] or 'pending' in out['skills pending'].lower(), out['skills pending']
-    assert out['skills reject nope'] != 'unsupported_command', out['skills reject nope']
+    # /skills and /memory answer directly on the messaging surface (management stays
+    # in the terminal hub); argument forms of these commands are refused here.
+    assert 'skills available' in out['skills'], out['skills']
     assert out['skills install x'] == 'unsupported_command', out['skills install x']
-    assert out['memory reject nope'] != 'unsupported_command', out['memory reject nope']
+    assert out['memory reject nope'] == 'unsupported_command', out['memory reject nope']
     # Write forms, messaging-model state and gateway-wide views stay refused (the per-session settings
     # run: tests/gateway/test_session_setting_commands.py).
-    # The /memory write forms are controls (tests/gateway/test_session_memory_review.py).
+    # The /memory write forms are controls.
     for command in ('usage reset', 'kanban create x', 'suggestions catalog',
                     'agents', 'sessions', 'platform'):
         assert out[command] == 'unsupported_command', (command, out[command])

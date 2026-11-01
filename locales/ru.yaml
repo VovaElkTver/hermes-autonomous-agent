@@ -719,9 +719,6 @@ gateway:
     disabled_for_platform: "Навык **{name}** выключен для {platform}.\nВключите его командой: `hermes skills config`"
     stacked_disabled: "Навык(и) **{names}** в этом составном вызове выключены для {platform}.\nВключите их командой: `hermes skills config`"
     stacked_load_failed: "Не удалось загрузить составные навыки для /{command}."
-    gate_off: "Одобрение записи навыков выключено (skills.write_approval). Включите его командой /skills approval on, затем проверяйте отложенные записи здесь через /skills pending."
-    unknown_subcommand: "Неизвестная подкоманда /skills на этой платформе. Используйте: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (Поиск и установка — только в CLI.)"
-    diff_truncated: "\n… (обрезано — полный diff в ~/.hermes/pending/skills/{pending_id}.json)"
   busy:
     action_restarting: "перезапускается"
     action_shutting_down: "завершает работу"
@@ -912,7 +909,6 @@ gateway:
     item: "• `/{slug}` — {desc} _(навыков: {count})_"
     invoke_hint: "Вызовите бандл командой `/<slug>`, чтобы загрузить все его навыки."
   memory:
-    unknown_subcommand: "Неизвестная подкоманда /memory. Доступно: pending, approve <id>, reject <id>, approval <on|off>."
   approvals:
     admin_only: "Менять постоянный режим одобрений могут только администраторы шлюза."
   heartbeat:
@@ -2975,7 +2971,6 @@ cli:
     kanban:
       failed: "(._.) ошибка kanban: {error}"
     memory:
-      unknown_subcommand: "Неизвестная подкоманда /memory. Доступны: pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Изучаю навык по вашему описанию..."
       from_conversation: "⚡ Изучаю навык по этому разговору..."

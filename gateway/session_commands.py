@@ -79,32 +79,22 @@ def _first_token(arg):
     return ''
 
 
-def _first_word(arg):
-    """The first whitespace-separated word, as main's CLI and the messaging /memory and /skills
-    handlers split it: a quote later in the line belongs to the argument (`/memory pending it's`)."""
-    words = arg.split(None, 1)
-    return words[0].lower() if words else ''
-
-
 # The read-only argument forms of a read command whose other subcommands write: ``/usage reset``
 # redeems a credit, ``/suggestions accept|catalog`` schedules cron jobs delivering to this
-# (non-messaging) chat. The review queues read like main's CLI: only the first word counts.
+# (non-messaging) chat. Only the first word counts.
 _READ_ARGUMENTS = {
-    'skills': lambda arg: _first_word(arg) in {'', 'pending', 'diff'},
+    'skills': lambda arg: not arg.strip(),
     'usage': lambda arg: not arg.strip(),
-    'memory': lambda arg: _first_word(arg) in {'', 'pending'},
+    'memory': lambda arg: not arg.strip(),
     'suggestions': lambda arg: not arg.strip(),
     'kanban': lambda arg: _first_token(arg) in _KANBAN_READS,
 }
 
 
-# The write forms of a command whose reads are above: the messaging handler's own review verbs,
-# applied for this session's profile (`/memory` and `/skills` approve|reject their staged queues;
-# `approval` updates their config.yaml switch, as main's CLI wrote it).
-_CONTROL_ARGUMENTS = {
-    'skills': lambda arg: _first_word(arg) in {'approve', 'apply', 'reject', 'deny', 'drop', 'approval', 'mode'},
-    'memory': lambda arg: _first_word(arg) in {'approve', 'apply', 'reject', 'deny', 'drop', 'approval', 'mode'},
-}
+# The write forms of commands whose bare form reads: the review queues used to put
+# approve|reject|approval verbs here per command; writes now go through the tools
+# directly, so the registry only refuses leftover hub verbs.
+_CONTROL_ARGUMENTS: dict[str, object] = {}
 
 
 # The setting forms a local session cannot deliver: `/voice tts` asks the owner to voice every reply,

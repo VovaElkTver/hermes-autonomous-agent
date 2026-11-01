@@ -704,9 +704,6 @@ gateway:
     disabled_for_platform: "Der Skill **{name}** ist für {platform} deaktiviert.\nAktivieren Sie ihn mit: `hermes skills config`"
     stacked_disabled: "Die Skills **{names}** in diesem gestapelten Aufruf sind für {platform} deaktiviert.\nAktivieren Sie sie mit: `hermes skills config`"
     stacked_load_failed: "Gestapelte Skills für /{command} konnten nicht geladen werden."
-    gate_off: "Die Genehmigung für Skill-Schreibvorgänge ist aus (skills.write_approval). Aktivieren Sie sie mit /skills approval on und prüfen Sie vorgemerkte Schreibvorgänge dann hier mit /skills pending."
-    unknown_subcommand: "Unbekannter /skills-Unterbefehl auf dieser Plattform. Verwenden Sie: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (Suchen/Installieren nur über die CLI.)"
-    diff_truncated: "\n… (gekürzt — vollständiger Diff in ~/.hermes/pending/skills/{pending_id}.json)"
   busy:
     action_restarting: "wird neu gestartet"
     action_shutting_down: "wird heruntergefahren"
@@ -897,7 +894,6 @@ gateway:
     item: "• `/{slug}` — {desc} _({count} Skills)_"
     invoke_hint: "Rufen Sie ein Bundle mit `/<slug>` auf, um alle seine Skills zu laden."
   memory:
-    unknown_subcommand: "Unbekannter /memory-Unterbefehl. Verwenden Sie: pending, approve <id>, reject <id>, approval <on|off>."
   approvals:
     admin_only: "Nur Gateway-Administratoren können den dauerhaften Genehmigungsmodus ändern."
   heartbeat:
@@ -2960,7 +2956,6 @@ cli:
     kanban:
       failed: "(._.) Kanban-Fehler: {error}"
     memory:
-      unknown_subcommand: "Unbekannter /memory-Unterbefehl. Verwenden Sie: pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Lerne einen Skill aus Ihrer Beschreibung..."
       from_conversation: "⚡ Lerne einen Skill aus dieser Konversation..."

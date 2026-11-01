@@ -377,17 +377,7 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     description: 'Show current session status',
     surface: rpc('session.status', ctx => ({ session_id: ctx.sessionId }))
   },
-  {
-    // Keep this explicit so a current Desktop can review staged writes even
-    // when connected to an older backend whose catalog still says the Skills
-    // sidebar owns the command. The sidebar manages installed skills; it does
-    // not expose the write-approval queue (#98330).
-    name: '/skills',
-    description: 'Review staged skill writes and approval mode',
-    surface: exec(),
-    argumentMode: 'options',
-    desktopSubcommands: ['pending', 'approve', 'reject', 'diff', 'approval']
-  }
+
 ]
 
 /**

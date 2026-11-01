@@ -10,7 +10,16 @@ import pytest
 
 from tools.memory_tool import memory_tool
 from tools.memory_tool_store import MemoryStore
-from hermes_cli.write_approval_commands import _changed_entries
+
+
+def _changed_entries(result: dict, kind: str) -> list[str]:
+    """Full text of every entry a memory write changed, single-op or batch shape."""
+    single = result.get(f"{kind}_entry")
+    if kind == "patched" and single is None:
+        single = result.get("patched_entry_before")
+    batch = result.get(f"{kind}_entries") or {}
+    return ([single] if single else []) + [batch[k] for k in sorted(batch, key=int)]
+
 
 PACKED = "todo: item A; item B; item C"
 
