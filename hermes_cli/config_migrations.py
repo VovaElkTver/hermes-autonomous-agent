@@ -708,19 +708,35 @@ def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
 def _migrate_to_53(results: dict[str, Any], quiet: bool) -> None:
     # 52 → 53: the memory/skills write-approval gate was retired (writes are direct; the
     # unattended background-review guard refuses destructive ops outright). Drop any persisted
-    # gate keys so nothing reads a flag no runtime consumes anymore.
+    # gate keys — including the fork plugin's companion flag — so nothing reads a flag no
+    # runtime consumes anymore.
     config = read_raw_config()
     touched = False
-    for subsystem in ("memory", "skills"):
+    for subsystem in ("memory", "skills", "files"):
         sub = config.get(subsystem)
-        if isinstance(sub, dict) and "write_approval" in sub:
-            sub.pop("write_approval")
+        if isinstance(sub, dict):
+            for key in ("write_approval", "write_dialog"):
+                if key in sub:
+                    sub.pop(key)
+                    touched = True
             config[subsystem] = sub
-            touched = True
     if touched:
-        results["config_added"].append("removed memory/skills.write_approval (gate retired)")
+        results["config_added"].append("removed memory/skills/files review flags (retired)")
         _commit(config, results, quiet, None,
-                "  ✓ Dropped write_approval gate keys — memory/skill writes are direct")
+                "  ✓ Dropped retired review flags — memory/skill writes are direct")
+    # The retired fork plugin's toolset name can linger in the bootstrap stamp of known
+    # plugin toolsets; prune the entry (nothing scans it anymore).
+    stamp = config.get("known_plugin_toolsets")
+    pruned = False
+    if isinstance(stamp, dict):
+        for plat, names in stamp.items():
+            if isinstance(names, list) and "write_dialog" in names:
+                stamp[plat] = [n for n in names if n != "write_dialog"]
+                pruned = True
+    if pruned:
+        config["known_plugin_toolsets"] = stamp
+        results["config_added"].append("pruned retired plugin toolset stamp")
+        _commit(config, results, quiet, None, "  ✓ Pruned retired plugin toolset stamp")
 
 
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
