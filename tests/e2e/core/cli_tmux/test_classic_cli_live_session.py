@@ -100,7 +100,7 @@ SLASH_SWEEP = (
     ("/verbose", "Tool progress:"), ("/yolo", "YOLO mode ON"), ("/yolo", "YOLO mode OFF"),
     ("/personality", "Personalities"), ("/cron", "Scheduled Tasks"), (f"/title {TITLE}", f"Session title set: {TITLE}"),
     ("/platforms", "Gateway Status"), ("/history", "LIVE01"), ("/save", "Usage: /save"), ("/agents", "Running processes"),
-    ("/insights", "Models Used"), ("/memory", "memory.write_approval"),
+    ("/insights", "Models Used"), ("/memory", "MEMORY.md"),
     # /busy and /footer print the gateway handler's markdown verbatim (main: plain CLI text); the
     # needles stop before the formatting so the sweep pins the behaviour, not that rendering gap.
     ("/config", "Configuration"), ("/busy queue", "Busy input mode set to"), ("/footer status", "Runtime footer"),

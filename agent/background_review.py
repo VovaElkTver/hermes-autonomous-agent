@@ -666,10 +666,6 @@ def _prior_tool_keys(prior_snapshot: list[dict]) -> tuple[set, set]:
 
 def _action_lines(data: dict, detail: dict, verbose: bool) -> list[str]:
     """Summary line(s) for one successful notify-tool result (``[]`` when nothing to report)."""
-    if data.get("staged"):
-        # The fork's own review summary is never published back, so an unattended-review
-        # consolidation proposal must surface here or it is silently lost (#105921).
-        return [data["message"]] if data.get("proposal_staged") and data.get("message") else []
     message = data.get("message", "")
     target = data.get("target", "") or detail.get("target", "")
     is_skill = detail.get("tool") == "skill_manage"

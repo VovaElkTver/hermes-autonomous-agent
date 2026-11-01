@@ -107,7 +107,7 @@ assess/пересмотр в том же ходе; отдельный прого
 - 31.10 resume-origin birth + hotfix-branch (`2a719e4fbf`/`dc181b75e2`) — критик GO-WITH-CONDITIONS закрыты; awaiting: приёмка Вл.
 - 31.10 autonomy-tick (cron 10m) — форс-прогон ok; awaiting: наблюдение цикла сутки + вердикт, таймер это или событие.
 - osиротевшие unknown-admissions (seq 1556 c63b4733) — закрытие только оператором: одна команда.
-- 01.11 полное удаление review-подсистемы записи (pending-store: writers memory/skills, surfaces gateway/TUI/CLI, config-ключи + миграция-53, i18n 17 локалей, desktop-каталог, README/controller): тесты 112+686+168 зелёные, e2e-читалка зелёная кроме env-семейства (daemon runtime перестраивается — требует тёплой сборки, не связано с логикой). awaiting: живой /memory и /skills в комнате после рестарта + приёмка Вл. О knowingly осталось: approval-гейт ~/.ssh/config (другой механизм, то же слово в имени функции), датированная критика 27.10 (архив), TS-комментарии с /skills как примером аргумент-гейтинга.
+- 01.11 полное удаление review-подсистемы записи (pending-store: writers memory/skills, surfaces gateway/TUI/CLI, config-ключи + миграция-53, i18n 17 локалей, desktop-каталог, docs/README/website): тесты 112+686+168+метрики зелёные (память-контракт: класс `staged` выведен, refusal-класс живёт); prod-config вычищен миграцией (5 ключей + штамп toolset), гейтвей перезапущен 12:49. awaiting: живой /memory и /skills в комнате + приёмка Вл. О knowingly осталось: approval-гейт ~/.ssh/config (другой механизм, то же слово в имени функции), датированная критика 27.10 (архив), TS-комментарии с /skills как примером аргумент-гейтинга.
 
 ## Внешний разбор 01.11: что принято, что на решение Вл, что отсеяно
 

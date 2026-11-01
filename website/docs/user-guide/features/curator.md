@@ -281,9 +281,7 @@ patch, rewrite, and add support files to any skill it learns from (hand-written,
 URL-installed, bundled, hub-installed, external, or pinned), so lessons land in
 the skill that governs the task whoever wrote it. Every such write is recorded
 in the skill ledger. It may archive (delete) only curator-managed skills, never
-pinned ones. To review those writes before they land, turn on
-`skills.write_approval` (see [Gating agent skill writes](./skills.md#gating-agent-skill-writes-skillswrite_approval)).
-A bundled or hub-installed skill the review has edited counts as locally
+pinned ones. A bundled or hub-installed skill the review has edited counts as locally
 modified, so `hermes update` / `hermes skills update` stop overwriting it.
 
 :::note `created_by` is a policy flag, not a provenance claim

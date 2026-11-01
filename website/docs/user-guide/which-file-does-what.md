@@ -13,7 +13,7 @@ description: "SOUL.md vs USER.md vs MEMORY.md vs AGENTS.md — a one-page map of
 | File | What it holds | Who writes it | When the agent sees it | Where it lives |
 |------|---------------|---------------|------------------------|----------------|
 | **SOUL.md** | The agent's primary identity — personality, tone, communication style, what to avoid stylistically | You. Hermes seeds a starter file automatically if one doesn't exist; existing files are never overwritten | Slot #1 of the system prompt, at session start | `~/.hermes/SOUL.md` (or `$HERMES_HOME/SOUL.md` with a custom home) — never the working directory |
-| **USER.md** | User profile — your name, role, preferences, communication style, expectations | The agent, via the `memory` tool (you can gate saves with `write_approval`, or edit entries via `hermes journey edit`) | Injected into the system prompt as a frozen snapshot at session start | `~/.hermes/memories/` |
+| **USER.md** | User profile — your name, role, preferences, communication style, expectations | The agent, via the `memory` tool (writes land directly; you can edit entries via `hermes journey edit`) | Injected into the system prompt as a frozen snapshot at session start | `~/.hermes/memories/` |
 | **MEMORY.md** | Agent's personal notes — environment facts, project conventions, tool quirks, things learned | The agent, via the `memory` tool (same gating and editing options as USER.md) | Injected into the system prompt as a frozen snapshot at session start | `~/.hermes/memories/` |
 | **AGENTS.md** | Project instructions, conventions, architecture — commands, ports, paths, repo-specific workflows | You (or whoever authors the project) | Loaded into the system prompt at startup from your working directory; nested copies are discovered progressively as the agent navigates subdirectories | Project working directory + subdirectories |
 | **.hermes.md** / **HERMES.md** | Project instructions, like AGENTS.md but Hermes-specific and highest priority | You | Loaded into the system prompt at startup (first match wins over AGENTS.md) | Your project — discovery walks up to the git root |
@@ -52,6 +52,6 @@ If the agent saved your name to memory, the save worked — check with the `memo
 
 ## Related Docs
 
-- [Persistent Memory](./features/memory.md) — MEMORY.md, USER.md, the `memory` tool, capacity limits, `write_approval`
+- [Persistent Memory](./features/memory.md) — MEMORY.md, USER.md, the `memory` tool, capacity limits
 - [Personality & SOUL.md](./features/personality.md) — SOUL.md content guidance, `/personality` presets, the prompt stack
 - [Context Files](./features/context-files.md) — AGENTS.md, `.hermes.md`, progressive discovery, security scanning
