@@ -91,9 +91,9 @@ describe('desktop slash command curation', () => {
   })
 
   it('keeps /skills terminal-only now the review queue is gone', () => {
-    // The write-approval review slice was the only reason /skills reached the
-    // desktop wire (#98330). With the queue retired, /skills is a terminal
-    // command: not exec-routed, not completed.
+    // A desktop slice was the only reason /skills reached the desktop wire
+    // (#98330). With the queue retired, /skills is a terminal command: not
+    // exec-routed, not completed.
     expect(isDesktopSlashCommand('/skills', 'pending')).toBe(false)
     expect(isDesktopSlashCommand('/skills')).toBe(false)
     expect(

@@ -387,9 +387,8 @@ export function useSlashCommand(deps: SlashCommandDeps) {
           return
         }
 
-        // Commands narrowed by `desktop_subcommands` (e.g. /skills exposes
-        // only its write-approval review slice here — the CLI hub mutations
-        // must not be reachable from a desktop exec) stop at the client.
+        // Commands narrowed by `desktop_subcommands` (an argument-gating list,
+        // e.g. `/skills approve x` vs plain `/skills`) stop at the client.
         const subcommandBlocked = desktopSubcommandUnavailableMessage(name, arg)
 
         if (subcommandBlocked) {
