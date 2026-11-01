@@ -111,6 +111,35 @@ class TestR1InlineWiring:
         assert out["ok"] is False and "unavailable" in out["error"]
 
 
+class TestH1Render:
+    def test_note_shows_question_and_unassessed(self, db, agent):
+        iid, _pid = _open_inv(db)
+        oid = db.capture_observation(iid, dedup_key="k-r", source="tool", content="z")
+        note = investigation_hooks.render_note(agent)
+        assert note and "why stale?" in note and "UNASSESSED" in note
+        assert oid in note
+
+    def test_silent_without_investigation(self, agent):
+        assert investigation_hooks.render_note(agent) is None
+
+    def test_fail_open_on_broken_store(self, agent):
+        broken = SimpleNamespace(_session_db=object(), session_id="s")
+        assert investigation_hooks.render_note(broken) is None
+
+    def test_wired_into_request_assembly(self):
+        # The row lands in the API copy only — pinned at the source level: the
+        # hook exists in turn_request_assembly and appends after user-merge.
+        import inspect
+
+        import agent.turn_request_assembly as tra
+
+        src = inspect.getsource(tra)
+        hook = src.index("INVESTIGATION-HOOK: H1")
+        merge = src.index("_drop_thinking_only_and_merge_users")
+        norm = src.index("# Normalize whitespace and tool-call JSON")
+        assert merge < hook < norm
+
+
 class TestH4Helpers:
     def test_unassessed_ids_and_nudge(self, db, agent):
         iid, _ = _open_inv(db)
