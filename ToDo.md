@@ -132,14 +132,30 @@ boot/resume_pending. Голосов веток нет: согласие не п�
 коммит `6148378c84` (аддитивно: hermes_state_investigations.py 475 стр, tools/investigation_tool.py,
 tests/test_investigations.py 25, спека docs/design/investigation-mechanism.md 362 строки,
  wiring в hermes_state.py +2/common +79 SCHEMA_SQL; bump SCHEMA_VERSION НЕ нужен — правило
-репо hermes_state_common.py:284-289, проверено). Хуки H1-H4 в рантайм НЕ врезаны — в спеке
-каждый помечен file:function:line-range; порядок врезки spec §8 (H2→H1→H4→fork-stamp+H3→boot settle).
+репо hermes_state_common.py:284-289, проверено). ХУКИ ВРЕЗАНЫ (команда «запускай хуки»,
+порядок spec §8): merge `3ca912a96f` + H2 capture tool-result → inline capture (dedup по
+tool_call_id, probe-привязка только структурным эхом probe_id в аргументах вызова, самооценки
+investigation-тула не пишутся как свидетельства) `5373052628`; R1 закрыт — investigation
+диспатчится через INLINE_TOOL_EXECUTORS (реестровый путь db не несёт); H1 render — служебная
+строка в API-копию перед вызовом модели (после user-merge, до нормализации; в durable историю
+не попадает, при пустом store молчит) `6e80dc11aa`; H4 стоп-гейт — однократный за ход nudge при
+неоценённых наблюдениях, флаг `_investigation_stop_synthetic` добавлен в реестры синтетики
+(persistence skip, finalizer strip, compression-синтетика, turn_context сброс счётчика)
+`913ecab3fe`; fork-stamp (session_fork probe_id → bind + meta_json ветки) + H3 join capture
+(work-note → одно branch-дедупнутое наблюдение в исследовании пробника) + boot settle
+(dispatched-без-результата → unknown_outcome, никогда не автоповтор; wake через
+mark_resume_pending ДО _schedule_resume_pending_sessions) `692b1bc621`. Каждый хук fail-open.
+Тесты: tests/test_investigation_hooks.py 21 (дедуп доставки, эхо/призрак probe, отказоустойчивость,
+гейт один раз, join дважды=один раз, wiring-guard'и порядка в рантайм-файлах) + skeleton 25 +
+fork-когорта = 69 зелёные.
 Приёмка мной независимо: 25/25 + соседние когорты 23/23 пере-прогнаны, 40/40 цитат спеки
 валидны по path:line. Риск R1 спеки (в реестровом пути тула нет `db` kwarg — та же форма,
 что у session_fork): при врезке — INLINE_TOOL_EXECUTORS (agent/inline_tool_executors.py).
 Широкая store-когорта tests/hermes_state/ на feat: 1754 passed / 1 failed / 59 skipped / 2 errors (35 мин). Оба проблемных теста НЕ регрессия: test_storage_health_latch ERROR воспроизводится на базе в main checkout (home_io_guard — env), test_state_db_repair… — только в массовом прогоне, в изоляции зелёный на feat и на detached-базе (teardown-галлюцинация pytest-хуков при 1754 тестах). Итог приёмки подготовки: регрессий от новых таблиц нет.
-НЕ сделано (ждёт «иди»): merge feat/investigation в рабочую ветку; врезка H1-H4; живой прогон
-поведенческого теста (агент меняет гипотезу на опровергающем наблюдении).
+НЕ сделано: холодный рестарт гейтвея (деплой mechanism'а — до него хуки не исполняются в проде);
+живой поведенческий прогон (агент открыл исследование → tool-result схвачен → H1 показал →
+assess/пересмотр в том же ходе; отдельный прогон на /fork probe_id → /join note → наблюдение в
+исследовании; прогон рестарта с dispatched-пробником → unknown_outcome + wake).
 
 ## ЖДЁТ ПРИЁМКИ ВЛ (успех определяет только Вл; самопроверка — допуск к приёмке, не вердикт)
 - 31.10 auto-resume: holds_admission status-filter фикс (`30dfa61344`) — деплойнут рестартом 20:4x; awaiting: живой прогон прерванного трона на следующем рестарте.
