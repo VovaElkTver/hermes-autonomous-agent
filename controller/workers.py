@@ -134,6 +134,25 @@ def _await_worker(proc, *, conn, run_id: str, step_id: str | None,
                 return out, err, True
 
 
+def scope_env(task) -> dict:
+    """Stage003 step 2: the memory scope of a worker run, as spawn env.
+
+    A worker's default write target is ITS OWN task scope («отсутствие
+    указанного scope не является разрешением на глобализацию»); the project id
+    rides along for the task→project inheritance chain. The central pump
+    session has no task: absent vars mean the global policy scope at the read
+    side (step 4 injection).
+    """
+    def field(key: str) -> str:
+        try:
+            return task[key] or ""
+        except (KeyError, IndexError):
+            return ""
+    return {"HERMES_SCOPE_KIND": "task",
+            "HERMES_SCOPE_ID": field("task_id"),
+            "HERMES_PROJECT_ID": field("project_id")}
+
+
 def make_worker(conn, *, timeout_s: float | None = None,
                 hermes_bin: str | None = None, extra_env: dict | None = None,
                 preempt_poll_s: float = 2.0, grace_s: float = 60.0,
@@ -156,7 +175,7 @@ def make_worker(conn, *, timeout_s: float | None = None,
             qf.close()
             exe = hermes_bin or shutil.which("hermes") or "hermes"
             env = {**os.environ, "HERMES_CONTROLLER_TASK_ID": task["task_id"],
-                   "HERMES_CONTROLLER_RUN_ID": run["run_id"]}
+                   "HERMES_CONTROLLER_RUN_ID": run["run_id"], **scope_env(task)}
             if extra_env:
                 env.update(extra_env)
             argv = [exe, "chat", "--query-file", qf.name, "--oneshot", "-Q",

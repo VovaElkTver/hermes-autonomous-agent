@@ -1026,6 +1026,50 @@ CREATE TABLE IF NOT EXISTS ctl_input_receipt (
   PRIMARY KEY (run_id, event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ctl_input_receipt_run ON ctl_input_receipt(run_id);
+-- Topic memory (stage003, ToDo «тематическая память ядра»): scope-isolated facts
+-- so task-local directives never leak into the global context. Writers: the
+-- controller package only (controller/topic_memory.py), same invariant as ctl_*.
+-- Hierarchy task → project → global; global is read-only for scoped writers.
+CREATE TABLE IF NOT EXISTS ctl_mem_scope (
+  scope_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('task','project','global')),
+  ref TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL,
+  UNIQUE (kind, ref)
+);
+-- One active record per subject WITHIN a scope: a newer item supersedes the
+-- older one on the same (scope_id, subject) — cross-scope it coexists by design
+-- («новее затирает старое» только при совпадении предмета И области действия).
+CREATE TABLE IF NOT EXISTS ctl_mem_item (
+  item_id TEXT PRIMARY KEY,
+  scope_id TEXT NOT NULL REFERENCES ctl_mem_scope(scope_id),
+  kind TEXT NOT NULL CHECK (kind IN ('fact','constraint','decision','preference')),
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('user-directive','tool-result','agent-proposal','hypothesis')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded')),
+  superseded_by TEXT,
+  confirmed INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  created_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_mem_item_scope ON ctl_mem_item(scope_id, status);
+-- Applicability chain beyond ctl_task.project_id: which parent scope a scope
+-- inherits memory from (task → project; global is implicit and last).
+CREATE TABLE IF NOT EXISTS ctl_mem_binding (
+  scope_id TEXT PRIMARY KEY REFERENCES ctl_mem_scope(scope_id),
+  parent_scope_id TEXT NOT NULL REFERENCES ctl_mem_scope(scope_id),
+  created_at REAL NOT NULL
+);
+-- Controlled cross-topic import with provenance: an import never edits the
+-- source item; it creates a new item in the destination scope, linked here.
+CREATE TABLE IF NOT EXISTS ctl_mem_import (
+  import_id TEXT PRIMARY KEY,
+  dst_item_id TEXT NOT NULL REFERENCES ctl_mem_item(item_id),
+  src_item_id TEXT NOT NULL REFERENCES ctl_mem_item(item_id),
+  imported_at REAL NOT NULL,
+  by_run_id TEXT
+);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).
