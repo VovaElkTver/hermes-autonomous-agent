@@ -444,6 +444,16 @@ class InvestigationMixin:
         rc = self._execute_write(_do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
         return int(rc) if isinstance(rc, int) else 0
 
+    def list_open_investigation_unknown_sessions(self) -> list[str]:
+        """Session ids holding an OPEN investigation that has at least one
+        ``unknown_outcome`` probe — the wake list for the boot hook (the owner
+        decides what a lost probe means; the core only makes it visible again)."""
+        rows = self._read_all(
+            """SELECT DISTINCT i.session_id FROM investigations i
+               JOIN investigation_probes p ON p.investigation_id = i.investigation_id
+               WHERE i.status = 'open' AND p.status = 'unknown_outcome'""")
+        return [r["session_id"] for r in rows]
+
     # --------------------------------------------------------------- render
 
     def render_active_investigation(self, session_id: str) -> str | None:

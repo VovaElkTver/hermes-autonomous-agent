@@ -1,0 +1,138 @@
+"""Runtime-hook tests for the investigation mechanism (spec §3 H1/H2 + §6 R1).
+
+Deterministic, tmp-DB only: a SimpleNamespace stands in for the agent (hooks
+read ``_session_db`` / ``session_id`` through getattr), the DB is real.
+Pins: capture happens once per durable delivery (dedup), probe binding is a
+structural echo only, the ``investigation`` tool works through the inline
+executor path (registry dispatch carries no db — spec R1), and every hook is
+fail-open.
+"""
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from agent import investigation_hooks
+from hermes_state import SessionDB
+from hermes_state_investigations import InvestigationMixin
+
+
+@pytest.fixture()
+def db(tmp_path):
+    instance = SessionDB(db_path=tmp_path / "state.db")
+    instance.ensure_session("sess-parent", source="test", session_key="k-parent")
+    yield instance
+    instance.close()
+
+
+@pytest.fixture()
+def agent(db):
+    return SimpleNamespace(_session_db=db, session_id="sess-parent")
+
+
+def _open_inv(db, with_probe=True):
+    iid, _ = db.open_investigation(db.new_investigation_id(), "sess-parent", "why stale?")
+    h1 = db.add_hypothesis(iid, "H1")
+    pid = None
+    if with_probe:
+        pid = db.add_probe(iid, "check eviction log")
+        db.add_prediction(pid, h1, "log line missing")
+    return iid, pid
+
+
+class TestH2Capture:
+    def test_captured_once_and_deduped_on_redelivery(self, db, agent):
+        iid, _pid = _open_inv(db)
+        first = investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-1", {"content": "no eviction line"})
+        assert first is not None
+        dup = investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-1", {"content": "no eviction line"})
+        assert dup is None  # same call_id = one observation, however re-delivered
+        obs = db.list_observations(iid)
+        assert len(obs) == 1 and obs[0]["assessed"] == 0
+
+    def test_probe_binds_only_structural_echo(self, db, agent):
+        iid, pid = _open_inv(db)
+        # no probe_id in args -> unbound capture
+        investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-a", {"content": "x"})
+        unbound = [o for o in db.list_observations(iid) if o["probe_id"] is None]
+        assert len(unbound) == 1
+        # valid echo -> bound, probe flips to observed
+        investigation_hooks.capture_tool_result(
+            agent, "terminal", {"probe_id": pid}, "call-b", {"content": "y"})
+        bound = [o for o in db.list_observations(iid) if o["probe_id"] == pid]
+        assert len(bound) == 1 and db.get_probe(pid)["status"] == "observed"
+        # foreign/bogus id -> unbound, never crashes
+        investigation_hooks.capture_tool_result(
+            agent, "terminal", {"probe_id": "prb-not-real"}, "call-c", {"content": "z"})
+        assert len([o for o in db.list_observations(iid) if o["probe_id"] == "prb-not-real"]) == 0
+
+    def test_investigation_tool_self_calls_are_not_evidence(self, db, agent):
+        iid, _ = _open_inv(db)
+        assert investigation_hooks.capture_tool_result(
+            agent, "investigation", {"op": "assess"}, "call-x", {"content": "{\"ok\":true}"}) is None
+        assert db.list_observations(iid) == []
+
+    def test_no_open_investigation_is_noop(self, db, agent):
+        assert investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-9", {"content": "x"}) is None
+
+    def test_fail_open_on_broken_store(self, agent):
+        broken = SimpleNamespace(_session_db=object(), session_id="s")
+        assert investigation_hooks.capture_tool_result(
+            broken, "terminal", {}, "c", {"content": "x"}) is None
+
+
+class TestR1InlineWiring:
+    def test_investigation_resolves_through_inline_executors(self):
+        from agent.inline_tool_executors import INLINE_TOOL_EXECUTORS
+
+        assert "investigation" in INLINE_TOOL_EXECUTORS
+
+    def test_inline_executor_end_to_end(self, db, agent):
+        from agent.inline_tool_executors import INLINE_TOOL_EXECUTORS
+
+        out = json.loads(INLINE_TOOL_EXECUTORS["investigation"](
+            agent, {"op": "open", "question": "Q?", "hypotheses": ["Ha", "Hb"]},
+            SimpleNamespace(effective_task_id=None)))
+        assert out["ok"] and out["investigation_id"].startswith("inv")
+        assert db.get_open_investigation("sess-parent")["question"] == "Q?"
+
+    def test_registry_handler_without_db_reports_unavailable(self):
+        # documents WHY the inline path is mandatory: the registry handler gets no db.
+        from tools.investigation_tool import investigation
+
+        out = json.loads(investigation({"op": "open", "question": "x"},
+                                       db=None, current_session_id="s"))
+        assert out["ok"] is False and "unavailable" in out["error"]
+
+
+class TestH4Helpers:
+    def test_unassessed_ids_and_nudge(self, db, agent):
+        iid, _ = _open_inv(db)
+        assert investigation_hooks.stop_nudge(agent) is None
+        db.capture_observation(iid, dedup_key="k1", source="tool", content="y")
+        nudge = investigation_hooks.stop_nudge(agent)
+        assert nudge is not None and "assess" in nudge
+
+    def test_nudge_silent_without_investigation(self, agent):
+        assert investigation_hooks.stop_nudge(agent) is None
+
+
+class TestMixinBootSettle:
+    def test_unknown_sessions_listed(self, db):
+        iid, pid = _open_inv(db)
+        db.set_probe_status(pid, "dispatched")
+        assert InvestigationMixin is not None
+        db.settle_unresolved_probes()
+        sessions = db.list_open_investigation_unknown_sessions()
+        assert sessions == ["sess-parent"]
+        # after the evidence is accounted and the investigation closes, no wake is owed
+        oid = db.capture_observation(iid, dedup_key="k9", source="tool", content="z")
+        db.assess_observation(oid, "inconclusive: не разделяет H1/H2")
+        assert db.close_investigation(iid, "done", "none")["closed"] is True
+        assert db.list_open_investigation_unknown_sessions() == []
