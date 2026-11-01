@@ -181,6 +181,12 @@ def render_prompt_block(*, include_unconfirmed_note: bool = True) -> str | None:
                 lines.append(f"- [{item['kind']}|{origin}] {item['subject']} — {item['body']}")
             if len(items) > _MAX_PROMPT_ITEMS:
                 lines.append(f"- …and {len(items) - _MAX_PROMPT_ITEMS} more earlier items")
+                # step 6: confirmed rules known to the chain but not rendered —
+                # the mechanical slice of error (iii) «при возврате к теме не найдено».
+                from controller import topic_memory_shadow as shadow
+                shadow.record("missing_decision", sid,
+                              {"total": len(items), "rendered": _MAX_PROMPT_ITEMS},
+                              conn=conn)
             header = ("## Topic memory\n"
                       f"Applicable scope chain: {' → '.join(chain)}. Written where it applies; "
                       "cross-topic records do NOT leak here (a semantic match grants no read "

@@ -175,3 +175,49 @@ def test_task_goal_topic_from_ctl_task(scoped_home):
 def test_task_goal_topic_none_without_scope(no_scope):
     from tools.topic_memory_bridge import task_goal_topic
     assert task_goal_topic() is None
+
+
+def _counts():
+    from controller import model as ctl_model
+    from controller.topic_memory_shadow import counts
+    conn = ctl_model.connect()
+    try:
+        return counts(conn)
+    finally:
+        conn.close()
+
+
+def test_shadow_leak_global_counted_for_scoped_builtin_write(scoped_home):
+    """(i) локальная корректировка стала глобальной: scoped-процесс пишет через
+    builtin store при выключенной блокировке — фиксируем, поведению не мешаем."""
+    from tools.memory_tool import memory_tool
+    from tools.memory_tool_store import MemoryStore
+    store = MemoryStore()
+    store.load_from_disk()
+    result = json.loads(memory_tool(target="memory", action="add",
+                                    content="env fact while scoped", store=store))
+    assert result["success"], result
+    assert _counts()["leak_global"] >= 1
+
+
+def test_shadow_missing_decision_on_overflow(scoped_home, monkeypatch):
+    """(iii) механический срез: подтверждённые решения есть, но не влезли в блок."""
+    from tools import topic_memory_bridge as br
+    for i in range(3):
+        out = br.apply_task_ops([{"action": "add", "subject": f"rule-{i}",
+                                  "content": f"body {i}", "source": "user-directive"}])
+        assert out["success"], out
+    monkeypatch.setattr(br, "_MAX_PROMPT_ITEMS", 1)
+    block = br.render_prompt_block()
+    assert "…and 2 more" in block
+    counts = _counts()
+    assert counts["missing_decision"] == 1
+
+
+def test_shadow_counts_always_have_three_keys_and_manual_foreign_rule(scoped_home):
+    """(ii) в v1 — только ручная разметка; счётчики существуют всегда."""
+    from controller.topic_memory_shadow import record
+    record("foreign_rule", None, {"note": "manual annotation by a human/audit"})
+    counts = _counts()
+    assert set(counts) == {"leak_global", "foreign_rule", "missing_decision"}
+    assert counts["foreign_rule"] == 1

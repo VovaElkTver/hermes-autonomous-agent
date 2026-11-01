@@ -85,8 +85,11 @@ class SummaryDispatchMixin:
                 telemetry["failure_class"] = "stall_deterministic_fallback"
             return None
         # Focus-topic derivation scans user turns; only pay when a summary is generated.
+        # Stage003 step 5: a controller-scoped worker's topic of record is its ctl_task.goal,
+        # which outranks the chat-noise heuristic.
+        from tools.topic_memory_bridge import task_goal_topic
         summary_kwargs: dict[str, Any] = {
-            "focus_topic": focus_topic or self._derive_auto_focus_topic(messages),
+            "focus_topic": focus_topic or task_goal_topic() or self._derive_auto_focus_topic(messages),
             "memory_context": memory_context,
         }
         if _accepts_keyword_argument(self._generate_summary, "bypass_cooldown"):

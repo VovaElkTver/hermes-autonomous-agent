@@ -143,17 +143,31 @@ assess/пересмотр в том же ходе; отдельный прого
   действия записей, reasoning не ограничивает; агент вправе искать и предлагать обобщения между темами,
   повышать scope молча не вправе; к человеку — только человеческое намерение/полномочие.
 
-Порядок работ (каждый шаг обратим; старт — по явному «иди» Вл):
-1. Схема mem_* в SCHEMA_SQL + writer controller/topic_memory.py (CRUD, provenance, supersede).
+Порядок работ (каждый шаг обратим):
+1. ✅ Схема mem_* в SCHEMA_SQL + writer controller/topic_memory.py (CRUD, provenance, supersede).
+   Исполнено: коммит `5fb31072af` (ctl_mem_scope/item/binding/import; чтение = SQL-фильтр scope ДО поиска).
 2. Env → scope в worker_fn (HERMES_SCOPE_KIND/ID); центральной сессии pump — scope='global'.
+   — исполнено тем же коммитом (`workers.scope_env`; отсутствие переменных = global на стороне чтения).
 3. Memory tool: третий target `task`; ограничение глобальных writes у scoped-воркеров.
+   — исполнено: `tools/topic_memory_bridge.py` + routing в `tools/memory_tool.py`
+   (target 'task' появляется в схеме ТОЛЬКО при HERMES_SCOPE_*; запись через controller.topic_memory;
+   источник по умолчанию agent-proposal, правила — после confirm; гвард глобальных writes
+   memory.task_restrict_globals, по умолчанию OFF до shadow-приёмки).
 4. Инжекция тематического блока при сборке промпта (global-политика + project/task блоки из SQL,
-   фильтр scope ДО поиска).
+   фильтр scope ДО поиска) — исполнено: volatile-сегмент после memory-блоков
+   (`agent/system_prompt._topic_memory_part` → bridge.render_prompt_block; без env — ноль байт).
 5. focus_topic компрессии ← title/goal задачи; summary шагов линковать через ctl_artifact_revision,
    не дублировать в память.
+   — исполнено (первая половина): `tools.topic_memory_bridge.task_goal_topic` приоритетнее
+   эвристики `_derive_auto_focus_topic` в `agent/context_compressor_summary.py:89` только у
+   scoped-процессов; prepared_compaction (интерактивные fork'и) не тронут — там нет scope-env.
 6. Shadow-режим: тематические записи пишутся параллельно со старой логикой MEMORY.md; счёт трёх ошибок
    Вл — (i) локальная корректировка стала глобальной, (ii) чужое правило попало в контекст, (iii) при
    возврате к теме не найдено ранее принятое решение. Первые две дороже третьей; политика консервативна.
+   — каркас исполнен: таблица ctl_mem_shadow + writer `controller/topic_memory_shadow.py`;
+   авто-детекторы: (i) scoped-запись через builtin store при OFF-гварде, (iii) подтверждённые правила
+   за шапкой рендера (_MAX_PROMPT_ITEMS=40); (ii) в v1 — ручная разметка (нужна семантика);
+   поведение shadow НЕ меняет; интерпретация и приёмка — Вл.
 7. Только после shadow-приёмки — детектор неявных тем для интерактивного агента (наблюдателем, по образцу
    embedding-классификатора из разбора 01.11).
 

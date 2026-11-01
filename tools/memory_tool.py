@@ -229,6 +229,23 @@ def check_memory_requirements() -> bool:
     return flags[0] or flags[1]
 
 
+def _shadow_record_scoped(kind: str, detail: dict[str, Any]) -> None:
+    """Step 6 shadow helper: resolve the task-scope row id for the current env
+    and append a ledger row. Best-effort by contract; callers also guard."""
+    from tools.topic_memory_bridge import _connect, task_scope_from_env
+    scope = task_scope_from_env()
+    if scope is None:
+        return
+    from controller import topic_memory as tm
+    from controller import topic_memory_shadow as shadow
+    conn = _connect()
+    try:
+        sid = tm.get_scope(conn, "task", scope["scope_id"])
+        shadow.record(kind, sid, {**detail, "scope_ref": scope["scope_id"]}, conn=conn)
+    finally:
+        conn.close()
+
+
 def _memory_target_error(
     store: MemoryStore, target: str | None, operations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
@@ -276,6 +293,13 @@ def _memory_target_error(
                 "This controller-scoped session treats the built-in stores (MEMORY.md/USER.md) "
                 "as read-only policy (memory.task_restrict_globals). Record task-local facts via "
                 "target='task'; propose a generalization instead of writing it globally yourself.")}
+        if scope:
+            # stage003 step 6 shadow telemetry: the legacy global channel was used
+            # inside a scoped process while the guard is OFF. Count, never block.
+            try:
+                _shadow_record_scoped("leak_global", {"target": target})
+            except Exception:
+                pass
         return None
     label = "USER.md" if target == "user" else "MEMORY.md"
     FAILURE_CLASS.set("disabled")

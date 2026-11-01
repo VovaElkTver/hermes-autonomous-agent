@@ -1070,6 +1070,20 @@ CREATE TABLE IF NOT EXISTS ctl_mem_import (
   imported_at REAL NOT NULL,
   by_run_id TEXT
 );
+-- Stage003 step 6 shadow ledger. Shadow mode changes NO behaviour: it measures
+-- Вл's three error classes while the legacy MEMORY.md flow keeps running
+-- unimpeded. kinds: leak_global (scoped process wrote via a builtin store),
+-- foreign_rule (manual annotation of someone else's rule in my context),
+-- missing_decision (accepted decisions exist in scope but did not fit the
+-- prompt block). Interpretation belongs to the human; these are proxies.
+CREATE TABLE IF NOT EXISTS ctl_mem_shadow (
+  shadow_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('leak_global','foreign_rule','missing_decision')),
+  scope_id TEXT REFERENCES ctl_mem_scope(scope_id),
+  detail TEXT NOT NULL DEFAULT '{}',
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_mem_shadow_kind ON ctl_mem_shadow(kind, created_at);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).
