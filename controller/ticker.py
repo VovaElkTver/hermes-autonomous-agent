@@ -57,7 +57,7 @@ from . import alerts, loop, model, pump_lock, queue as Q, transitions
 
 logger = logging.getLogger("controller.ticker")
 
-INTERVALS = {"pump": 300.0, "watchdog": 1800.0}
+INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0}
 TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
 
 PUMP_STALE_S = 25 * 60   # the watchdog cron's own freshness rule
@@ -340,13 +340,17 @@ class Ticker:
         counters over the same clock, not independent long sleeps. An idle
         beat does zero SQL; only a due counter touches the DB."""
         next_pump = self._mono() + self.intervals["pump"] / 2
+        next_followups = self._mono() + self.intervals["followups"]
         while not self._stop.is_set():
             if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
                 next_pump = max(next_pump, self._mono()) + self.intervals["pump"]
+            if self._mono() >= next_followups:
+                self._guard("followups", conn, self.run_followups)
+                next_followups = max(next_followups, self._mono()) + self.intervals["followups"]
             # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
-            self._stop.wait(min(self.tick_s, max(0.0, next_pump - self._mono())))
+            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups) - self._mono())))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
@@ -448,6 +452,17 @@ class Ticker:
         self._write_gates_file(snap)
         for line in lines:
             self._journal_and_deliver(conn, line)
+
+    def run_followups(self, conn) -> None:
+        """Async follow-ups scan (plan item 3): due reminders/reviews ride the
+        same chat channel as the live ports. A broken transport never kills the
+        tick — the row simply waits for the next interval (durable in state.db)."""
+        from . import followups, live_ports
+        deliver = live_ports.default_deliver(self.alert_target,
+                                             deliver_fn=self.deliver_fn)
+        fired = followups.scan(conn, deliver, now=self._now(), beat_s=self.tick_s)
+        if fired:
+            self._heartbeat(conn, "followups", {"fired": fired})
 
     def _drain_live_ports(self, conn) -> int:
         """Donor ports live (stage tail): dispatch durable effects/outbox rows.

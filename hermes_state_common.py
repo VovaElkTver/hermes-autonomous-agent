@@ -999,6 +999,27 @@ CREATE TABLE IF NOT EXISTS ctl_outbox (
   dropped_reason TEXT, created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ctl_outbox_conv ON ctl_outbox(conv_key, status);
+-- ctl_followup — async consequences on the 1 Hz beat (controller/followups.py,
+-- mini-spec journal/20261103-async-followups-spec.md): a consequence is a ROW,
+-- the ticker finds due rows and delivers via the live chat port. Reminder:
+-- due_at + repeat_beats/max_repeats (donor evals REQUEUES→unavailable parity);
+-- review: periodic by period_s. Created in-task scope only (stage003 rule).
+CREATE TABLE IF NOT EXISTS ctl_followup (
+  followup_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('reminder','review')),
+  scope_task TEXT NOT NULL,
+  scope_project TEXT,
+  text TEXT NOT NULL,
+  due_at REAL,
+  period_s INTEGER,
+  state TEXT NOT NULL DEFAULT 'pending'
+       CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
+  last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
+  repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
+  created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
+CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);
 -- ctl_mandate — immutable authorization a task entered running under
 -- (controller/mandate.py): recorded by transitions.py at every ready->running,
 -- revalidated against the CURRENT policy before blocked/failed/needs_human resume;
