@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -29,14 +28,21 @@ _MAX_PROMPT_ITEMS = 40
 
 
 def task_scope_from_env() -> dict[str, str] | None:
-    """The controller-assigned memory scope of THIS process, or None."""
-    kind = os.environ.get("HERMES_SCOPE_KIND") or ""
-    scope_id = os.environ.get("HERMES_SCOPE_ID") or ""
+    """The controller-assigned memory scope of THIS turn, or None.
+
+    Read through agent.session_client_env.session_env: inside a gateway-hosted
+    turn this returns the client_env the spawning worker process froze into its
+    session (stage003 step 2); in a plain process it falls back to os.environ,
+    so CLI/cron/direct callers keep the pre-bridge behaviour.
+    """
+    from agent.session_client_env import session_env
+    kind = session_env("HERMES_SCOPE_KIND") or ""
+    scope_id = session_env("HERMES_SCOPE_ID") or ""
     if kind != "task" or not scope_id:
         return None
     return {"kind": kind, "scope_id": scope_id,
-            "project_id": os.environ.get("HERMES_PROJECT_ID") or "",
-            "run_id": os.environ.get("HERMES_CONTROLLER_RUN_ID") or ""}
+            "project_id": session_env("HERMES_PROJECT_ID") or "",
+            "run_id": session_env("HERMES_CONTROLLER_RUN_ID") or ""}
 
 
 def available() -> bool:

@@ -20,8 +20,12 @@ from contextvars import ContextVar
 from tools.code_execution_env import is_secret_env_name
 
 # What main's CLI read per process and the gateway otherwise reads daemon-wide.
+# Stage003: HERMES_SCOPE_*/HERMES_PROJECT_ID/HERMES_CONTROLLER_RUN_ID ride client_env so a
+# controller worker's topic-memory scope survives the turn running in the gateway process
+# (`memory` target='task' + prompt injection read them via session_env at tool time).
 BEHAVIOUR_ENV = ('HERMES_EPHEMERAL_SYSTEM_PROMPT', 'HERMES_PREFILL_MESSAGES_FILE', 'HERMES_INFERENCE_PROVIDER',
-                 'HERMES_ENABLE_PROJECT_PLUGINS')
+                 'HERMES_ENABLE_PROJECT_PLUGINS',
+                 'HERMES_SCOPE_KIND', 'HERMES_SCOPE_ID', 'HERMES_PROJECT_ID', 'HERMES_CONTROLLER_RUN_ID')
 # Behaviour values that name the client's host: a path, or the opt-in that inspects the client's folder.
 HOST_BEHAVIOUR = ('HERMES_PREFILL_MESSAGES_FILE', 'HERMES_ENABLE_PROJECT_PLUGINS')
 TOOL_ENV = ('PATH', 'VIRTUAL_ENV', 'GOPATH', 'GOROOT', 'CARGO_HOME', 'RUSTUP_HOME', 'JAVA_HOME')
