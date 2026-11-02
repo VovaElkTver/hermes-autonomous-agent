@@ -222,11 +222,17 @@ class SessionBranchMixin:
                 if row is None:
                     return 0
                 floor = row[0]
-                # parent tail must be clean: no compacted/summary rows after the base
+                # parent tail must be clean: no compacted/summary rows after the base.
+                # Value check, not IS NOT NULL: the writer stores 0/1 integers
+                # (`1 if msg.get(...) else 0`), never NULL — a null-check flags every
+                # ordinary row and makes append-join impossible once the parent kept
+                # living after the fork (live натурка 02.11). Legacy rows may hold
+                # NULL/summary-text, hence COALESCE + explicit flag truthiness.
                 dirty = conn.execute(
                     """SELECT COUNT(*) FROM messages
                        WHERE session_id = ? AND id > ?
-                         AND (_compressed_summary IS NOT NULL OR active = 0 OR compacted = 1)""",
+                         AND (COALESCE(_compressed_summary, 0) NOT IN (0, '')
+                              OR active = 0 OR compacted = 1)""",
                     (parent_id, floor)).fetchone()
                 if dirty and dirty[0]:
                     return 0
