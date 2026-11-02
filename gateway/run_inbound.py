@@ -1737,6 +1737,11 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         message_text = self._prefix_inbound_sender_context(event, source, message_text)
         if event.media_urls:
             message_text = f"{self._media_origin_note(source)}\n\n{message_text}".strip()
+            # Cited-evidence retention: any turn referencing the files extends their pins so the
+            # age-based cache sweep cannot delete a screenshot mid-argument (2026-11-03).
+            from gateway.platforms.media_pin import _env_enabled as pins_enabled, pin_media_files
+            if pins_enabled():
+                pin_media_files(event.media_urls)
         image_paths, audio_paths, audio_file_paths, video_paths = self._classify_inbound_media(event, _pending_stt_prepared)
         if image_paths:
             message_text = await self._enrich_inbound_images(source, session_key, message_text, image_paths)

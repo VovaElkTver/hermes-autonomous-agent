@@ -14,6 +14,12 @@ from gateway.run import GatewayRunner
 from gateway.session import SessionSource
 
 
+@pytest.fixture(autouse=True)
+def _no_media_pins(tmp_path, monkeypatch):
+    """Keep the evidence-pin registry off this suite's radar (it has its own tests)."""
+    monkeypatch.setenv("HERMES_MEDIA_PINS", "0")
+
+
 def _make_runner() -> GatewayRunner:
     runner = GatewayRunner.__new__(GatewayRunner)
     runner.config = GatewayConfig(

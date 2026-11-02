@@ -670,14 +670,22 @@ async def cache_image_from_url(url: str, ext: str = ".jpg", retries: int = 2) ->
 
 
 def _cleanup_cache_dir(cache_dir: Path, max_age_hours: int) -> int:
-    """Delete files in *cache_dir* older than *max_age_hours*; return the count removed."""
+    """Delete files in *cache_dir* older than *max_age_hours*; return the count removed.
+
+    Evidence pins (gateway.platforms.media_pin) are skipped: a file the agent cited in a
+    claim must survive to be re-checked (2026-11-03 incident contract)."""
     cutoff = time.time() - (max_age_hours * 3600)
+    from gateway.platforms.media_pin import _env_enabled as pins_enabled, pinned_until
     removed = 0
     for f in cache_dir.iterdir():
-        if f.is_file() and f.stat().st_mtime < cutoff:
-            with contextlib.suppress(OSError):
-                f.unlink()
-                removed += 1
+        if not f.is_file() or f.stat().st_mtime >= cutoff:
+            continue
+        if pins_enabled() and pinned_until(f) is not None:
+            logger.debug("Media cache cleanup skipped pinned evidence %s", f)
+            continue
+        with contextlib.suppress(OSError):
+            f.unlink()
+            removed += 1
     return removed
 
 
