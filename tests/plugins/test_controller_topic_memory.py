@@ -156,3 +156,37 @@ def test_worker_scope_env_task_not_global(tmp_path, monkeypatch):
     assert env["HERMES_PROJECT_ID"] == "proj-q"
     empty = W.scope_env({"task_id": "task-zz", "project_id": ""})
     assert empty["HERMES_PROJECT_ID"] == ""
+
+
+def test_worker_scope_survives_gateway_handoff():
+    """Stage003 step 3 regression (инцидент 02.11): воркер запускает `hermes chat`,
+    чей тёрн исполняется в процессе gateway — скоуп доживает только если
+    allow-list agent.session_client_env проносит HERMES_SCOPE_*/HERMES_CONTROLLER_RUN_ID.
+    Дефект жил две недели именно потому, что каждый слой проходил СОБСТВЕННЫЕ тесты
+    по отдельности: scope_env ставит переменные (тест выше), bridge читает os.environ
+    (tests/tools/test_topic_memory_bridge.py). Здесь цепь закреплена целиком —
+    spawn env → клиентский collect → gateway-side accept → bind на время turn-а →
+    чтение bridge — и она краснеет, если любое из имён уберут из allow-list."""
+    import os
+    from controller import workers as W
+    from agent import session_client_env as SCE
+    from tools.topic_memory_bridge import task_scope_from_env
+
+    worker_env = {k: v for k, v in os.environ.items() if isinstance(v, str)}
+    worker_env.update(W.scope_env({"task_id": "task-aaa", "project_id": "proj-q"}))
+    worker_env["HERMES_CONTROLLER_RUN_ID"] = "run-9"
+
+    accepted = SCE.accept_client_env(SCE.collect_client_env(environ=worker_env, config={}), {})
+    expected = {"HERMES_SCOPE_KIND": "task", "HERMES_SCOPE_ID": "task-aaa",
+                "HERMES_PROJECT_ID": "proj-q", "HERMES_CONTROLLER_RUN_ID": "run-9"}
+    assert expected.items() <= accepted.items()
+
+    with SCE.client_env_scope(accepted, local=True, rules=SCE.client_env_rules({})):
+        assert task_scope_from_env() == {"kind": "task", "scope_id": "task-aaa",
+                                         "project_id": "proj-q", "run_id": "run-9"}
+
+    # До-фиксное состояние (имён нет в allow-list): в gateway-тёрне bridge обязан
+    # быть инертен (None), а НЕ молча писать в глобальный scope.
+    pre_fix = {k: v for k, v in accepted.items() if k not in expected}
+    with SCE.client_env_scope(pre_fix, local=True, rules=SCE.client_env_rules({})):
+        assert task_scope_from_env() is None
