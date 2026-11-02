@@ -1454,6 +1454,20 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         return message_text
 
     @staticmethod
+    def _media_origin_note(source: SessionSource) -> str:
+        """One-line, code-resolved origin of inbound attachments, prepended to the turn.
+
+        Without it the agent guesses the platform/client from image pixels and then DEFENDS the
+        guess (2026-11-03: a Matrix screenshot misclassified as Telegram, three user corrections
+        deep). The gateway KNOWS the transport — state it as fact so vision describes content
+        while this line carries provenance."""
+        if source is None:
+            return ""
+        plat = getattr(source.platform, "value", "") or str(getattr(source, "platform", ""))
+        chat = neutralize_untrusted_inline_text(getattr(source, "chat_name", "") or getattr(source, "chat_id", "") or "")
+        return f"[Media origin (resolved by gateway code, not from image pixels): platform={plat}, chat={chat}]"
+
+    @staticmethod
     def _classify_inbound_media(
         event: MessageEvent, pending_stt_prepared: bool
     ) -> tuple[list, list, list, list]:
@@ -1721,6 +1735,8 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         self._consume_pending_native_image_paths(session_key)
 
         message_text = self._prefix_inbound_sender_context(event, source, message_text)
+        if event.media_urls:
+            message_text = f"{self._media_origin_note(source)}\n\n{message_text}".strip()
         image_paths, audio_paths, audio_file_paths, video_paths = self._classify_inbound_media(event, _pending_stt_prepared)
         if image_paths:
             message_text = await self._enrich_inbound_images(source, session_key, message_text, image_paths)
