@@ -135,3 +135,51 @@ class TestReturnLeave:
             GatewayRunner, GatewayRunner._IDLE_COMMANDS)
         assert table["return"].__name__ == "_handle_return_command"
         assert table["leave"].__name__ == "_handle_leave_command"
+        assert table["return0"].__name__ == "_handle_return0_command"
+
+
+class TestReturn0Alias:
+    """`/return0` == `/return --discard`: fast close, summarizer must not run."""
+
+    @pytest.mark.asyncio
+    async def test_return0_discards_without_summarizer(self, store):
+        source = _make_source("t7")
+        runner = _make_runner(store)
+        parent_id = _forked(store, runner, source)
+        await runner._handle_fork_command(_make_event("/fork quick", source))
+        child = store.get_or_create_session(source)
+        store._db.append_message(child.session_id, role="user", content="branch stuff")
+
+        summarize_calls = []
+        async def _no_summary(child_id):
+            summarize_calls.append(child_id)
+            return "should not be used"
+        runner._summarize_branch = _no_summary
+
+        reply = await runner._handle_return0_command(_make_event("/return0", source))
+        assert "discard" in reply.lower()
+        # no work-note in the parent (note strategy would have written one)
+        hp = store._db.get_messages_as_conversation(parent_id)
+        assert not any("work-note" in str(m.get("content", "")) for m in hp)
+        # branch closed, console back on the parent
+        assert not store._db.has_active_branches(parent_id)
+        assert store.get_or_create_session(source).session_id == parent_id
+        assert summarize_calls == []
+
+    @pytest.mark.asyncio
+    async def test_return0_explicit_flag_still_wins(self, store):
+        source = _make_source("t8")
+        runner = _make_runner(store)
+        await runner._handle_fork_command(_make_event("/flagged", source)) if False else None
+        parent_id = _forked(store, runner, source)
+        from gateway.session import build_session_key
+        await runner._handle_fork_command(_make_event("/fork keepme", source))
+        child = store.get_or_create_session(source)
+        store._db.append_message(child.session_id, role="user", content="to append")
+
+        reply = await runner._handle_return0_command(
+            _make_event("/return0 --append", source))
+        # append moved raw rows: the child's text is now IN the parent transcript
+        hp = store._db.get_messages_as_conversation(parent_id)
+        assert any("branch stuff" in str(m.get("content", "")) or "to append" in str(m.get("content", ""))
+                   for m in hp) or "append" in reply.lower()

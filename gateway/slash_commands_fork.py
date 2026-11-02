@@ -212,8 +212,12 @@ class GatewayForkCommandsMixin:
             self._evict_cached_agent(child_key)
         return t("gateway.join.joined", branch=name, strategy=strategy)
 
-    async def _return_or_leave(self, event, close: bool) -> str:
+    async def _return_or_leave(self, event, close: bool, default_strategy: str = "note") -> str:
         """Shared body of /return (close=True) and /leave (close=False).
+
+        ``default_strategy`` preselects the join strategy when the command line
+        carries no explicit flag — /return0 rides it to force ``discard``
+        (fast close, no summary LLM) without re-parsing event text.
 
         Finds the active branch whose CHILD is the session this chat stands on
         (walking compression-rotated ids via the parent chain), then merges it
@@ -250,7 +254,7 @@ class GatewayForkCommandsMixin:
         if close:
             _pos, flags = parse_join_args(event.get_command_args())
             strategy = ("append" if "--append" in flags
-                        else "discard" if "--discard" in flags else "note")
+                        else "discard" if "--discard" in flags else default_strategy)
             result = await self.join_branch(parent_id, branch, strategy)
 
         # move this chat's console back to the parent
@@ -265,10 +269,22 @@ class GatewayForkCommandsMixin:
         return t("gateway.leave.left", branch=name)
 
     async def _handle_return_command(self, event) -> str:
-        """/return [--discard|--append] — close the branch I stand in, back to parent."""
+        """`/return [--discard|--append] — close the branch I stand in, back to parent."""
         if not self._session_db:
             return self._session_db_unavailable_reply()
         return await self._return_or_leave(event, close=True)
+
+    async def _handle_return0_command(self, event) -> str:
+        """`/return0` — alias for `/return --discard`.
+
+        The fast close: no summarizer pass (the default `/return` note strategy
+        runs a full compression LLM call before the console moves — measured
+        28 s on a 61-message branch, 02.11). Explicit --append/--discard on the
+        line still wins, mirroring /return's flag handling.
+        """
+        if not self._session_db:
+            return self._session_db_unavailable_reply()
+        return await self._return_or_leave(event, close=True, default_strategy="discard")
 
     async def _handle_leave_command(self, event) -> str:
         """/leave — step out of the branch I stand in; it stays open."""
