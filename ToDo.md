@@ -86,4 +86,11 @@ FAILURES_BEFORE_ERROR, по донору). Отправка в чат из те�
    поведение shadow НЕ меняет; интерпретация и приёмка — Вл.
 7.  детектор неявных тем для интерактивного агента (наблюдателем, по образцу
    embedding-классификатора из разбора 01.11).
+   — каркас исполнен (`bebbe94f5b`): controller/topic_detector.py — на каждый
+   интерактивный user-оборот одна строка в ctl_topic_detect (corpus = активные
+   ctl_task goals + прошлые предложения; embed через эндпоинт плагина
+   sqlite-memory, lexical-фолбэк; fail-open). Хук в gateway _run_agent_inner,
+   отдельный поток; heartbeat'ы и HERMES_SCOPE-процессы пропускаются.
+   Гейт memory.topic_detect_enabled по умолчанию OFF — ноль строк, ноль HTTP.
+   Классификация НЕ читается в поведение до приёмки Вл (шаг 6 тени).
 
