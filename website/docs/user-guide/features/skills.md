@@ -76,10 +76,10 @@ Every installed skill is automatically available as a slash command:
 
 ```bash
 # In the CLI or any messaging platform:
-/gif-search funny cats
+/excalidraw sketch the request flow for our API
 /axolotl help me fine-tune Llama 3 on my dataset
 /github-pr-workflow create a PR for the auth refactor
-/songsee analyze the frequency spread of this mix
+/youtube-content summarize https://youtu.be/dQw4w9WgXcQ
 
 # Just the skill name loads it and lets the agent ask what you need:
 /excalidraw
@@ -664,6 +664,49 @@ applied**, with an error naming the key the text sits in and where to move it.
 The targeted `patch` is preferred for updates — it's more token-efficient than a full rewrite because only the changed text appears in the tool call.
 :::
 
+### Gating agent skill writes (`skills.write_approval`)
+
+By default the agent writes skills freely — including from the [background
+self-improvement review](./memory.md#controlling-memory-writes-write_approval)
+that runs after a turn. If you'd rather approve every skill write first
+(small models that misjudge what they learned, secure environments, or just
+wanting eyes on the self-improvement loop), turn on the write-approval gate:
+
+```yaml
+skills:
+  write_approval: false     # false = write freely (default) | true = require approval
+```
+
+When `write_approval: true`, every `skill_manage` write (create / edit /
+patch / delete / write_file / remove_file) is **staged** instead of committed —
+a SKILL.md is too large to review inline, so staging applies regardless of
+whether the write came from a foreground turn or the background review.
+Staged writes survive restarts under `~/.hermes/pending/skills/` and are
+reviewed with the same familiar approve/deny flow as dangerous commands:
+
+```
+/skills pending             # list staged skill writes + a one-line gist each
+/skills diff <id>           # full unified diff (best viewed in CLI or dashboard)
+/skills approve <id>        # apply it (or 'all')
+/skills reject <id>         # drop it (or 'all')
+/skills approval on         # turn the gate on (or 'off') and persist it
+```
+
+The review surface works in the interactive CLI and on messaging platforms
+(diff output is truncated for chat bubbles — read the full diff on the CLI or
+in the pending JSON file). Memory writes have the same gate under
+`memory.write_approval` — see [Controlling memory writes](./memory.md#controlling-memory-writes-write_approval).
+
+To stop the agent from changing one *specific* skill at all, lock it:
+`hermes curator lock <skill>` (or the lock switch in Desktop). A locked skill stays
+readable and auto-loadable, but `skill_manage`, `write_file`, `patch` and `terminal`
+all refuse to change it, in every kind of session; your own edits still work. See
+[Locking a skill](./curator.md#locking-a-skill).
+
+> The separate `skills.guard_agent_created` setting is a content scanner
+> (dangerous-pattern heuristics), not an approval gate — the two are
+> independent. See [Guard on agent-created skill writes](../configuration.md#guard-on-agent-created-skill-writes).
+
 ## Skills Hub
 
 Browse, search, install, and manage skills from online registries, `skills.sh`, direct well-known skill endpoints, and official optional skills.
@@ -763,6 +806,7 @@ Default taps (browsable without any setup):
 - [anthropics/skills](https://github.com/anthropics/skills)
 - [huggingface/skills](https://github.com/huggingface/skills)
 - [NVIDIA/skills](https://github.com/NVIDIA/skills) — NVIDIA-verified skills (signed `skill.oms.sig` + governance `skill-card.md`)
+- [wandb/skills](https://github.com/wandb/skills), [qdrant/skills](https://github.com/qdrant/skills), [pinecone-io/skills](https://github.com/pinecone-io/skills) — each vendor's own skills for its product
 - [garrytan/gstack](https://github.com/garrytan/gstack)
 - [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) and [synthetic-sciences/openscience](https://github.com/synthetic-sciences/openscience) — ~480 scientific research skills (bioinformatics, chemistry, physics, ML training, scholarly tooling), grouped under one `science` category. Community trust: every install is security-scanned. Many wrap third-party tools with their own licenses (some GPL; KEGG requires a commercial license for non-academic use) — check each skill's prerequisites.
 
@@ -883,7 +927,7 @@ Important behavior:
 |-------|--------|--------|
 | `builtin` | Ships with Hermes | Always trusted |
 | `official` | `optional-skills/` in the repo | Built-in trust, no third-party warning |
-| `trusted` | Trusted registries/repos such as `openai/skills`, `anthropics/skills`, `huggingface/skills`, `NVIDIA/skills` | More permissive policy than community sources |
+| `trusted` | Trusted registries/repos such as `openai/skills`, `anthropics/skills`, `huggingface/skills`, `NVIDIA/skills`, `wandb/skills`, `qdrant/skills`, `pinecone-io/skills` | More permissive policy than community sources |
 | `community` | Everything else (`skills.sh`, well-known endpoints, custom GitHub repos, most marketplaces) | Non-dangerous findings can be overridden with `--force`; `dangerous` verdicts stay blocked |
 
 ### Update lifecycle

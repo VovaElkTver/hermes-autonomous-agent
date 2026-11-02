@@ -4,7 +4,7 @@
 and could not re-check because the cached file had been swept. These tests pin the
 mechanism that makes re-checking possible:
 
-- a pinned file is skipped by ``_cleanup_cache_dir`` however old its mtime;
+- a pinned file is skipped by the per-kind ``cleanup_*_cache`` sweep however old its mtime;
 - the rolling TTL extends on re-pin, bounded by an absolute cap from FIRST pin;
 - ``prune_expired`` drops expired entries and pins of vanished files;
 - a corrupt registry degrades to "no pins" — deletion never blocks on it.
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from gateway.platforms import media_pin
-from gateway.platforms.base import _cleanup_cache_dir
+from gateway.platforms.base import cleanup_image_cache, cleanup_document_cache
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_pinned_file_survives_age_sweep(isolated_home):
     plain = _backdated_file(cache, "plain.jpg", 48)
     assert media_pin.pin_media_file(pinned) is True
 
-    removed = _cleanup_cache_dir(cache, max_age_hours=24)
+    removed = cleanup_image_cache(max_age_hours=24)
 
     assert removed == 1
     assert pinned.exists()
@@ -103,7 +103,7 @@ def test_corrupt_store_degrades_to_no_pins(isolated_home, tmp_path):
     f = _backdated_file(cache, "doc.pdf", 48)
     (isolated_home / "cache" / "media_pins.json").write_text("{{{not json")
 
-    removed = _cleanup_cache_dir(cache, max_age_hours=24)
+    removed = cleanup_document_cache(max_age_hours=24)
 
     assert removed == 1
     assert not f.exists()
