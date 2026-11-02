@@ -1639,3 +1639,40 @@ class TestGatewayRoutingTable:
         restarted._db.close()
 
 
+class TestSessionBirthLine:
+    """The **Session started:** stamp: O(1) answer to "did /new already happen?"."""
+
+    def _prompt_with_entry(self, config=None):
+        from datetime import UTC, datetime
+
+        config = config or GatewayConfig()
+        source = SessionSource(
+            platform=Platform.LOCAL, chat_id="cli", chat_name="CLI terminal", chat_type="dm",
+        )
+        born = datetime(2026, 11, 2, 22, 6, 37, tzinfo=UTC)
+        entry = SessionEntry(
+            session_key=build_session_key(source), session_id="20261102_220637_test",
+            created_at=born, updated_at=born,
+        )
+        ctx = build_session_context(source, config, session_entry=entry)
+        return build_session_context_prompt(ctx)
+
+    def test_birth_stamp_rendered_when_entry_known(self):
+        prompt = self._prompt_with_entry()
+        assert "**Session started:** 2026-11-02T22:06:37+00:00" in prompt
+        assert "previous session generations" in prompt
+
+    def test_no_birth_stamp_without_session_entry(self):
+        source = SessionSource(
+            platform=Platform.LOCAL, chat_id="cli", chat_name="CLI terminal", chat_type="dm",
+        )
+        ctx = build_session_context(source, GatewayConfig())
+        assert "Session started" not in build_session_context_prompt(ctx)
+
+    def test_birth_line_is_stable_across_rebuilds(self):
+        """Cache invariant: same session → byte-identical rendered block."""
+        p1 = self._prompt_with_entry()
+        p2 = self._prompt_with_entry()
+        assert p1 == p2
+
+

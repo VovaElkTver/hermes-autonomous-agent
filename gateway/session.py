@@ -448,6 +448,17 @@ def build_session_context_prompt(context: SessionContext, *, redact_pii: bool = 
         uid = _hash_sender_id(src.user_id) if redact_pii else src.user_id
         lines.append(f"**User ID:** {_format_untrusted_prompt_value(uid)}")
 
+    # Session birth as an O(1) fact. Only STABLE fields belong here (the rendered block is part
+    # of the agent-cache signature): created_at is constant per session generation, so the line
+    # never busts prompt caching. An agent that must reconstruct "did /new already happen" from
+    # narrative history gets it wrong (2026-11-03 incident); read it from this stamp instead.
+    if context.created_at:
+        lines += [
+            "",
+            f"**Session started:** {_iso(context.created_at)}. Everything earlier in history "
+            "belongs to previous session generations.",
+        ]
+
     lines.extend(_PLATFORM_NOTES.get(src.platform, lambda ctx: [])(context))
     platforms_list = ["local (files on this machine)"] + [
         f"{p.value}: Connected ✓" for p in context.connected_platforms if p != Platform.LOCAL
