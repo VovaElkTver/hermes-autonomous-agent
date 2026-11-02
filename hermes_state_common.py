@@ -1084,6 +1084,24 @@ CREATE TABLE IF NOT EXISTS ctl_mem_shadow (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ctl_mem_shadow_kind ON ctl_mem_shadow(kind, created_at);
+-- Stage003 step 7: implicit-topic detector for interactive agents (observer
+-- only; gate memory.topic_detect_enabled defaults OFF — zero rows, zero HTTP
+-- until Вл turns it on). One row per observed user turn with the best topic
+-- candidate and its score; proposed_new carries a no-match message excerpt
+-- (candidate for a new topic). Read back ONLY for acceptance, never into
+-- behaviour: the detector changes nothing until приёмка.
+CREATE TABLE IF NOT EXISTS ctl_topic_detect (
+  detect_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  message_excerpt TEXT NOT NULL DEFAULT '',
+  best_scope_id TEXT,
+  best_label TEXT NOT NULL DEFAULT '',
+  score REAL NOT NULL DEFAULT 0.0,
+  method TEXT NOT NULL CHECK (method IN ('embed','lexical','skip')),
+  proposed_new TEXT,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_topic_detect_session ON ctl_topic_detect(session_id, created_at);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).

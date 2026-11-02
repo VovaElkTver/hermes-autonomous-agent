@@ -2289,6 +2289,30 @@ class GatewayTurnMixin(GatewayTurnPrepareMixin, GatewayTurnHygieneMixin, Gateway
             except Exception as _ne:
                 logger.debug("Long-running notification error: %s", _ne)
 
+    def _topic_detect_observe(self, session_id: str, message) -> None:
+        """Stage003 step 7: off-thread implicit-topic observer (shadow only).
+
+        Records one ctl_topic_detect guess per interactive turn when
+        ``memory.topic_detect_enabled``; controller-scoped processes declare
+        their topic via HERMES_SCOPE_* and are skipped. Fail-open: any trouble
+        is a debug line, the turn never notices.
+        """
+        try:
+            from controller import topic_detector
+            if not topic_detector.enabled():
+                return
+            from tools.topic_memory_bridge import task_scope_from_env
+            if task_scope_from_env() is not None:
+                return
+            import threading
+            threading.Thread(
+                target=topic_detector.detect,
+                kwargs={"session_id": str(session_id or ""), "text": str(message or "")[:4000]},
+                daemon=True, name="topic-detector",
+            ).start()
+        except Exception as exc:
+            logger.debug("topic detector observe skipped: %s", exc)
+
     async def _run_agent_inner(
         self, message: str, context_prompt: str, history: list[dict[str, Any]],
         source: SessionSource, session_id: str, session_key: str | None = None,
@@ -2318,6 +2342,11 @@ class GatewayTurnMixin(GatewayTurnPrepareMixin, GatewayTurnHygieneMixin, Gateway
             if captured is not None and 'result' not in captured:
                 captured['result'] = result
             return result
+
+        if not scheduled_heartbeat:
+            # A heartbeat is proactive machinery, not a user utterance — the
+            # stage003 step-7 observer only classifies human turns.
+            self._topic_detect_observe(session_id, message)
 
         from run_agent import AIAgent
 
