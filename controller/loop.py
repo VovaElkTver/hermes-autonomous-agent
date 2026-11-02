@@ -60,6 +60,9 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
     if status != "finished":
         model.unstick_step(conn, sid)  # release the claim: a ready->running retry must find it dispatchable
         transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
+        from . import live_ports
+        live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
+                                      goal=task["goal"], reason=str(res.get("error") or status))
         return {"entry": {"task": tid, "run": run_id, "to": "failed"}, "stop": False}
     return None
 

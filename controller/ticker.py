@@ -421,6 +421,10 @@ class Ticker:
                     worker_fn=self._worker_fn(conn),
                     review_fn=self._review_fn(conn))
                 pump_lock.heartbeat(lock_path)
+            # donor ports live: durable effects/outbox dispatch (outbox_reply and
+            # any future kinds) under the same pump lock — single-flight across
+            # processes, bounded passes so a chatty deliverer can't wedge the tick.
+            self._drain_live_ports(conn)
             self._heartbeat(conn, "pump",
                             {"scopes": {s: len(v) for s, v in out.items()}})
         finally:
@@ -432,6 +436,23 @@ class Ticker:
         self._write_gates_file(snap)
         for line in lines:
             self._journal_and_deliver(conn, line)
+
+    def _drain_live_ports(self, conn) -> int:
+        """Donor ports live (stage tail): dispatch durable effects/outbox rows.
+
+        Delivery rides the ticker's own chat channel — ``deliver_fn`` when the
+        gateway injected one, else the shared alerts.deliver path to
+        ``alert_target``. Never raises into run_pump: a broken chat transport
+        must leave effects queued with backoff, not kill the tick."""
+        try:
+            from . import live_ports
+            deliver = live_ports.default_deliver(self.alert_target,
+                                                 deliver_fn=self.deliver_fn)
+            return live_ports.drain_pending(conn, deliver)
+        except Exception:
+            logger.exception("controller ticker: live-ports drain failed "
+                             "(effects stay queued for the next tick)")
+            return 0
 
     def _open_scopes(self, conn) -> list[str]:
         return [r["workdir"] for r in conn.execute(
