@@ -84,6 +84,37 @@ def test_reconcile_no_blind_retry(ctl):
                         (rid,)).fetchone()["run_status"] == "finished"
 
 
+def test_reconcile_leaves_live_worker_untouched(ctl):
+    """A live external worker must not be forced to 'unknown' by a restart sweep."""
+    conn, model, _ = ctl
+    from controller import reconcile
+    import os
+    rid = model.start_run(conn, task_id="t", step_id="s", contract_version=1,
+                          execution_epoch=1)
+    conn.execute("INSERT INTO ctl_task VALUES ('t','o','','/w','g','running',1,NULL,0,0)")
+    model.record_run_process(conn, rid, os.getpid(), None)
+    rep = reconcile.recover(conn, verify_fn=lambda r: "not_started")
+    assert rep == [{"run_id": rid, "action": "left_alive", "pid": os.getpid()}]
+    assert conn.execute("SELECT run_status FROM ctl_run WHERE run_id=?",
+                        (rid,)).fetchone()["run_status"] == "starting"
+
+
+def test_run_progress_reports_ticks(ctl):
+    conn, model, _ = ctl
+    from controller import reconcile
+    rid = model.start_run(conn, task_id="t", step_id="s", contract_version=1,
+                          execution_epoch=1)
+    conn.execute("INSERT INTO ctl_task VALUES ('t','o','','/w','g','running',1,NULL,0,0)")
+    conn.execute("INSERT INTO sessions (id, source, started_at, cwd, tool_call_count,"
+                 " api_call_count, message_count) VALUES ('s1','cli',?,'/w',31,18,50)",
+                 (conn.execute("SELECT started_at FROM ctl_run WHERE run_id=?",
+                               (rid,)).fetchone()["started_at"],))
+    rep = reconcile.run_progress(conn, run_id=rid)
+    assert rep[0]["ticks"] == 18 and rep[0]["tool_calls"] == 31
+    assert rep[0]["messages"] == 50
+    assert rep[0]["worker"] == "no-pid"
+
+
 def test_plugin_registers_off_and_flag_gates(tmp_path, monkeypatch):
     """plugins/controller loads; with flag off the hooks are inert (no DB touch)."""
     import sys

@@ -20,6 +20,19 @@ import json
 import sys
 
 
+def _progress_cli(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="controller.pump_cli progress")
+    ap.add_argument("--run", default=None, help="limit to one run_id")
+    a = ap.parse_args(argv)
+    from controller import model, reconcile
+    conn = model.connect()
+    try:
+        print(json.dumps(reconcile.run_progress(conn, a.run), ensure_ascii=False))
+    finally:
+        conn.close()
+    return 0
+
+
 def _todo_cli(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="controller.pump_cli todo")
     sub = ap.add_subparsers(dest="todo_cmd", required=True)
@@ -107,6 +120,10 @@ def main(argv=None) -> int:
     # If the first positional is 'todo', dispatch to the to-do CLI.
     if argv and argv[0] == "todo":
         return _todo_cli(argv[1:])
+
+    # 'progress': the observability answer to a run's real ticks — never a drain.
+    if argv and argv[0] == "progress":
+        return _progress_cli(argv[1:])
 
     ap = argparse.ArgumentParser(prog="controller.pump_cli")
     ap.add_argument("--scope", action="append", default=None)
