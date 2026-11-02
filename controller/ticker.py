@@ -58,6 +58,8 @@ from . import alerts, loop, model, pump_lock, queue as Q, transitions
 logger = logging.getLogger("controller.ticker")
 
 INTERVALS = {"pump": 300.0, "watchdog": 1800.0}
+TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
+
 PUMP_STALE_S = 25 * 60   # the watchdog cron's own freshness rule
 MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
 HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
@@ -211,10 +213,11 @@ class Ticker:
                  deliver_fn=None, now_fn=time.time, worker_model: str | None = None,
                  worker_provider: str | None = None, max_steps: int = 50,
                  gates_path: str | None = None, boot_token: str | None = None,
-                 mono_fn=time.monotonic):
+                 mono_fn=time.monotonic, tick_s: float | None = None):
         self.boot_token = boot_token or model.new_id("boot")
         self._owner_payload: str | None = None  # owner row content after claim
         self.intervals = {**INTERVALS, **(intervals or {})}
+        self.tick_s = TICK_S if tick_s is None else tick_s
         self.alert_target = alert_target
         self.deliver_fn = deliver_fn
         self._now = now_fn      # wall clock: DB ts fields and ages vs stored ts
@@ -273,7 +276,8 @@ class Ticker:
                 return
             conn = model.connect()
             self._heartbeat(conn, "ticker-start",
-                            {"pid": os.getpid(), "intervals": self.intervals})
+                            {"pid": os.getpid(), "intervals": self.intervals,
+                             "beat_s": self.tick_s})
             self._start_watchdog()
             self._adopt_workers(conn)
             self._schedule(conn)
@@ -301,7 +305,10 @@ class Ticker:
     def _watchdog_run(self) -> None:
         """Watchdog cadence on its own thread + connection: the pump tick can
         wedge in run_cycle and never return; this thread still ticks, still
-        sees the aging 'pump' heartbeat and alerts. Cadence is monotonic."""
+        sees the aging 'pump' heartbeat and alerts. Cadence is monotonic.
+        The thread wakes on the 1 Hz base beat (bounded slices), counting off
+        the watchdog interval — one clock for the whole core, not a long
+        silent sleep (doctrine 02.11)."""
         try:  # a connect failure must be LOUD: silent watchdog death is 24.10 in miniature
             conn = model.connect()
         except Exception as exc:
@@ -311,13 +318,12 @@ class Ticker:
         try:
             next_tick = self._mono() + self.intervals["watchdog"]
             while not self._stop.is_set():
-                delay = next_tick - self._mono()
-                if delay > 0:
-                    self._stop.wait(delay)
-                if self._stop.is_set():
-                    break
-                self._guard("watchdog", conn, self.run_watchdog)
-                next_tick = max(next_tick, self._mono()) + self.intervals["watchdog"]
+                now = self._mono()
+                if now >= next_tick:
+                    self._guard("watchdog", conn, self.run_watchdog)
+                    next_tick = max(next_tick, self._mono()) + self.intervals["watchdog"]
+                # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
+                self._stop.wait(min(self.tick_s, max(0.0, next_tick - self._mono())))
         finally:
             conn.close()
 
@@ -327,14 +333,20 @@ class Ticker:
         ts columns). First drain half an interval after boot (an instant full
         drain storms workers into the gateway warm-up), then the interval
         table, re-anchored after any late tick (a slow drain never collapses
-        the cadence into a busy loop)."""
+        the cadence into a busy loop).
+
+        Base beat is 1 Hz (TICK_S, doctrine 02.11): the thread wakes every
+        beat and counts off the interval deadlines — pump/watchdog are tick
+        counters over the same clock, not independent long sleeps. An idle
+        beat does zero SQL; only a due counter touches the DB."""
         next_pump = self._mono() + self.intervals["pump"] / 2
         while not self._stop.is_set():
             if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
                 next_pump = max(next_pump, self._mono()) + self.intervals["pump"]
-            self._stop.wait(max(0.0, next_pump - self._mono()))
+            # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
+            self._stop.wait(min(self.tick_s, max(0.0, next_pump - self._mono())))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error

@@ -5,6 +5,7 @@ is patched to one shared file so the pump thread, the watchdog thread and the
 scratch connections all see the same rows (raw SCHEMA_SQL path).
 """
 import json
+import itertools
 import os
 import sqlite3
 import subprocess
@@ -218,6 +219,49 @@ def test_start_default_double_call_one_thread(singleton):
     assert t1 is not None
     assert t2 is t1
     assert len(_pump_threads()) == 1
+
+
+def test_base_beat_is_1hz_and_recorded_in_ticker_start(db_connect, monkeypatch):
+    """Doctrine 02.11: the ticker's base beat is 1 Hz — intervals are counted
+    over beats, and ticker-start records the beat for observability."""
+    from controller import ticker
+
+    t = ticker.Ticker(intervals={"pump": 3600, "watchdog": 3600}, gates_path=None)
+    assert t.tick_s == ticker.TICK_S == 1.0
+    monkeypatch.setattr(t, "run_pump", lambda conn: None)
+    t.start()
+    try:
+        got = _wait_for(lambda: _rows(db_connect,
+                                      "SELECT payload FROM ctl_ticker_heartbeat"
+                                      " WHERE kind='ticker-start'"), timeout=5)
+        assert got, "no ticker-start heartbeat"
+        rec = json.loads(_rows(db_connect,
+                               "SELECT payload FROM ctl_ticker_heartbeat"
+                               " WHERE kind='ticker-start'")[0]["payload"])
+        assert rec["beat_s"] == 1.0
+        assert rec["intervals"]["pump"] == 3600  # interval untouched, just counted
+    finally:
+        t.stop()
+
+
+def test_beat_slicing_does_not_delay_due_ticks(db_connect):
+    """A due counter must not wait for a full extra beat: with tick granularity
+    below the interval, cadence stays tight (no quantization drift)."""
+    from controller import ticker
+
+    fired = []
+    t = ticker.Ticker(intervals={"pump": 0.12, "watchdog": 3600},
+                      gates_path=None, tick_s=0.03)
+    t.run_pump = lambda conn: fired.append(time.monotonic())
+    t.start()
+    try:
+        assert _wait_for(lambda: len(fired) >= 3, timeout=5), \
+            "pump cadence collapsed under beat slicing"
+        gaps = [b - a for a, b in itertools.pairwise(fired)]
+        assert all(g < 0.6 for g in gaps), gaps  # ~0.12s cadence + slice slack
+    finally:
+        t.stop()
+
 
 
 def test_start_default_after_reimport_one_thread(singleton):
