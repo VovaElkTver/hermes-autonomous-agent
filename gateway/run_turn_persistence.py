@@ -132,6 +132,10 @@ class GatewayTurnPersistenceMixin:
             except Exception:
                 logger.debug("branch_prefix: decorate failed for %s",
                              session_entry.session_id, exc_info=True)
+            # 2026-11-03 contract: a "done" with no cited verification artifact gets an
+            # explicit marker — see gateway/declaration_gate.py.
+            from gateway.declaration_gate import annotate_unverified_declaration
+            response = annotate_unverified_declaration(response)
 
         # The agent thread already updated the contextvar; propagate to SessionEntry + _save() only
         # if the binding still points at the session this run was launched against.
