@@ -315,6 +315,10 @@ async def test_configured_toolchain_names_a_local_client_omitted_never_leak_from
     from tools.code_execution_env import _build_child_env
     from tools.environments.local import _make_run_env
     from tools.process_registry import ProcessRegistry
+    # Герметичность: не зависим от venv, в котором запущен тест (см. test_host_values…):
+    # без фикса _resolve_hermes_bin_dir.prepend искажает первый элемент PATH.
+    import tools.environments.local as _local_env
+    monkeypatch.setattr(_local_env, '_HERMES_BIN_DIR', None)
     home = _home(tmp_path, _CONFIG + 'terminal: {client_env_passthrough: [GEM_HOME]}\n')
     monkeypatch.setenv('GEM_HOME', '/alpha')
     monkeypatch.setenv('PATH', '/daemon/bin:/usr/bin:/bin')
@@ -355,6 +359,11 @@ async def test_host_values_apply_only_over_a_gateway_proven_local_attach(tmp_pat
     from hermes_state_local import local_receipt
     from hermes_state_runtime import RuntimeStoreError
     from tools.environments.local import _make_run_env
+    # Герметичность: тестовый процесс может жить в любом venv; иначе
+    # _resolve_hermes_bin_dir подмешает его bin/ первым элементом PATH и клиентские
+    # '/client/bin' / '/daemon/bin' сравнения станут зависимы от окружения запуска.
+    import tools.environments.local as _local_env
+    monkeypatch.setattr(_local_env, '_HERMES_BIN_DIR', None)
     home = _home(tmp_path, 'platform_toolsets: {cli: []}\nmodel: {default: m}\n')  # no configured provider
     repo = tmp_path / 'repo'
     (repo / '.hermes' / 'plugins' / 'mine').mkdir(parents=True)

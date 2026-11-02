@@ -94,3 +94,11 @@ FAILURES_BEFORE_ERROR, по донору). Отправка в чат из те�
    Гейт memory.topic_detect_enabled по умолчанию OFF — ноль строк, ноль HTTP.
    Классификация НЕ читается в поведение до приёмки Вл (шаг 6 тени).
 
+Урок item1 (инцидент 02.11, PATH-замечание Вл): `hermes chat --oneshot -Q` воркера
+исполняет ход В ПРОЦЕССЕ ШЛЮЗА (gateway-hosted turn) — env-зависимости ядра возить
+только именованными переменными через client_env/BEHAVIOUR_ENV, не через окружение
+процесса. PATH-канал тулчейна (TOOL_ENV, client_env_passthrough) — best-effort для
+интерактивных тулов: conda/uv/venv'ы тусуют PATH как хотят, на нём ничего не строить;
+тесты не должны зависеть от окружения запуска (герметизировать monkeypatch'ем
+`_HERMES_BIN_DIR`, см. tests/gateway/test_session_client_env.py).
+
