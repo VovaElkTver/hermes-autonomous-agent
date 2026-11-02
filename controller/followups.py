@@ -117,12 +117,14 @@ def list_open(conn: sqlite3.Connection, scope_task: str | None = None) -> list[d
     return [dict(r) for r in conn.execute(sql + " ORDER BY due_at", params)]
 
 
-def _deliver_one(row: dict, deliver, *, now: float) -> bool:
-    """One send attempt. True = transport accepted; False/exception = retryable."""
+def _deliver_one(receipt: dict, deliver) -> bool:
+    """One send attempt with a ``{"text": ...}`` receipt (live_ports contract:
+    default_deliver unwraps the receipt itself; gateway deliver_fn gets text).
+    True = transport accepted; False/exception = retryable."""
     try:
-        return bool(deliver({"text": row["text"], "followup": row}))
+        return bool(deliver(receipt))
     except Exception as exc:
-        logger.debug("followup %s delivery refused: %s", row["followup_id"], exc)
+        logger.debug("followup delivery refused: %s", exc)
         return False
 
 
@@ -162,11 +164,11 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
             # Donor parity (evals REQUEUES→unavailable): say it out loud once, then rest.
             note = (f"[controller] напоминание {rid} не дозвонилось за "
                     f"{row['max_repeats']} попыток: {row['text'][:120]}")
-            _deliver_one({**row, "text": note}, deliver, now=now)
+            _deliver_one({"text": note}, deliver)
             with conn:
                 conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
             continue
-        ok = _deliver_one(row, deliver, now=now)
+        ok = _deliver_one({"text": row["text"]}, deliver)
         # Success: pending→awaiting_ack (reminder) or stays pending (review).
         # Refused send: row keeps its state, but the window restarts — a broken
         # transport must not be hammered every scan, nor lose the row.
