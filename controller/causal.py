@@ -310,18 +310,21 @@ def projection(conn: sqlite3.Connection, roots: list[str] | str,
 # ---------------------------------------------------------------- migration
 
 def _migrate_reply_edges(conn, stats) -> None:
-    """reply-рёбра из event_observations.relation (m.in_reply_to).
+    """reply-рёбра из event_observations.relation.
     Донор ТЗ говорил `messages.in_reply_to` — такой колонки в этой схеме нет;
-    фактический носитель reply-to в state.db — relation JSONTransport-слоя."""
+    фактический носитель reply-to в state.db — relation JSON транспортного слоя.
+    Формат отношений коннектора разбирается на границе транспорта
+    (:func:`transport.relation_parent_event`) — сам граф платформо-слеп."""
+    from .transport import relation_parent_event
     rows = conn.execute(
         "SELECT event_obs_id, room_id, relation FROM event_observations"
-        " WHERE relation LIKE '%in_reply_to%'").fetchall()
+        " WHERE relation != '' AND relation != '{}'").fetchall()
     for ev_id, room_id, relation in rows:
         try:
             rel = json.loads(relation or "{}")
         except (ValueError, TypeError):
             continue
-        parent = (((rel or {}).get("m.in_reply_to") or {}).get("event_id"))
+        parent = relation_parent_event(rel)
         if not parent:
             continue
         prow = conn.execute(
@@ -484,20 +487,21 @@ def record_branch_join(conn: sqlite3.Connection, *, branch_id: str,
     return eid
 
 def mirror_reply_for_event(conn: sqlite3.Connection, *, event_obs_id: str,
-                           room_id: str, relation: dict | None,
+                           room_id: str, parent_event_id: str | None,
                            commit: bool = False) -> None:
-    """Shadow writer for transport: an m.in_reply_to relation mirrors to a reply
-    edge when the parent event is already observed in the same room. Never
-    raises — a missing parent is the norm for out-of-order sync, the idempotent
-    :func:`migrate` sweeps the stragglers later."""
+    """Shadow writer for transport: a reply observation mirrors to a reply edge
+    when the parent event is already observed in the same room. The caller
+    resolves platform relation formats at the transport boundary — this layer
+    only ever sees internal ids. Never raises — a missing parent is the norm
+    for out-of-order sync, the idempotent :func:`migrate` sweeps the stragglers
+    later."""
     try:
-        parent = (((relation or {}).get("m.in_reply_to") or {}).get("event_id"))
-        if not parent:
+        if not parent_event_id:
             return
         prow = conn.execute(
             "SELECT event_obs_id FROM event_observations"
             " WHERE room_id=? AND event_id=? AND event_obs_id<>? LIMIT 1",
-            (room_id, parent, event_obs_id)).fetchone()
+            (room_id, parent_event_id, event_obs_id)).fetchone()
         if prow is None:
             return
         link(conn, frm=f"obs:{prow[0]}", to=f"obs:{event_obs_id}", kind="reply",

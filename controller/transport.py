@@ -74,6 +74,19 @@ def open_db() -> sqlite3.Connection:
     return _model._connect()
 
 
+def relation_parent_event(relation: dict | None) -> str | None:
+    """Platform-normalized parent reference of an observed relation dict.
+
+    Connector relation formats are a transport fact and live here, at the
+    transport-observation boundary (same rationale as the m.room.encrypted
+    decryption special-case below). Core mechanisms downstream of this layer
+    must stay format-blind: they consume internal ids only.
+    """
+    if not isinstance(relation, dict):
+        return None
+    return ((relation.get("m.in_reply_to") or {}).get("event_id")) or None
+
+
 def record_observation(
     conn: sqlite3.Connection, *, connector: str, channel: str, room_id: str,
     event_id: str, event_type: str = "", content_hash: str = "", sender: str = "",
@@ -123,11 +136,13 @@ def record_observation(
          "pending", "pending", decryption, "pending", "pending", "pending", now),
     )
     conn.commit()
-    # V-O9 shadow writer: mirror an m.in_reply_to relation into a causal reply
-    # edge when the parent is already observed. Never raises (causal.mirror_*).
-    from .causal import mirror_reply_for_event
-    mirror_reply_for_event(conn, event_obs_id=ev_id, room_id=room_id,
-                           relation=relation, commit=True)
+    # V-O9 shadow writer: mirror a reply relation into a causal reply edge when
+    # the parent is already observed. Never raises (causal.mirror_*).
+    parent_event = relation_parent_event(relation)
+    if parent_event:
+        from .causal import mirror_reply_for_event
+        mirror_reply_for_event(conn, event_obs_id=ev_id, room_id=room_id,
+                               parent_event_id=parent_event, commit=True)
     return {"observation_id": obs_id, "event_obs_id": ev_id, "status": status}
 
 
