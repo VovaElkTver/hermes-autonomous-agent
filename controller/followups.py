@@ -1,19 +1,25 @@
 """Async follow-ups on the 1 Hz beat (mini-spec journal/20261103-async-followups-spec.md).
 
 A consequence is a ROW in state.db, never a timer object: the ticker wakes, finds
-due ``ctl_followup`` rows, and delivers them through the live chat port. Restarts
-lose nothing; an idle beat still runs zero SQL (the scan rides its own interval
-counter in ``Ticker._schedule``, not every beat).
+due ``ctl_followup`` rows and acts on them. Restarts lose nothing; an idle beat
+still runs zero SQL (the scan rides its own interval counter in
+``Ticker._schedule``, not every beat).
 
-Reminder semantics (v1, donor-referenced): fire at/after ``due_at`` → repeat every
-``repeat_beats`` beats until ``max_repeats`` attempts → final "не дозвонилось"
-notice + done (donor evals: REQUEUES → unavailable). Ack-capture is OUT of v1 —
-the human may cancel any follow-up explicitly; a reminder that annoyed without a
-cancel is a spec question, not lost work. Review = periodic by ``period_s``,
-stays pending forever until cancelled.
+Recipient model (v2, принят Вл 04.11): DEFAULT RECIPIENT IS THE AGENT ITSELF.
+Fire = enqueue a real controller task into the scope of ``scope_task``
+(inherits owner/workdir/project from it) so the agent executes the consequence
+like any other queued work — the human never shovels reminder texts back at the
+bot. ``recipient='user'`` is an explicit opt-in that keeps the v1 chat-delivery
+semantics (repeat beats, exhaustion notice via live port).
 
-Delivery is at-least-once across crash seams: the state flip to awaiting_ack is
-a separate commit from the send itself. Duplicates are rarer than losses.
+Reminder (agent): fire once → dispatched task recorded in ``dispatch_ref``;
+the follow-up closes when that task reaches a terminal state (completed /
+cancelled). Review (agent): each ``period_s`` a new task is enqueued unless the
+previous one is still open (reviews never pile up).
+
+Delivery/enqueue is at-least-once across crash seams: the state flip commits
+after the attempt, so a crash seam duplicates at worst. Duplicates are rarer
+than losses.
 """
 from __future__ import annotations
 
@@ -29,7 +35,13 @@ DEFAULT_REPEAT_BEATS = 300
 DEFAULT_MAX_REPEATS = 3
 
 KINDS = ("reminder", "review")
+RECIPIENTS = ("agent", "user")
 _STATES = ("pending", "awaiting_ack", "done", "cancelled")
+
+#: Task states that mean «the dispatched work is still somebody's problem».
+_OPEN_TASK_STATES = ("draft", "ready", "running", "blocked", "paused",
+                     "needs_human", "verifying", "failed")
+_TERMINAL_TASK_STATES = ("completed", "cancelled")
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -47,6 +59,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           period_s INTEGER,
           state TEXT NOT NULL DEFAULT 'pending'
                CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
+          recipient TEXT NOT NULL DEFAULT 'agent'
+               CHECK (recipient IN ('agent','user')),
+          dispatch_ref TEXT,
           last_fired_at REAL,
           retries INTEGER NOT NULL DEFAULT 0,
           repeat_beats INTEGER NOT NULL DEFAULT 300,
@@ -73,7 +88,8 @@ def _new_id(conn: sqlite3.Connection, prefix: str) -> str:
 
 def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         due_at: float | None = None, period_s: int | None = None,
-        scope_project: str | None = None, repeat_beats: int = DEFAULT_REPEAT_BEATS,
+        scope_project: str | None = None, recipient: str = "agent",
+        repeat_beats: int = DEFAULT_REPEAT_BEATS,
         max_repeats: int = DEFAULT_MAX_REPEATS, created_by: str = "agent-proposal",
         provenance: dict | None = None, now: float | None = None) -> str:
     """Register one follow-up. Reminder needs ``due_at``; review needs ``period_s``."""
@@ -83,6 +99,8 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         raise ValueError("review requires period_s")
     if kind not in KINDS:
         raise ValueError(f"invalid followup kind {kind!r}")
+    if recipient not in RECIPIENTS:
+        raise ValueError(f"invalid recipient {recipient!r}")
     now = now if now is not None else time.time()
     ensure_schema(conn)
     fid = _new_id(conn, "fup")
@@ -90,12 +108,12 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         conn.execute(
             """INSERT INTO ctl_followup
                (followup_id, kind, scope_task, scope_project, text, due_at,
-                period_s, state, repeat_beats, max_repeats, created_by,
-                created_at, provenance_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                period_s, state, recipient, repeat_beats, max_repeats,
+                created_by, created_at, provenance_json)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (fid, kind, scope_task, scope_project, text, due_at, period_s,
-             "pending", repeat_beats, max_repeats, created_by, now,
-             json.dumps(provenance) if provenance else None))
+             "pending", recipient, repeat_beats, max_repeats, created_by, now,
+             json.dumps(provenance, ensure_ascii=False) if provenance else None))
     return fid
 
 
@@ -128,13 +146,81 @@ def _deliver_one(receipt: dict, deliver) -> bool:
         return False
 
 
+def _task_status(conn: sqlite3.Connection, task_id: str) -> str | None:
+    row = conn.execute("SELECT state FROM ctl_task WHERE task_id=?", (task_id,)).fetchone()
+    return row["state"] if row else None
+
+
+def _dispatch_task(conn: sqlite3.Connection, row: dict) -> str:
+    """Enqueue the consequence as a real controller task in its scope's lane."""
+    from . import model, transitions
+    scope = conn.execute(
+        "SELECT owner, project_id, workdir FROM ctl_task WHERE task_id=?",
+        (row["scope_task"],)).fetchone()
+    if scope is None:
+        raise LookupError(f"scope task vanished: {row['scope_task']}")
+    goal = (f"[followup {row['followup_id']}] {row['text']}"
+            + (f" (периодический обзор раз в {row['period_s']}с)" if row["kind"] == "review" else ""))
+    tid = model.create_task(conn, owner=scope["owner"], workdir=scope["workdir"],
+                            goal=goal, project_id=scope["project_id"] or "")
+    # The consequence IS its own mandate source (created_by carries the authorizer);
+    # contract v1 is self-agreed, otherwise every reminder would dead-lock on review.
+    model.agree_contract(conn, tid)
+    transitions.transition(conn, tid, "ready", basis=f"followup:{row['followup_id']}")
+    return tid
+
+
+def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) -> str | None:
+    """Agent-recipient fire: dispatch a task, mind the previous one. Returns rid if fired."""
+    rid = row["followup_id"]
+    prev = row["dispatch_ref"]
+    status = _task_status(conn, prev) if prev else "no-dispatch-yet"
+    in_flight = status in _OPEN_TASK_STATES
+    if prev:
+        if row["kind"] == "reminder":
+            if in_flight:
+                return None               # previous work still somebody's problem
+            # terminal (completed/cancelled) or vanished row = the agent handled it,
+            # a human stopped it, or its own lifecycle cleaned it up. Either way
+            # the reminder has nothing left to wait for.
+            with conn:
+                conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
+            return None
+        if in_flight:
+            return None                   # reviews never pile up
+        # review: previous cycle finished → slot free, enqueue next cycle below
+    try:
+        tid = _dispatch_task(conn, row)
+    except LookupError as exc:
+        # Scope gone and nobody left to own this: say it out loud once, then rest.
+        note = (f"[controller] следствие {rid} не исполнить — исходная задача "
+                f"{row['scope_task']} недоступна: {row['text'][:100]}")
+        logger.warning("followup %s dispatch impossible: %s", rid, exc)
+        _deliver_one({"text": note}, deliver)
+        with conn:
+            conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
+        return None
+    except Exception as exc:                  # transient queue trouble → retry window
+        logger.debug("followup %s dispatch deferred: %s", rid, exc)
+        with conn:
+            conn.execute("UPDATE ctl_followup SET last_fired_at=?, retries=retries+1 WHERE followup_id=?",
+                         (now, rid))
+        return None
+    next_state = "awaiting_ack" if row["kind"] == "reminder" else row["state"]
+    with conn:
+        conn.execute(
+            "UPDATE ctl_followup SET state=?, dispatch_ref=?, last_fired_at=?, retries=retries+1"
+            " WHERE followup_id=?", (next_state, tid, now, rid))
+    return rid
+
+
 def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
          beat_s: float = 1.0) -> list[str]:
-    """Find due follow-ups, attempt delivery, advance state. Returns fired ids.
+    """Find due follow-ups, act on them, advance state. Returns fired ids.
 
     Call on its own interval counter (NOT every beat — doctrine: idle beats run
-    zero SQL). Idempotency key per attempt is carried by the caller's transport;
-    state flips commit after the attempt so a crash seam duplicates at worst.
+    zero SQL). agent rows → task dispatch; user rows → chat delivery with the
+    v1 repeat/exhaustion cadence.
     """
     now = now if now is not None else time.time()
     fired: list[str] = []
@@ -144,8 +230,24 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
     for row in rows:
         rid = row["followup_id"]
         last = row["last_fired_at"]
-        window_ok = last is None or (now - last) >= row["repeat_beats"] * beat_s
         base = row["created_at"] if last is None else last   # review period counts from creation
+
+        if row["recipient"] == "agent":
+            due_now = (
+                (row["kind"] == "reminder" and row["state"] == "pending"
+                 and row["due_at"] is not None and now >= row["due_at"])
+                or (row["kind"] == "reminder" and row["state"] == "awaiting_ack")
+                or (row["kind"] == "review" and now >= base + (row["period_s"] or 0))
+            )
+            if due_now:
+                # Cheap per-scan work: _fire_agent_row holds while the dispatched
+                # task is open, closes the row when it turns terminal.
+                if _fire_agent_row(conn, row, deliver, now) == rid:
+                    fired.append(rid)
+            continue
+
+        # ---- explicit user-recipient path: v1 chat delivery -------------------
+        window_ok = last is None or (now - last) >= row["repeat_beats"] * beat_s
         deadline_reached = (
             row["kind"] == "reminder" and row["state"] == "pending"
             and row["due_at"] is not None and now >= row["due_at"]

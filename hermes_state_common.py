@@ -1014,6 +1014,9 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   period_s INTEGER,
   state TEXT NOT NULL DEFAULT 'pending'
        CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
+  recipient TEXT NOT NULL DEFAULT 'agent'
+       CHECK (recipient IN ('agent','user')),
+  dispatch_ref TEXT,
   last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
   repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
   created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT
