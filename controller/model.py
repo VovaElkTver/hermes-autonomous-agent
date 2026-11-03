@@ -144,6 +144,11 @@ def revise_contract(conn, task_id: str, fields: dict, change_class: str) -> int:
          cur["v"], time.time() if change_class != "MATERIAL" else None))
     conn.execute("UPDATE ctl_task SET contract_version=?, updated_at=? WHERE task_id=?",
                  (nxt, time.time(), task_id))
+    if cur["v"]:
+        # V-O9: the supersede chain mirrors to a causal edge in the same transaction.
+        from .causal import link as _causal_link
+        _causal_link(conn, frm=f"rev:{task_id}@{cur['v']}", to=f"rev:{task_id}@{nxt}",
+                     kind="supersedes", commit=False, strict=False)
     conn.commit()
     return nxt
 
@@ -520,6 +525,10 @@ def todo_materialize(conn, todo_id: str, workdir: str, *,
             " WHERE todo_id=?",
             (tid, todo_id),
         )
+        # V-O9: the todo (decision to do X) causes the task born from it.
+        from .causal import link as _causal_link
+        _causal_link(conn, frm=f"todo:{todo_id}", to=f"task:{tid}",
+                     kind="causes", commit=False, strict=False)
         conn.commit()
         return tid
     except Exception:

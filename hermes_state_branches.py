@@ -32,17 +32,27 @@ class SessionBranchMixin:
         and gets re-summarized by the auto-titler, so it cannot be the label.
         """
         meta = json.dumps({"title": title}) if title else None
-        self._execute_write(
-            lambda conn: conn.execute(
+
+        def _do(conn: sqlite3.Connection) -> None:
+            cur = conn.execute(
                 """INSERT OR IGNORE INTO session_branches (
                        branch_id, parent_session_id, child_session_id, base_message_uid,
                        created_at, created_by_turn, status, meta_json)
                    VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
                 (branch_id, parent_session_id, child_session_id,
                  base_message_uid, time.time(), created_by_turn, meta),
-            ),
-            patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S,
-        )
+            )
+            if cur.rowcount:
+                # V-O9 shadow writer: the parent line causes this branch creation.
+                # Bookkeeping only — a causal failure must never sink the fork.
+                try:
+                    from controller import causal
+                    causal.link(conn, frm=f"sess:{parent_session_id}",
+                                to=f"br:{branch_id}", kind="causes",
+                                commit=False, strict=False)
+                except Exception:
+                    pass
+        self._execute_write(_do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 
     def set_branch_title(self, branch_id: str, title: str) -> None:
         """Merge ``title`` into the branch's meta_json (idempotent)."""
@@ -149,6 +159,23 @@ class SessionBranchMixin:
                 (status, join_strategy, status, time.time(), branch_id))
         except Exception:
             return False
+        if rc > 0 and status == "joined":
+            # V-O9 shadow writer: join = convergence event node with a merge
+            # edge from the absorbed branch (idempotent per branch).
+            try:
+                row = self._read_one(
+                    "SELECT parent_session_id FROM session_branches WHERE branch_id = ?",
+                    (branch_id,))
+                if row is not None:
+                    from controller import causal as _causal
+
+                    def _join(conn: sqlite3.Connection) -> None:
+                        _causal.record_branch_join(
+                            conn, branch_id=branch_id,
+                            parent_session_id=row["parent_session_id"], commit=False)
+                    self._execute_write(_join)
+            except Exception:
+                pass
         return rc > 0
 
     def min_active_base_rowid(self, parent_session_id: str) -> int | None:

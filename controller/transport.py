@@ -123,6 +123,11 @@ def record_observation(
          "pending", "pending", decryption, "pending", "pending", "pending", now),
     )
     conn.commit()
+    # V-O9 shadow writer: mirror an m.in_reply_to relation into a causal reply
+    # edge when the parent is already observed. Never raises (causal.mirror_*).
+    from .causal import mirror_reply_for_event
+    mirror_reply_for_event(conn, event_obs_id=ev_id, room_id=room_id,
+                           relation=relation, commit=True)
     return {"observation_id": obs_id, "event_obs_id": ev_id, "status": status}
 
 
