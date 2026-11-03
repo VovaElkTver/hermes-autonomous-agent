@@ -86,6 +86,20 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 
 # ---------------------------------------------------------------- node registry
 
+#: namespace -> (table, timestamp column, key column). `sess:` ts = CREATION
+#: (started_at), never activity: a mutable stamp would make historic edges flip
+#: their ordering as sessions keep living. `rev:` is special-cased below.
+_NODE_TABLES = {
+    "ctl": ("ctl_event", "ts", "event_id"),
+    "task": ("ctl_task", "created_at", "task_id"),
+    "mem": ("ctl_mem_item", "created_at", "item_id"),
+    "todo": ("ctl_todo", "created_at", "todo_id"),
+    "br": ("session_branches", "created_at", "branch_id"),
+    "sess": ("sessions", "started_at", "id"),
+    "obs": ("event_observations", "created_at", "event_obs_id"),
+}
+
+
 def _split(node: str) -> str | None:
     ns, sep, rest = str(node).partition(":")
     if not sep or not rest:
@@ -96,13 +110,8 @@ def _split(node: str) -> str | None:
 def _node_state(conn: sqlite3.Connection, node: str) -> tuple[bool, float | None]:
     """Resolve an endpoint → (exists, ts). ts is None for present-but-un-timestamped
     nodes (rev before agreement) — the ordering check skips those."""
-    ns = _split(node)
-    rest = str(node).partition(":")[2]
-    if ns == "ctl":
-        row = conn.execute("SELECT ts FROM ctl_event WHERE event_id=?", (rest,)).fetchone()
-    elif ns == "task":
-        row = conn.execute("SELECT created_at FROM ctl_task WHERE task_id=?", (rest,)).fetchone()
-    elif ns == "rev":
+    ns, _, rest = str(node).partition(":")
+    if ns == "rev":
         task, sep, ver = rest.rpartition("@")
         if not sep or not ver.isdigit():
             return False, None
@@ -110,21 +119,11 @@ def _node_state(conn: sqlite3.Connection, node: str) -> tuple[bool, float | None
             "SELECT agreed_at FROM ctl_contract_revision WHERE task_id=? AND version=?",
             (task, int(ver))).fetchone()
         return (row is not None), (None if row is None else row[0])
-    elif ns == "mem":
-        row = conn.execute("SELECT created_at FROM ctl_mem_item WHERE item_id=?", (rest,)).fetchone()
-    elif ns == "todo":
-        row = conn.execute("SELECT created_at FROM ctl_todo WHERE todo_id=?", (rest,)).fetchone()
-    elif ns == "br":
-        row = conn.execute("SELECT created_at FROM session_branches WHERE branch_id=?", (rest,)).fetchone()
-    elif ns == "sess":
-        # Node ts = CREATION (started_at), never activity: a mutable stamp would
-        # make historic edges flip their ordering as sessions keep living.
-        row = conn.execute("SELECT started_at FROM sessions WHERE id=?", (rest,)).fetchone()
-    elif ns == "obs":
-        row = conn.execute("SELECT created_at FROM event_observations WHERE event_obs_id=?",
-                           (rest,)).fetchone()
-    else:
+    spec = _NODE_TABLES.get(ns)
+    if spec is None:
         return False, None
+    table, ts_col, key = spec
+    row = conn.execute(f"SELECT {ts_col} FROM {table} WHERE {key}=?", (rest,)).fetchone()
     return (row is not None), (None if row is None else row[0])
 
 

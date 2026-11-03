@@ -405,5 +405,5 @@ legitimately (отклонение от ТЗ §2.4, отмечено Вл). UNIQ
 
 Бенчмарк на копии прод-state.db (38k сообщений, 13.6k наблюдений): миграция 0.2s,
 4502 ребра, replay идемпотентен, freshness/impact/projection — медиана <1ms при
-гейте приёмки 50ms. Регресс: tests/plugins/test_controller_causal.py (24, включая
+гейте приёмки 50ms. Регресс: tests/plugins/test_controller_causal.py (25, включая
 SIGKILL-chaos посреди миграции).

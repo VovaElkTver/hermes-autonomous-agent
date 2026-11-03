@@ -22,10 +22,19 @@ def conn(tmp_path):
 
 
 def _emit(conn, n):
-    eids = []
+    # Strictly increasing event stamps, waited as a condition (HX013): re-emit
+    # while the clock has not ticked past the previous insert (sub-microsecond
+    # on Linux, so the loop exits on the first or second try).
+    eids, prev_ts = [], 0.0
     for i in range(n):
-        eids.append(model.emit(conn, kind="t", origin="test", payload={"i": i}))
-        time.sleep(0.005)
+        while True:
+            eid = model.emit(conn, kind="t", origin="test", payload={"i": i})
+            ts = conn.execute("SELECT ts FROM ctl_event WHERE event_id=?",
+                              (eid,)).fetchone()[0]
+            if ts > prev_ts:
+                eids.append(eid)
+                prev_ts = ts
+                break
     return eids
 
 
@@ -317,14 +326,20 @@ def test_sigkill_mid_migration_leaves_no_partial_edges(tmp_path):
     final.close()
 
 
+
+
 # ---- v2 legacy sweep ---------------------------------------------------------------
 
 def test_legacy_v1_schema_upgraded_in_place(tmp_path):
     """DB built before ТЗ v2 (old unique-index name, AUTOINCREMENT table):
     ensure_schema must land the v2 shape without losing rows or the
     idempotency guarantee."""
-    db = tmp_path / "legacy.db"
-    c = sqlite3.connect(db)
+    c = model.connect(tmp_path / "legacy.db")
+    a, b = _emit(c, 2)
+    # downgrade the causal table to its pre-v2 shape, exactly as found in the
+    # live state.db (AUTOINCREMENT residue + triple under the old index name)
+    c.execute("DROP INDEX ux_cl_edge")
+    c.execute("DROP TABLE ctl_causal_link")
     c.execute("""CREATE TABLE ctl_causal_link (
         link_id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL,
         from_event TEXT NOT NULL, to_event TEXT NOT NULL, kind TEXT NOT NULL,
@@ -332,16 +347,16 @@ def test_legacy_v1_schema_upgraded_in_place(tmp_path):
     c.execute("CREATE UNIQUE INDEX udl_ctl_causal_link"
               " ON ctl_causal_link(from_event, to_event, kind)")
     c.execute("INSERT INTO ctl_causal_link(ts,from_event,to_event,kind)"
-              " VALUES (1.0,'ctl:a','ctl:b','causes')")
+              " VALUES (1.0,?,?,'causes')", (f"ctl:{a}", f"ctl:{b}"))
     c.commit()
 
     causal.ensure_schema(c)  # the sweep runs on every entry point
     idx = {r[0] for r in c.execute("SELECT name FROM sqlite_master"
-                                   " WHERE type='index' AND tbl_name='ctl_causal_link'")}
+                                   " WHERE type='index' AND tbl_name='ctl_causal_link'"
+                                   " AND name IS NOT NULL")}
     assert "ux_cl_edge" in idx and "udl_ctl_causal_link" not in idx
     assert c.execute("SELECT COUNT(*) FROM ctl_causal_link").fetchone()[0] == 1
-    with pytest.raises(sqlite3.IntegrityError):  # uniqueness survived the rename
-        c.execute("INSERT INTO ctl_causal_link(ts,from_event,to_event,kind)"
-                  " VALUES (2.0,'ctl:a','ctl:b','causes')")
+    # idempotency key survived the rename: a replayed edge is absorbed
+    assert causal.link(c, frm=f"ctl:{a}", to=f"ctl:{b}", kind="causes") is None
     assert causal.check_invariants(c) == {}
     c.close()

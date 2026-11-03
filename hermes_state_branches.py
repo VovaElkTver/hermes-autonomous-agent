@@ -10,11 +10,14 @@ methods here are additive; sessions without branches never touch this table.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
 
 BRANCH_STATUSES = ("active", "joined", "abandoned")
+
+logger = logging.getLogger("hermes_state")
 
 
 class SessionBranchMixin:
@@ -51,7 +54,7 @@ class SessionBranchMixin:
                                 to=f"br:{branch_id}", kind="causes",
                                 commit=False, strict=False)
                 except Exception:
-                    pass
+                    logger.debug("causal fork edge failed", exc_info=True)
         self._execute_write(_do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 
     def set_branch_title(self, branch_id: str, title: str) -> None:
@@ -175,7 +178,7 @@ class SessionBranchMixin:
                             parent_session_id=row["parent_session_id"], commit=False)
                     self._execute_write(_join)
             except Exception:
-                pass
+                logger.debug("causal join edges failed for %s", branch_id, exc_info=True)
         return rc > 0
 
     def min_active_base_rowid(self, parent_session_id: str) -> int | None:
