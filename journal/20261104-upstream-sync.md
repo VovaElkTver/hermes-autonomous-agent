@@ -370,3 +370,8 @@ VERDICT: [заполняется по завершении параллельн�
   403526cb20 == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~self-closed~~.
 - NEXT TICK: base hermes_cli a2 исход ~18:05 (при XML — rc/INTERR/tc-count против merged weak
   19447tc/1188F; при rc=124 → a3 fresh ~4h); merged tui_gateway a1 исход ~19:22 (XML vs шторм-watch).
+
+## Тик 17:5x (04.11)
+- Оттаиваний нет. BASE chunkbasev6: hermes_cli a2, лог статичен с 14:51:56 (тот же долгий тест), cgroup CPU 51ms/25s ≠ 0 → жив, ждём hard-timeout ~18:05 → a3. MERGED chunkmergedv6b: tui_gateway a1, лог статичен с 15:34:43 (шторм-признак), CPU 20ms/25s ≠ 0 → не трогаем, wrapper переработает ~19:22.
+- .done: merged 10/25, base 0/25. Инвентарь XML без изменений.
+- Шлюз 15 мин: -- No entries --. more-mem-layer 403526cb20==origin; дерево чисто; ToDo 118 строк, «ждёт агента»/~~ нет.
