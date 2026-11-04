@@ -248,3 +248,47 @@ VERDICT: [заполняется по завершении параллельн�
   обе живые на gateway a1.
 - ИТОГОВОЕ покрытие к VERDICT = union(старые chunks_*/*.xml по 10 валидным чанкам) + новые chunks_*_r2.
   Совместимые-пустые (compat/fakes/fixtures rc=5 no-tests) — симметричны, не гэп.
+
+## Тик 04.11 13:4x–13:5x
+- MERGED `hermes_cli` a1 принят драйвером v6 на 13:46 (rc=3, .done снят), но XML слабый:
+  9м38с, 19447 tests / 1188 F / 9420 E, 52 INTERNALERROR (WorkerController KeyError в логе) —
+  crash-cascade шторм, не реальное покрытие. BASE тот же чанк идёт чисто (a1 с 12:34, 87% к 13:48,
+  реальные F). → VERDICT-лист перепрогона: hermes_cli на обе ленты после ALL-DONE; до перепрогона
+  merged-hermes_cli XML не использовать для name-diff (только base-verified executed names).
+- BASE v6 чуть не умер тем же, чем умер mergedv6 в 13:30: MemoryCurrent 21.3G > MemoryHigh 20G.
+  Поднят runtime-свойством `set-property chunkbasev6 MemoryHigh=32G` на 13:5x — угроза oomd-килла
+  на 87% hermes_cli (потеря XML + полный перепрогон ленты, .done 0/25) снята. mergedv6b High=32G с релаунча.
+- Состояние: df 252G (73%), mem 81G avail. .done base 0/25, merged 1/25. Gateway 15 мин — 0 ERROR/Traceback.
+  ToDo.md 118 строк: нет «ждёт агента», нет ~~. Дерево чистое; more-mem-layer 1ec0bed46c == origin.
+
+## Тик 04.11 14:1x
+- Шторм-цикл ~15 мин продолжился: разморозка x3 за тик (kill только pytest-родителя):
+  1) BASE `hermes_cli` a1 @89% — родитель 0 тиков/30с, `node down`, zombie-worker, лог статичен с 14:00:51
+     → kill 14:05, XML a1 ПОТЕРЯН (смерть до записи junit), a2 переживает с нуля (жив, 14с CPU/20с).
+  2) MERGED `hermes_events` a1 (завис с 13:46:09) и a2 (шторм на bring-up) → kill 14:05 и 14:09.
+  3) MERGED `hermes_events` a3 — gw1+gw2 down за секунды, 1.3ms/30с → kill 14:11 →
+     **hermes_events NO-CLEAN на merged, НОЛЬ XML** → в VERDICT-лист перепрогона (база до него
+     ещё не дошла; name-diff возможен только после перепрогона на обе ленты).
+- MERGED `hermes_platform` a1: rc=3 + XML записан (23672B, 2F/118P/6S; INTERNALERROR — после
+  session-summary) → принят слабым; в VERDICT сверять executed-count, не доверять 2F как полный набор.
+- Состояние на конец тика: BASE `chunkbasev6` живая на hermes_cli a2; MERGED `chunkmergedv6b` живая
+  на hermes_state (после hermes_platform a1). .done merged 1/25 (hermes_cli), base 0/25.
+  df 252G, mem 83G avail, base MemoryHigh 32G.
+- VERDICT-лист перепрогона: hermes_cli (merged слабый), hermes_events (merged NO-CLEAN 0 XML),
+  прежние: acp_adapter, e2e, desktop, gateway(база a1 lost) — см. инвентарь XML на ALL-DONE.
+- Gateway 15 мин — 0 ERROR/Traceback (только tool_executor WARNING моих же вызовов).
+  ToDo.md 118 строк: нет «ждёт агента», нет ~~. Дерево чистое; more-mem-layer 1ec0bed46c == origin.
+
+## Тик 14:3x (04.11)
+- Разморозка MERGED `plugins` a1: `[gw2] node down` на 97%, лог статичен с 14:31:32, cgroup
+  1.4мс/25с → kill pytest-родителя 3897460 (timeout-обёртка 3897459) → a1 rc=143 14:37:33,
+  XML потерян; a2 живая и прогрессит (3.1с/20с CPU, 76%+). plugins остаётся в списке
+  «дождаться валидного XML на merged» до ALL-DONE.
+- Инвентарь merged r2 XML: hermes_cli (слабый), hermes_platform (слабый 2F/118P), hermes_state.a1
+  (rc=3 принят, 1846 tests, 52 INTERNALERROR — сверять executed-count), integration.a1 (rc=0,
+  1 тест windows-skip — симметрично, не гэп), providers.a1 (rc=3, 17KB). .done merged 6/25, base 0/25.
+- BASE `chunkbasev6` живая: hermes_cli a2 ~72%, F-кластеры реальные (зеркалят merged a1 —
+  name-diff по common executed set на вердикте). Метка 14:05:23 hermes_cli a1 rc=143 — та же
+  разморозка 14:1x тика.
+- Прочее чисто: gateway 15 мин — 1 строка, 0 ERROR/Traceback. hermes-agent дерево чистое,
+  more-mem-layer 1ec0bed46c == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
