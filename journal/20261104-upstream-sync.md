@@ -292,3 +292,12 @@ VERDICT: [заполняется по завершении параллельн�
   разморозка 14:1x тика.
 - Прочее чисто: gateway 15 мин — 1 строка, 0 ERROR/Traceback. hermes-agent дерево чистое,
   more-mem-layer 1ec0bed46c == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
+
+## Тик 04.11 15:2x
+- 3 разморозки merged `chunkmergedv6b`: security a1 (1.1ms/25s, bring-up storm, статичен с 14:40) → kill pytest-parent 3931333 → a1 rc=143; a2 → шторм (статик с 15:16) → kill 4001967 → a2 rc=143 15:16:14; a3 → шторм bring-up в течение минуты → kill 4003244 → **security NO-CLEAN 15:20:25** (все 3 попытки умерли на bring-up, ZERO XML merged).
+- Инвентарь merged r2 (.done 9/25): hermes_cli weak (19447/1188F/9420E, 52 INTERNALERROR), hermes_events NO-CLEAN 0XML, hermes_platform weak, hermes_state weak-rc3, plugins weak (2154 тестов за 143с, 52 INTERNALERROR), providers rc=3, integration rc=0 (windows-skip), skills WEAK (rc=3 за 7.06s, 1649 тестcases, 52 INTERNALERROR — почти scheduling-артефакт, считать weak до сверки counts), security NO-CLEAN.
+- Шторм bring-up теперь на КАЖДОМ новом чанке merged (security×3, skills мгновенный rc=3) — lane физически не даёт чистых прогонов; базовая линия (chunkbasev6) шторма не видит.
+- BASE: hermes_cli a2 @99% на одном длинном тесте с 14:51 (CPU живая: 526ms/25s, 409ms/22s — не заморожена, НЕ трогать; timeout-обёртка убьёт ~18:05 если не выйдет). .done base 0/25.
+- Gateway 15 мин: 0 ERROR/Traceback. hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
+- RERUN-BOTH-LANES перед VERDICT (актуальный): hermes_cli, hermes_events, hermes_platform, plugins, security, skills (+ старые: acp_adapter, e2e, desktop, gateway — дождаться r2 XML).
+- NEXT TICK: merged на tools a1 (@6%, живая) — ожидать шторм/разморозку; base hermes_cli a2 XML лендинг → сверить rc+INTERNALERROR+testcase count с merged weak 19447.
