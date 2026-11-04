@@ -359,3 +359,14 @@ VERDICT: [заполняется по завершении параллельн�
   «ждёт агента», нет ~~self-closed~~.
 - NEXT TICK: base hermes_cli a2 исход ~18:05 (XML vs rc=124→a3; при XML — rc/INTERR/tc-count против merged
   weak 19447/1188F); merged tui_gateway a1 исход ~19:22.
+
+## Tick 17:4x (04.11)
+- Оттаиваний НЕТ. BASE chunkbasev6: hermes_cli a2 — тот же длинный тест с 14:51, лог статичен, CPU-дельта
+  категруппы 554мс/25с ≠ 0 → жив, таймаут-враппер убьёт ~18:05 → a3 (XML a2 теряется при rc=124).
+  MERGED chunkmergedv6b: tui_gateway a1 @99% с 15:34:43 (сиг шторма: SIGTERM, [gw2] node down), CPU
+  200мс/25с ≠ 0 → не трогаем, враппер переработает ~19:22.
+- .done merged 10/25, base 0/25; XML-инвентарь без изменений с 17:1x.
+- Gateway 15-мин: 1 строка, 0 ERROR/Traceback. Git hermes-agent: дерево чисто, more-mem-layer
+  403526cb20 == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~self-closed~~.
+- NEXT TICK: base hermes_cli a2 исход ~18:05 (при XML — rc/INTERR/tc-count против merged weak
+  19447tc/1188F; при rc=124 → a3 fresh ~4h); merged tui_gateway a1 исход ~19:22 (XML vs шторм-watch).
