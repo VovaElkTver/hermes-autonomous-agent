@@ -233,6 +233,81 @@ def test_late_parent_reply_edge_lands_on_migrate(conn):
     stats = causal.migrate(conn)
     assert stats["reply_new"] == 1  # child created now, parent stamped older -> ok
 
+# ---- backward-migration audit (stage-b, ТЗ §2.4 п.4) ------------------------------------
+
+def _obs(conn, event_id, relation=None, room="!r"):
+    return transport.record_observation(conn, connector="matrix", channel="sync",
+                                        room_id=room, event_id=event_id,
+                                        relation=relation or {})["event_obs_id"]
+
+def test_mirror_coverage_green_after_migrate(conn):
+    _obs(conn, "$p")
+    _obs(conn, "$c", {"m.in_reply_to": {"event_id": "$p"}})
+    causal.migrate(conn)
+    cov = causal.mirror_coverage(conn)
+    assert cov == {"expected": 1, "resolved": 1, "unresolvable": 0, "missing": []}
+
+def test_mirror_coverage_flags_silently_dropped_edge(conn):
+    # Simulate the failure mode migrate cannot see about itself: an expected
+    # mirror edge deleted behind its back (manual tamper, bug in a writer).
+    parent = _obs(conn, "$p")
+    c = _obs(conn, "$c", {"m.in_reply_to": {"event_id": "$p"}})
+    x = _obs(conn, "$x")  # unrelated so the table is not empty
+    causal.link(conn, frm=f"obs:{c}", to=f"obs:{x}", kind="causes")
+    causal.migrate(conn)
+    conn.execute("DELETE FROM ctl_causal_link WHERE kind='reply'")
+    conn.commit()
+    cov = causal.mirror_coverage(conn)
+    assert cov["expected"] == 1 and cov["resolved"] == 1
+    assert cov["missing"] == [[f"obs:{parent}", f"obs:{c}"]]
+    # the audit is a measure, not a writer: the fix is the idempotent sweep
+    assert causal.migrate(conn)["reply_new"] == 1
+    assert causal.mirror_coverage(conn)["missing"] == []
+
+def test_mirror_coverage_counts_unresolvable_tail(conn):
+    # parent never observed: expected but not resolvable — never "missing"
+    _obs(conn, "$c", {"m.in_reply_to": {"event_id": "$gone"}})
+    causal.migrate(conn)
+    cov = causal.mirror_coverage(conn)
+    assert cov == {"expected": 1, "resolved": 0, "unresolvable": 1, "missing": []}
+
+def test_mirror_coverage_ignores_relation_without_parent(conn):
+    # thread/reaction style relations carry no reply parent — not counted at all
+    _obs(conn, "$p")
+    _obs(conn, "$c", {"m.thread": {"event_id": "$p"}})
+    causal.migrate(conn)
+    assert causal.mirror_coverage(conn)["expected"] == 0
+
+def test_mirror_coverage_is_platform_blind(conn):
+    # a foreign relation shape with no known parent key never yields a phantom
+    # expected edge (the extractor at the transport boundary decides, not here)
+    _obs(conn, "$p")
+    _obs(conn, "$c", {"m.relates_to": {"rel_type": "m.in_reply_to.ext",
+                                       "event_id": "$p"}})
+    causal.migrate(conn)
+    cov = causal.mirror_coverage(conn)
+    assert cov["expected"] == 0 and cov["missing"] == []
+
+def test_migrate_backfills_traffic_arrived_after_stage_a(conn):
+    # the stage-b loop: stage-a migration, MORE traffic (a child whose parent
+    # has not landed yet — the live mirror cannot edge it), coverage audit flags
+    # the delta, the parent arrives, the next migrate sweep absorbs it
+    _obs(conn, "$p")
+    _obs(conn, "$c", {"m.in_reply_to": {"event_id": "$p"}})
+    causal.migrate(conn)
+    _obs(conn, "$late_child", {"m.in_reply_to": {"event_id": "$late_parent"}})
+    lc = conn.execute("SELECT event_obs_id FROM event_observations"
+                      " WHERE event_id='$late_child'").fetchone()[0]
+    _obs(conn, "$late_parent")  # out-of-order: parent observed after its child
+    lp = conn.execute("SELECT event_obs_id FROM event_observations"
+                      " WHERE event_id='$late_parent'").fetchone()[0]
+    assert causal.mirror_coverage(conn)["missing"] == [[f"obs:{lp}", f"obs:{lc}"]]
+    stats = causal.migrate(conn)
+    assert stats["reply_new"] == 1 and not stats["skipped"]
+    cov = causal.mirror_coverage(conn)
+    assert cov["missing"] == [] and cov["resolved"] == 2
+    assert causal.check_invariants(conn) == {}
+
 
 # ---- readers -------------------------------------------------------------------------------
 

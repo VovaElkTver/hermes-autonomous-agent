@@ -396,6 +396,49 @@ def migrate(conn: sqlite3.Connection, *, commit: bool = True) -> dict:
 
 # ---------------------------------------------------------------- invariants
 
+def mirror_coverage(conn: sqlite3.Connection, *, cap: int = MAX_WALK_ROWS) -> dict:
+    """Backward-migration audit (stage-b, ТЗ §2.4 п.4): every donor relation
+    whose parent is present in the same room must carry a reply mirror edge.
+
+    Answers the question `migrate` cannot answer about itself: `reply_unresolved`
+    counts only edges this run dropped, while this audit re-derives the *expected*
+    edge set over the whole donor corpus through the same transport extractor
+    (`transport.relation_parent_event`) and subtracts what is on disk. `missing`
+    must be empty after a migration pass; a growing `unresolvable` is the normal
+    out-of-order-sync tail (parent never observed), never a defect. The relation
+    format is resolved at the transport boundary — this stays platform-blind."""
+    from .transport import relation_parent_event
+    expected = resolved = 0
+    missing: list[list] = []
+    rows = conn.execute(
+        "SELECT event_obs_id, room_id, relation FROM event_observations"
+        " WHERE relation != '' AND relation != '{}'").fetchall()
+    for ev_id, room_id, relation in rows:
+        try:
+            rel = json.loads(relation or "{}")
+        except (ValueError, TypeError):
+            continue
+        parent = relation_parent_event(rel)
+        if not parent:
+            continue
+        expected += 1
+        prow = conn.execute(
+            "SELECT event_obs_id FROM event_observations"
+            " WHERE room_id=? AND event_id=? AND event_obs_id<>? LIMIT 1",
+            (room_id, parent, ev_id)).fetchone()
+        if prow is None:
+            continue  # unresolvable tail — outside the observation window
+        resolved += 1
+        if not conn.execute(
+                "SELECT 1 FROM ctl_causal_link WHERE from_event=? AND to_event=?"
+                " AND kind='reply' LIMIT 1",
+                (f"obs:{prow[0]}", f"obs:{ev_id}")).fetchone():
+            if len(missing) < cap:
+                missing.append([f"obs:{prow[0]}", f"obs:{ev_id}"])
+    return {"expected": expected, "resolved": resolved,
+            "unresolvable": expected - resolved, "missing": missing}
+
+
 def check_invariants(conn: sqlite3.Connection) -> dict:
     """Audit pass used after migration and in regression: every violation class is
     listed (bounded), an empty dict of lists is the green board."""
