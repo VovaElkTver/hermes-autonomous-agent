@@ -420,3 +420,9 @@ VERDICT: [заполняется по завершении параллельн�
 - BASE chunkbasev6: security a1 шторм-наблюдение (статичен с 18:27:18; CPU 340ms/25s ≠0) → не трогаем, wrapper hard-timeout ~22:27 → a2. .done base 7/25 (без изменений с 18:3x; пропускная способность base сильно ниже — основной простой на security).
 - Шлюз 15 мин: 34 строки, 0 ERROR/Traceback. Git: hermes-agent дерево чисто; elk/skills-write-forbidden c3d28a502b==origin; more-mem-layer 401f7edea2==origin (ls-remote). ToDo.md 118 строк: «ждёт агента»/~~ нет.
 - NEXT TICK: merged gateway a1 исход (4h timeout ~00:33; шторм-патруль каждый тик); base security a1 ~22:27 rc=124→a2; r3-инвентарь на VERDICT растёт: verify, website (+старые: hermes_cli, hermes_platform, plugins, skills, tools, security, hermes_events, desktop, e2e, acp_adapter, monitoring).
+
+## Тик 20:4x (04.11)
+- MERGED chunkmergedv6b: gateway a1 ЖИВОЙ и прогрессит — @12%, реальные F, лог mtime = секунда проверки, cgroup 1057ms/3s. Оттаиваний не было. Обёртка 4h → дедлайн ~00:33 (r1 обе стороны rc=124 — чанк марафонский).
+- BASE chunkbasev6: security a1 лог статичен с 18:27:18 (2ч18м, шторм-сиг `[gw0] node down`), но cgroup CPU 292ms/25s — на порядок выше frozen-crit порога (<10ms/30s) → не трогаем, wrapper hard-timeout ~22:27:18 → rc=124 → a2. .done по ls = 6/25.
+- Шлюз 15 мин: 1 строка, 0 ERROR/Traceback. Git: hermes-agent дерево чисто; НАЙДЕН не запушенный коммит параллельной сессии 453cea8a39 «skills: hub-install honors skills.write_forbidden» (20:29) → запушен FF в origin/elk/skills-write-forbidden (source==dest, разрешено тиком); more-mem-layer 401f7edea2==origin. ToDo.md 118 строк: «ждёт агента»/~~ нет.
+- NEXT TICK: base security a1 исход ~22:27 (rc=124→a2, шторм-watch на bring-up); merged gateway прогресс/шторм-патруль; r3-инвентарь без изменений.
