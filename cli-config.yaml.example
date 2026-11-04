@@ -1176,6 +1176,15 @@ skills:
   # Set to 0 to disable.
   creation_nudge_interval: 15
 
+  # Ban ALL skill-library writes (agent skill_manage, curator transitions, learning
+  # contours).  When true, nothing is written under ~/.hermes/skills/; each would-be
+  # write lands as a plain file in ~/.hermes/need2write/, mirroring the target path
+  # (deletes/archives become empty `<name>__del.md` / `<name>__archive.md` markers;
+  # name collisions get __2/__3 suffixes).  The folder is cleaned up BY HAND —
+  # copy-paste to apply or discard.  Memory is unaffected.  Read at write time,
+  # no gateway restart.  Default false = normal behavior.
+  # write_forbidden: true
+
   # External skill directories — share skills across tools/agents without
   # copying them into ~/.hermes/skills/.  Each path is expanded (~ and ${VAR})
   # and resolved to an absolute path.  External dirs are read-only: skill

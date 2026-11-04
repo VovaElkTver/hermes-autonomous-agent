@@ -277,6 +277,10 @@ def _skill_manage_batch(operations, default_name: str | None = None, task_id: st
                     return json.dumps(fail, ensure_ascii=False)
                 entry = {"name": names[i], "action": op["action"],
                          "file_path": op.get("file_path"), "success": True}
+                # write_forbidden proposal rows: the agent must SEE where the proposal landed —
+                # the compact success row would otherwise hide the ban.
+                if parsed.get("_forbidden"):
+                    entry.update({k: parsed.get(k) for k in ("message", "need2write")})
                 # Advisory payloads (linter findings, org-sharing note) ride on the op result; the
                 # compact success row otherwise hides them and the model never sees a finding.
                 entry.update({k: parsed[k] for k in _ADVISORY_KEYS if parsed.get(k) is not None})

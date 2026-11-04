@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Set,
 
 from hermes_constants import get_hermes_home
 from agent.skill_utils import is_excluded_skill_path, is_external_skill_path
+from tools import skill_write_policy
 from utils import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,10 @@ def _toggle_suppressed_name(skill_name: str, *, add: bool) -> None:
     if not skill_name or (skill_name in (names := read_suppressed_names())) == add:
         return
     (names.add if add else names.discard)(skill_name)
+    if skill_write_policy.write_forbidden():
+        logger.info("skill write forbidden → %s not written (skills.write_forbidden)",
+                    _skills_dir() / ".curator_suppressed")
+        return
     try:
         atomic_write_text(_skills_dir() / ".curator_suppressed", "\n".join(sorted(names)) + ("\n" if names else ""),
                           tmp_prefix=".curator_suppressed_")
@@ -380,6 +385,11 @@ def load_usage() -> dict[str, dict[str, Any]]:
 def save_usage(data: dict[str, dict[str, Any]]) -> bool:
     """Write the usage map atomically; True when it committed."""
     path = _usage_file()
+    if skill_write_policy.write_forbidden():
+        # skills.write_forbidden: the sidecar lives under skills/ — freezing the library
+        # means this write does not land (callers see the honest "did not commit").
+        logger.info("skill write forbidden → %s not written (skills.write_forbidden)", path)
+        return False
     try:
         atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False), tmp_prefix=".usage_")
         return True
@@ -586,6 +596,11 @@ def forget(skill_name: str) -> None:
 def _relocate(src: Path, dest: Path, skill_name: str, action: str, **capture_kwargs: Any) -> tuple[bool, str]:
     """Move *src* to *dest* for *action* ("archive" | "restore") inside a best-effort audit-ledger entry, then apply
     suppression + state side effects; rename falls back to shutil.move across devices."""
+    if skill_write_policy.write_forbidden():
+        # Lifecycle move (archive/restore) as an empty marker: `<name>__archive.md` /
+        # `<name>__restore.md` — the name says it; the library itself is not moved.
+        dest = skill_write_policy.dump(f"{skill_name}__{action}.md", None)
+        return True, f"write forbidden — proposal saved to {dest}"
     try:
         from tools import skill_ledger as _ledger
         _ledger_before = _ledger.capture_before(src, **capture_kwargs)

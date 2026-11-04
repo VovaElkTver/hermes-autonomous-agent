@@ -20,6 +20,7 @@ import hermes_yaml as yaml
 
 from hermes_constants import get_hermes_home
 from utils import atomic_write_text, is_truthy_value
+from tools import skill_write_policy
 from hermes_cli.config import cfg_get
 from agent.skill_utils import (
     extract_skill_description,
@@ -407,7 +408,14 @@ def _guarded_write(name: str, skill_dir: Path, target: Path, action: str, label:
                    content: str) -> Optional[dict[str, Any]]:
     """Read-before-write guard (existing targets only), the description budget for the root SKILL.md
     (whichever action and file_path reach it), atomic write, then the security scan; a blocked scan
-    restores the original (or unlinks a new file). Error dict or None."""
+    restores the original (or unlinks a new file). Error dict or None.
+
+    THE single choke point for skill content writes: ``skills.write_forbidden`` is honored here,
+    in forbidden mode the full final content is dumped to need2write and no byte is written."""
+    if skill_write_policy.write_forbidden():
+        dest = skill_write_policy.dump(
+            skill_write_policy.rel_under_root(target, skill_dir), content)
+        return skill_write_policy.forbidden_response(dest, name=name, action=action)
     original = None
     if target.exists():
         if read_guard := _background_review_read_before_write_guard(name, target, action, label):
@@ -471,6 +479,12 @@ def _create_skill(name: str, content: str, category: str | None = None) -> dict[
     if existing := _find_skill(name):
         return _err(f"A skill named '{name}' already exists at {existing['path']}.")
     skill_dir = _resolve_skill_dir(name, category)
+    if skill_write_policy.write_forbidden():
+        # skills.write_forbidden: the proposal lands in need2write, the library is untouched
+        # (checked BEFORE mkdir so not even an empty dir appears in the tree).
+        dest = skill_write_policy.dump(
+            skill_write_policy.rel_under_root(skill_dir / "SKILL.md", skill_dir), content)
+        return skill_write_policy.forbidden_response(dest, name=name, action="create")
     from hermes_constants import mkdir_under_hermes_home
     mkdir_under_hermes_home(skill_dir.parent)
     try:
@@ -591,6 +605,11 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> dict[str, A
     skills_root = _containing_skills_root(skill_dir)
     if unsafe := _validate_delete_target(skill_dir):  # defense-in-depth before rmtree
         return _err(unsafe)
+    if skill_write_policy.write_forbidden():
+        # The delete INTENT lands as an empty marker: `<skill>__del.md` (the name says it).
+        rel = skill_write_policy.rel_under_root(skill_dir, skill_dir)
+        dest = skill_write_policy.dump(f"{rel}__del.md", None)
+        return skill_write_policy.forbidden_response(dest, name=name, action="delete")
     # Curator consolidations must be RECOVERABLE (`hermes curator restore`): archive instead
     # of rmtree. Foreground deletes keep hard-delete semantics.
     absorbed_note = f" Content absorbed into '{absorbed_target}'." if absorbed_target else ""
@@ -627,6 +646,11 @@ def _write_file(name: str, file_path: str, file_content: str) -> dict[str, Any]:
     if err := _validate_content_size(file_content, label=file_path):
         return _err(err)
     skill_dir, guard = _locate_for_write(name, "write_file", " Create it first with action='create'.")
+    if guard and skill_write_policy.write_forbidden():
+        # Batch shape: a create in the same call only produced a need2write proposal, so the
+        # skill is not on disk — the supporting file lands next to that proposal.
+        dest = skill_write_policy.dump(Path(name) / file_path, file_content)
+        return skill_write_policy.forbidden_response(dest, name=name, action="write_file")
     if guard:
         return guard
     target, err = _resolve_supporting_file(skill_dir, file_path)
@@ -656,6 +680,11 @@ def _remove_file(name: str, file_path: str) -> dict[str, Any]:
         return _err(f"File '{file_path}' not found in skill '{name}'.", available_files=available or None)
     if read_guard := _background_review_read_before_write_guard(name, target, "remove_file", file_path):
         return read_guard
+    if skill_write_policy.write_forbidden():
+        # removal INTENT as an empty marker alongside where the file lived: `<...>.md__del`
+        dest = skill_write_policy.dump(
+            skill_write_policy.rel_under_root(target, skill_dir) + "__del", None)
+        return skill_write_policy.forbidden_response(dest, name=name, action="remove_file")
     target.unlink()
     _rmdir_if_empty(target.parent, skill_dir)
     return {"success": True, "message": f"File '{file_path}' removed from skill '{name}'."}
@@ -776,7 +805,7 @@ def skill_manage(
         result = handler({"name": name, **args})
         if isinstance(result, str):
             return result  # tool_error JSON for argument-shape problems (patch)
-        if result.get("success"):
+        if result.get("success") and not result.get("_forbidden"):
             _record_success(
                 action, name, result, file_path=file_path, absorbed_into=absorbed_into,
                 task_id=task_id, session_id=session_id, ledger_before=_ledger_before)

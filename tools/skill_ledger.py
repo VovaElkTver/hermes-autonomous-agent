@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from hermes_constants import get_hermes_home
+from tools import skill_write_policy
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +302,12 @@ def append_entry(
     evidence: Optional[dict[str, Any]] = None) -> Optional[str]:
     """Append one entry -> id, or None when disabled / write failed (never raises)."""
     if not ledger_enabled():
+        return None
+    if skill_write_policy.write_forbidden():
+        # The ledger file itself lives under skills/ — freezing the library freezes the
+        # audit trail too (the ban's byte-for-byte acceptance covers this path).
+        logger.info("skill write forbidden → ledger entry '%s/%s' not written "
+                    "(skills.write_forbidden)", action, skill)
         return None
     try:
         # pre-rollback deliberately records before == after (the current state of every touched path).
