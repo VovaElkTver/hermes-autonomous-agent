@@ -232,3 +232,19 @@ VERDICT: [заполняется по завершении параллельн�
   .done: merged 10/37, base 11/37.
 - Прочее чисто: дерево hermes-agent чисто, more-mem-layer == origin (1ec0bed46c);
   журнал гейтвея 15 мин — 0 ERROR; ToDo — нет «ждёт агента» и самозакрытых.
+
+## Тик 04.11 06:0x–06:2x — ENOSPC-инцидент и перезапуск дорожек v5
+- ~06:03 корень / заполнился (драйвер v4 не чистил /tmp/pt-*; /tmp/pt-base-gateway-a1 нарос до 109G).
+  Гейтвей-лог: OSError 28, «kanban dispatcher: tick failed». Враннер-дорожки умерли молча.
+- «ALL-DONE» 06:08/06:09 — ЛОЖНЫЙ: с 06:03 по 06:09 ~22 чанка на обеих дорожках отвалились
+  мгновенными rc=120 (ENOSPC) → NO-CLEAN. Реальное покрытие осталось только у 10 чанков/дорожку
+  (acp_adapter*, agent*, ci, computer_use, conformance, controller, cron, dashboard(rc=0), docker,
+  e2e base-частично; merged e2e ZERO). gateway.xml = 0 байт с обеих сторон.
+- Принято решение без Вл (инцидент, обратимо): удалены basetemp мёртвых дорожек + UUID-dir'ы >24ч,
+  освобождено ~246G, диск 71% (268G свободно). Дорожки v4 умерли вместе с диском сами.
+- Перезапуск точечным драйвером v5 (scratch/run_chunks_v5.sh, список scratch/rerun_chunks.txt,
+  25 чанков; ГЛАВНОЕ отличие — удаление basetemp сразу после каждого чанка). Юниты
+  chunkbasev5/chunkmergedv5 (-n3, MemoryMax=64G), выход в chunks_{base,merged}_r2/. Старт 06:24,
+  обе живые на gateway a1.
+- ИТОГОВОЕ покрытие к VERDICT = union(старые chunks_*/*.xml по 10 валидным чанкам) + новые chunks_*_r2.
+  Совместимые-пустые (compat/fakes/fixtures rc=5 no-tests) — симметричны, не гэп.
