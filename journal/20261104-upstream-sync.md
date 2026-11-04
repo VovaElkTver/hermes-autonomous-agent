@@ -325,3 +325,14 @@ VERDICT: [заполняется по завершении параллельн�
 - hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк:
   нет «ждёт агента», нет ~~self-closed~~.
 - NEXT TICK: tui_gateway a1 исход (XML vs rc=124→a2); base hermes_cli a2 исход ~18:05.
+
+## Тик 16:1x (04.11)
+- MERGED `chunkmergedv6b`: `tools` a1 (стартовал 15:22) прошёл до 99%, в хвосте `F..[gateway-signal]
+  SIGTERM / [gw2] node down` — лог статичен с 15:22:26, но cgroup CPU 164ms/22s ≠ 0 → НЕ размораживал;
+  timeout-обёртка пересоберёт ~19:2x. Ждать исхода tools (XML/NO-CLEAN) в следующем тике.
+- BASE `chunkbasev6`: `hermes_cli` a2 — всё тот же один длинный тест с 14:51, CPU 442ms/22s (живая),
+  не трогать; timeout ~18:05 → a3. .done base 0/25, merged 10/25.
+- Gateway 15 мин: 1 строка, 0 ERROR/Traceback. hermes-agent: дерево чистое, more-mem-layer
+  2a9181e16f == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~self-closed~~.
+- NEXT TICK: base hermes_cli a2 исход ~18:05 (XML vs rc=124→a3); merged tools/tui_gateway исход
+  к ~19:2x; при каждом rc=3 — приём только с верификацией tc-count/INTERNALERROR (weak-инвентарь).
