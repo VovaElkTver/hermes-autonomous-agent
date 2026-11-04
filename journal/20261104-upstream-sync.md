@@ -301,3 +301,14 @@ VERDICT: [заполняется по завершении параллельн�
 - Gateway 15 мин: 0 ERROR/Traceback. hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
 - RERUN-BOTH-LANES перед VERDICT (актуальный): hermes_cli, hermes_events, hermes_platform, plugins, security, skills (+ старые: acp_adapter, e2e, desktop, gateway — дождаться r2 XML).
 - NEXT TICK: merged на tools a1 (@6%, живая) — ожидать шторм/разморозку; base hermes_cli a2 XML лендинг → сверить rc+INTERNALERROR+testcase count с merged weak 19447.
+
+## Тик 15:3x (04.11)
+- MERGED `chunkmergedv6b`: ЖИВА на `tui_gateway` a1 @82%+ с реальными F (лог mtime = секунда проверки) — шторм bring-up на этом чанке НЕ повторился, разморозки не потребовалось.
+-merged `.done` 10/24: hermes_cli, hermes_events, hermes_platform, hermes_state, integration, plugins, providers, security, skills, tools.
+  - tools a1 rc=3 ACCEPTED-WEAK: 1716 tc / 112.8s (3E/2F/15 skip), 229 строк INTERNALERROR в логе = crash-cascade → в список rerun-both-lanes.
+  - skills a1 rc=3 ACCEPTED-WEAK: 1649 tc / 7.06s, 52 INTERNALERROR = артефакт scheduling → rerun-both-lanes.
+  - security NO-CLEAN (15:20), ZERO XML → rerun-both-lanes.
+- BASE `chunkbasev6`: hermes_cli a2 тот же один длинный тест с 14:51; cgroup CPU 376ms/25s = ЖИВАЯ (не frozen), НЕ размораживать; timeout wrapper убьёт ~18:05 → a3.
+- RERUN-BOTH-LANES перед VERDICT (актуальный): hermes_cli, hermes_events, hermes_platform, plugins, security, skills, tools (+ прежние desktop/acp-списки по инвентарю XML).
+- Gateway 15 мин: 0 ERROR/Traceback (1 строка). hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
+- NEXT TICK: merged tui_gateway.a1 XML landing → верификация приёма (rc∈{0,1}+no INTERNALERROR / weak-инвентарь); base hermes_cli a2 доживёт ли до XML или rc=124 ~18:05 (тогда a3,-desktop-pattern ожидания шторма).
