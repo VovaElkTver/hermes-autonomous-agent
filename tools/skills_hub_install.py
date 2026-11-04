@@ -183,6 +183,16 @@ def install_from_quarantine(
             raise ValueError(f"Installed skill contains symlinks, which is not allowed: {rel}")
 
     install_dir.parent.mkdir(parents=True, exist_ok=True)
+    # skills.write_forbidden: the hub is a writer too — the scanned bundle lands in
+    # need2write (whole directory, not just SKILL.md) and the library stays untouched.
+    from tools import skill_write_policy
+    if skill_write_policy.write_forbidden():
+        manual = skill_write_policy.need2write_root() / "hub-install" / install_rel_path
+        manual = skill_write_policy._free_path(manual)
+        manual.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(quarantine_path), str(manual))
+        logger.info("skill write forbidden → hub bundle parked at %s", manual)
+        return manual
     shutil.move(str(quarantine_path), str(install_dir))
     installed_hash = content_hash(install_dir)
     HubLockFile().record_install(
