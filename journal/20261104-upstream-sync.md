@@ -400,3 +400,10 @@ VERDICT: [заполняется по завершении параллельн�
 - BASE chunkbasev6: security a1 статичен с 18:27:18 (149B, шторм bring-up gw node down), cgroup CPU 197ms/22s ≠ 0 → не оттаиваем по frozen-crit; wrapper hard-timeout ~22:27 → a2. .done base 6/25 без изменений.
 - Шлюз 15 мин: 1 строка, 0 ERROR/Traceback. Git: hermes-agent дерево чисто, more-mem-layer 401f7edea2==origin (ls-remote); upstream-sync-20261103 a5aaa42b36==origin, hermes-sync-up дерево чисто. ToDo.md 118 строк: «ждёт агента»/~~ нет.
 - NEXT TICK: base security a1 исход ~22:27 (rc=124→a2; NO-CLEAN zero XML = симметрия с merged security 15:20); merged monitoring a1 исход (~длинный чанк); контроль шторма на bring-up новых чанков merged.
+
+
+## Тик 19:5x (04.11)
+- MERGED chunkmergedv6b: monitoring a1 попал в шторм bring-up ровно по паттерну (лог статичен с 19:33:55, `[gw2]/[gw0] node down`, cgroup CPU 1ms/22s) → оттаивание: kill pytest-parent 237160 → `monitoring a1 rc=143 19:57:57`, a2 перезапущен обёрткой (PID 248564, basetemp pt-merged-monitoring-a2) — живой шторм-цикл ~15 мин продолжается. .done merged 11/25.
+- BASE chunkbasev6: security a1 всё ещё шторм-под-наблюдением (статичен с 18:27:18, 149B) но CPU 233ms/22s ≠ 0 → не трогаем; wrapper hard-timeout ~22:27 → a2 (NO-CLEAN zero XML = симметрия с merged security 15:20). .done base 6/25 без изменений.
+- Шлюз 15 мин: 3 строки, 0 ERROR/Traceback (1 — tool_executor WARNING чужой сессии, noise). Git: more-mem-layer 401f7edea2==origin, upstream-sync-20261103 b513b4c7aa==origin (ls-remote). hermes-agent: НОВАЯ активная работа параллельной сессии — ветка elk/skills-write-forbidden (HEAD 401f7edea2), грязные tools/skill_* + untracked tools/skill_write_policy.py, tests/tools/test_skill_write_forbidden.py, mtime 19:54–19:55 = живой редактор (sess.run pytest tests/tools @41% CPU) — не коммитим за них. В fleet-секции ToDo «ждёт агента»/~~ нет (118 строк).
+- NEXT TICK: merged monitoring a2 исход (шторм-watch bring-up; после 3 попыток NO-CLEAN → +monitoring в rerun-both-lanes); base security a1 исход ~22:27; исход elk/skills-write-forbidden (коммит/пуш — дело той сессии, контролировать только что неOur ToDo не трогает).
