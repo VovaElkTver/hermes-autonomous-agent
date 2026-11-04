@@ -375,3 +375,9 @@ VERDICT: [заполняется по завершении параллельн�
 - Оттаиваний нет. BASE chunkbasev6: hermes_cli a2, лог статичен с 14:51:56 (тот же долгий тест), cgroup CPU 51ms/25s ≠ 0 → жив, ждём hard-timeout ~18:05 → a3. MERGED chunkmergedv6b: tui_gateway a1, лог статичен с 15:34:43 (шторм-признак), CPU 20ms/25s ≠ 0 → не трогаем, wrapper переработает ~19:22.
 - .done: merged 10/25, base 0/25. Инвентарь XML без изменений.
 - Шлюз 15 мин: -- No entries --. more-mem-layer 403526cb20==origin; дерево чисто; ToDo 118 строк, «ждёт агента»/~~ нет.
+
+## Тик 18:0x (04.11)
+- BASE chunkbasev6: hermes_cli a2 → rc=124 hard-timeout 18:05:43, как предсказано (XML a2 потерян, 0 hermes_cli.xml на base). a3 стартовал ~18:05, лог живой (mtime = секунда проверки), cgroup CPU 18.7s/25s → здоров; дедлайн a3 ~22:05. .done base 0/25.
+- MERGED chunkmergedv6b: tui_gateway a1, лог статичен с 15:34:43 (шторм-сиг: SIGTERM, [gw2] node down), cgroup CPU 142ms/25s ≠ 0 → не трогаем, wrapper переработает ~19:22 (a2 при неудаче). .done merged 10/25; XML-инвентарь без изменений (9 файлов, weakest — skills/tools rc=3 weak-accepted).
+- Шлюз 15 мин: 0 ERROR/Traceback. Git: hermes-agent дерево чисто, more-mem-layer 403526cb20==origin; upstream-sync-20261103 f8091e6ffd==origin. ToDo.md 118 строк: «ждёт агента»/~~ нет.
+- NEXT TICK: merged tui_gateway a1 исход ~19:22 (rc=124→a2 fresh шторм-watch; XML → сверка с base, которого нет → tui_gateway в rerun-both-lanes, если base тоже NO-CLEAN'ет); base hermes_cli a3 прогресс в середине тика (при XML: rc/INTERR/tc-count против merged weak 19447tc/1188F).
