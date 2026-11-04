@@ -1068,6 +1068,40 @@ class _Rejected(Exception):
         self.result_json = result_json
 
 
+def _coerce_timeout(value: Any) -> "tuple[Any, Optional[str]]":
+    """Normalise a model-supplied ``timeout`` before any comparison.
+
+    The schema advertises an integer, but providers stringify arguments
+    ("14400") and the raw ``timeout <= 0`` check then TypeErrors into the
+    generic crash envelope instead of a clean rejection (observed twice on
+    2026-11-04). Digit-strings are accepted; bools, non-finite and
+    non-positive values get the same rejection-message shape as the old
+    numeric guard. Returns ``(value, None)`` when usable, ``(None, message)``
+    when not; ``None`` means "unset" and passes through untouched.
+    """
+    if value is None:
+        return None, None
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            return _coerce_timeout(int(text))
+        except ValueError:
+            try:
+                return _coerce_timeout(float(text))
+            except ValueError:
+                return None, (
+                    f"timeout must be a number of seconds (got {value!r}); "
+                    "send an integer, e.g. timeout=600."
+                )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, f"timeout must be a number of seconds (got {type(value).__name__})."
+    if value != value or value in (float("inf"), float("-inf")):
+        return None, f"timeout must be a finite number of seconds (got {value})."
+    if value <= 0:
+        return None, f"timeout must be a positive number of seconds (got {value})."
+    return value, None
+
+
 @dataclass
 class _ApprovalVerdict:
     """Outcome of the pre-exec guard pass.
@@ -1126,10 +1160,10 @@ class _ExecPlan:
     image: str
     cwd: str
     host_cwd: Optional[str]
-    effective_timeout: int
+    effective_timeout: float
     # Set when a foreground call asked for more than FOREGROUND_MAX_TIMEOUT and was promoted to a
     # tracked background process instead of being refused (the requested seconds, for the note).
-    promoted_from_foreground_timeout: Optional[int] = None
+    promoted_from_foreground_timeout: Optional[float] = None
     # Set when a foreground `cmd &` (the trailing `&` its only backgrounding) is run as
     # terminal(command="cmd", background=true) instead of being refused: the command to run.
     auto_background_command: Optional[str] = None
@@ -1144,7 +1178,7 @@ _PROMOTED_NOTE = (
 
 
 def _plan_execution(
-    command: Any, *, task_id: Optional[str], timeout: Optional[int],
+    command: Any, *, task_id: Optional[str], timeout: Any,
     background: bool, _host_local: bool,
 ) -> _ExecPlan:
     """Resolve backend, env-cache key, image, cwd and timeout for one call.
@@ -1203,9 +1237,13 @@ def _plan_execution(
         cwd = remapped
     # Reject non-positive timeouts before deadline math: ``timeout or
     # default`` would silently turn 0 into the default, and a negative
-    # value is truthy and would fire an immediate "-Ns" timeout.
-    if timeout is not None and timeout <= 0:
-        raise _Rejected(tool_error(f"timeout must be a positive number of seconds (got {timeout})."))
+    # value is truthy and would fire an immediate "-Ns" timeout. Models
+    # also stringify this field ("14400"), which used to TypeError in the
+    # comparison and fall into the generic crash envelope (2026-11-04);
+    # the coercion helper turns every unusable value into this rejection.
+    timeout, timeout_err = _coerce_timeout(timeout)
+    if timeout_err:
+        raise _Rejected(tool_error(timeout_err))
     promoted = None
     if not background:
         # An over-cap foreground timeout is a bounded job the caller wants to wait for (test suites,
@@ -1241,7 +1279,7 @@ _PROMOTED_NOTE_POLL_ONLY = (
 )
 
 
-def _with_promoted_note(result_json: str, requested_timeout: int) -> str:
+def _with_promoted_note(result_json: str, requested_timeout: float) -> str:
     """Attach the foreground->background promotion note to a spawn result (unchanged on error). The
     note only promises a notification when the spawn actually kept notify_on_complete (finite sessions
     such as one-shot runners cannot route one back; the spawn already said so and cleared the flag)."""
