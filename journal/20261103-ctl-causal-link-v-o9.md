@@ -100,3 +100,17 @@ freshness 0.107ms.
 causal.py не содержит ни одного платформенного литерала. causal 25/25, ruff clean,
 lefthook green. Тень не нарушена: ctl_causal_link в живом state.db по-прежнему 0 строк;
 читатели включаются по одному после ратификации.
+
+## 04.11: stage-a исполнен на проде (мандат «го stage-a»)
+
+Бэкап: /data/state.db.stage-a-backup (377MiB, SQLite backup API поверх живой БД).
+Миграция causal.migrate() на живом state.db: 4578 рёбер (reply 4537, causes 28,
+merge 13), reply_unresolved=856 (родители вне окна наблюдения — норма для
+out-of-order sync, сметает последующий migrate). Повторный прогон: absorbed-only
+(new=0) — идемпотентность подтверждена на прод-данных. Остаток AUTOINCREMENT из
+legacy-формы устранён атомарной пересборкой таблицы за 8ms (строки и распределение
+kind идентичны до/после), DDL приведён к ТЗ v2 (INTEGER PRIMARY KEY rowid-alias).
+Индексы: ux_cl_edge + idx_{kind,to,from}, udl_ctl_causal_link сброшен.
+Инварианты GREEN. Шadow-writers включатся в процессах после их рестартов (гейтвей
+живёт с 03.11 12:55 — старше causal-коммитов); читатели по-прежнему выключены —
+stage-b по ратификации.
