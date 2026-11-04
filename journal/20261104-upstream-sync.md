@@ -312,3 +312,16 @@ VERDICT: [заполняется по завершении параллельн�
 - RERUN-BOTH-LANES перед VERDICT (актуальный): hermes_cli, hermes_events, hermes_platform, plugins, security, skills, tools (+ прежние desktop/acp-списки по инвентарю XML).
 - Gateway 15 мин: 0 ERROR/Traceback (1 строка). hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк: нет «ждёт агента», нет ~~.
 - NEXT TICK: merged tui_gateway.a1 XML landing → верификация приёма (rc∈{0,1}+no INTERNALERROR / weak-инвентарь); base hermes_cli a2 доживёт ли до XML или rc=124 ~18:05 (тогда a3,-desktop-pattern ожидания шторма).
+
+## Тик 15:4x (04.11)
+- MERGED `chunkmergedv6b`: `tui_gateway` a1 остановился на 99% в 15:34:43 с сигнатурой шторма
+  (`[gateway-signal] SIGTERM`, `[gw2] node down`) — но cgroup CPU 186ms/25s ≠ 0, НЕ размораживал;
+  timeout-обёртка переработает ~19:22 (a1 стартовал 15:22). .done 10/25, XML tui_gateway ещё нет.
+- BASE `chunkbasev6`: hermes_cli a2 — тот же длинный тест с 14:51, CPU 443ms/22s (живая), не трогать;
+  timeout ~18:05 → a3.
+- tools.a1.xml повторная сверка: 5 строк `<testcase` при 284KB / 229 INTERNALERROR — вердикт
+  ACCEPTED-WEAK не меняется, tools остаётся в rerun-both-lanes.
+- Gateway 15 мин: 4 WARNING (tool_executor + Matrix sync timeout — эгресс-флак, ретраи), 0 ERROR/Traceback.
+- hermes-agent: дерево чистое, more-mem-layer 2a9181e16f == origin (ls-remote). ToDo.md 118 строк:
+  нет «ждёт агента», нет ~~self-closed~~.
+- NEXT TICK: tui_gateway a1 исход (XML vs rc=124→a2); base hermes_cli a2 исход ~18:05.
