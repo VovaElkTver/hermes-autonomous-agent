@@ -745,6 +745,12 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         self._llm_delay_seconds: float = _env_number(
             "MATRIX_LLM_DELAY_SECONDS", 3.0, lambda s: float(s) if s.strip() else 3.0)
         self._dm_mention_threads: bool = self._extra_truthy(config, "dm_mention_threads", "MATRIX_DM_MENTION_THREADS", "false")
+        # Fork doctrine ("Matrix is a visualizer"): a Matrix thread is client-side rendering,
+        # not a domain concept. Branching lives in controller state (/branch, session_branches);
+        # the transport neither branches sessions on room artifacts nor seeds room artifacts
+        # from session mechanics. Both flags default OFF; legacy behavior is opt-in.
+        self._thread_sessions: bool = self._extra_truthy(config, "thread_sessions", "MATRIX_THREAD_SESSIONS", "false")
+        self._thread_delivery: bool = self._extra_truthy(config, "thread_delivery", "MATRIX_THREAD_DELIVERY", "false")
         raw_session_scope = str(_extra_or_secret(config.extra, "session_scope", "MATRIX_SESSION_SCOPE", "auto")).strip().lower()
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = self._extra_truthy(config, "process_notices", "MATRIX_PROCESS_NOTICES", "false")
@@ -2073,6 +2079,11 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
                     self._matrix_session_scope != "room" and self._auto_thread)
             if synthetic:
                 thread_id = event_id
+        if thread_id and not self._thread_sessions:
+            # Visualizer doctrine: a message written inside an Element thread belongs to the SAME
+            # room-level session as any other input; the answer goes out flat (see _thread_delivery).
+            # In-thread mention gating above already ran — this only detaches domain state.
+            thread_id = None
         if voice_gate is not None:  # decided (parked or passing): don't hold bare mentions any longer
             self._parked_voices.release(room_id, sender, voice_gate)
         display_name = await self._get_display_name(room_id, sender)
@@ -3033,10 +3044,14 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         return msg_content
 
     def _apply_relation_metadata(
-        self, msg_content: dict[str, Any], *, reply_to: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None) -> None:
+            self, msg_content: dict[str, Any], *, reply_to: Optional[str] = None,
+            metadata: Optional[dict[str, Any]] = None) -> None:
         """Apply Matrix reply/thread relation metadata to an outbound payload."""
         thread_id = str((metadata or {}).get("thread_id") or "")
+        if thread_id and not self._thread_delivery:
+            # Visualizer doctrine (default): never attach m.thread on the way out —
+            # "Обсуждение" chains are how a transport artifact captures session routing.
+            thread_id = ""
         if reply_to:
             msg_content["m.relates_to"] = {"m.in_reply_to": {"event_id": reply_to}}
         if thread_id:

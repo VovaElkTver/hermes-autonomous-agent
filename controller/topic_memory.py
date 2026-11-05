@@ -135,6 +135,7 @@ def add_item(conn, scope_id: str, kind: str, subject: str, body: str,
     confirmed_flag = 1 if confirmed else 0
     now = time.time()
     item_id = new_id("memitem")
+    old = None
     # One transaction: supersede + insert (a failed insert must not retire the old value).
     if confirmed_flag:
         old = conn.execute(
@@ -147,6 +148,11 @@ def add_item(conn, scope_id: str, kind: str, subject: str, body: str,
         "INSERT INTO ctl_mem_item (item_id,scope_id,kind,subject,body,source,status,"
         "confirmed,created_at,created_run_id) VALUES (?,?,?,?,?,?,'active',?,?,?)",
         (item_id, scope_id, kind, subject, body, source, confirmed_flag, now, run_id))
+    if confirmed_flag and old:
+        # V-O9: supersede chain mirrors to a causal edge (both nodes now exist).
+        from .causal import link as _causal_link
+        _causal_link(conn, frm=f"mem:{old['item_id']}", to=f"mem:{item_id}",
+                     kind="supersedes", commit=False, strict=False)
     conn.commit()
     return item_id
 
@@ -163,6 +169,13 @@ def confirm(conn, item_id: str) -> bool:
         (item_id, item_id, item_id, item_id))
     cur = conn.execute("UPDATE ctl_mem_item SET confirmed=1"
                        " WHERE item_id=? AND confirmed=0", (item_id,))
+    # V-O9: every item this confirmation just retired gets a supersedes edge.
+    from .causal import link as _causal_link
+    for r in conn.execute(
+            "SELECT item_id FROM ctl_mem_item WHERE superseded_by=? AND status='superseded'",
+            (item_id,)).fetchall():
+        _causal_link(conn, frm=f"mem:{r[0]}", to=f"mem:{item_id}",
+                     kind="supersedes", commit=False, strict=False)
     conn.commit()
     return bool(cur.rowcount)
 

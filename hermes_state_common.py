@@ -1014,6 +1014,9 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   period_s INTEGER,
   state TEXT NOT NULL DEFAULT 'pending'
        CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
+  recipient TEXT NOT NULL DEFAULT 'agent'
+       CHECK (recipient IN ('agent','user')),
+  dispatch_ref TEXT,
   last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
   repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
   created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT
@@ -1047,6 +1050,24 @@ CREATE TABLE IF NOT EXISTS ctl_input_receipt (
   PRIMARY KEY (run_id, event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ctl_input_receipt_run ON ctl_input_receipt(run_id);
+-- ctl_causal_link (V-O9 «плоско пишем — графом читаем», core ТЗ 03.11): directed
+-- causal DAG edges over state history — reply/about/causes/supersedes/merge between
+-- namespaced node ids (ctl:, task:, rev:, mem:, todo:, br:, sess:, obs:). Writers:
+-- controller/causal.py + transport/branch/memory hooks; old columns keep their
+-- values (denormalization, shadow readers). UNIQUE triple = idempotent replay.
+CREATE TABLE IF NOT EXISTS ctl_causal_link (
+  link_id    INTEGER PRIMARY KEY,
+  ts         REAL NOT NULL,
+  from_event TEXT NOT NULL,
+  to_event   TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('reply','about','causes','supersedes','merge')),
+  payload    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_cl_edge
+  ON ctl_causal_link(from_event, to_event, kind);
+CREATE INDEX IF NOT EXISTS idx_cl_from ON ctl_causal_link(from_event);
+CREATE INDEX IF NOT EXISTS idx_cl_to   ON ctl_causal_link(to_event);
+CREATE INDEX IF NOT EXISTS idx_cl_kind ON ctl_causal_link(kind);
 -- Topic memory (stage003, ToDo «тематическая память ядра»): scope-isolated facts
 -- so task-local directives never leak into the global context. Writers: the
 -- controller package only (controller/topic_memory.py), same invariant as ctl_*.

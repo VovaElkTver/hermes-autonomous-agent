@@ -271,7 +271,7 @@ _ENV_BUILDERS = {"local": _build_local_env, "docker": _build_docker_env, "modal"
                  "ssh": _build_ssh_env}
 
 
-def _create_environment(env_type: str, image: str, cwd: str, timeout: int,
+def _create_environment(env_type: str, image: str, cwd: str, timeout: float,
                         ssh_config: dict | None = None, container_config: dict | None = None,
                         local_config: dict | None = None, task_id: str = "default",
                         host_cwd: Optional[str] = None, probe_only: bool = False):

@@ -1639,6 +1639,10 @@ DEFAULT_CONFIG = {
         "require_mention": True,  # require @mention to respond in rooms
         "free_response_rooms": "",  # comma-separated room IDs answered without mention
         "allowed_rooms": "",  # if set, ONLY respond in these room IDs (whitelist)
+        # Fork doctrine ("Matrix is a visualizer"): branching is /branch + session_branches,
+        # never a client-side thread artifact. Threads stay opt-in on Matrix.
+        "auto_thread": False,  # do not fork sessions into room threads on @mention
+        "dm_mention_threads": False,  # a DM has no discussions; answers go flat at room root
     },
     # Approvals for dangerous commands.
     # mode: manual (always prompt) | smart (aux LLM auto-approves low-risk) | off (= --yolo)

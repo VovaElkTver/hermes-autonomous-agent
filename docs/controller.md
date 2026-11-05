@@ -375,3 +375,35 @@ stores». Правки:
    реализация `/memory audit` до всякого механизма — это только дайджест+парсер).
 3. v0: background_review → intent-генератор (память/скиллы), сверка + гейт.
 4. Расширение на весь write-контур — по итогам обкатки.
+
+## Каузальный граф (ctl_causal_link) — «плоско пишем — графом читаем» (V-O9, ТЗ 03.11)
+
+История работы агента — не список и не дерево, а DAG: форки тем, слияния источников,
+следствия из нескольких лент. Записи остаются append-плоскими (ctl_event, messages,
+session_branches не тронуты); парные связи **дополнительно** зеркалятся рёбрами в
+`ctl_causal_link` (kind: reply | about | causes | supersedes | merge). Концы рёбер —
+namespaced id (`ctl:`,`task:`,`rev:`,`mem:`,`todo:`,`br:`,`sess:`,`obs:`), таблица
+узлов — сами домены; single source of truth за совместимость — старые колонки.
+
+Писатели (shadow: пишут всегда, старые читатели не переключались):
+transport reply-mirror (`m.in_reply_to` → ребро reply, при отсутствующем родителе —
+поздний добор миграцией), materialize_todo (todo→task causes), revise_contract и
+ctl_mem_item.supersede (supersedes), session_branches fork/join (causes; join —
+через событие-сходимость, прямое br→parent ребро закрыло бы цикл).
+
+Контракт писателя (`controller/causal.py::link`): концы существуют, cycle/self-loop
+запрещены (рекурсивный CTE вверх от from), ts(to) ≥ ts(from) — контрактная скидка
+для reply: штампы obs — время ПРИЁМА, поздно вычитанный родитель инвертирует их
+legitimately (отклонение от ТЗ §2.4, отмечено Вл). UNIQUE(from,to,kind) = идемпотентный replay
+для писателей и миграции. Миграция `migrate()` конвертирует старые парные ссылки
+(relation JSON, session_branches, supersede-колонки) — исходные поля НЕ удаляются.
+
+Читатели (пока хелперы, переключение по одному): `supersede_impact` («что затронет
+правка X»), `projection` (линейный топологический вид ленты — совместимый для старых
+читателей), `causal_freshness` (длина причинной цепи от узла; delivery ≠ causality,
+пока только считать и логировать). Аудит инвариантов — `check_invariants`.
+
+Бенчмарк на копии прод-state.db (38k сообщений, 13.6k наблюдений): миграция 0.2s,
+4502 ребра, replay идемпотентен, freshness/impact/projection — медиана <1ms при
+гейте приёмки 50ms. Регресс: tests/plugins/test_controller_causal.py (25, включая
+SIGKILL-chaos посреди миграции).

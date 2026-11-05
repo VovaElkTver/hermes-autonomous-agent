@@ -25,7 +25,7 @@ logger = logging.getLogger("tools.terminal_tool")
 
 
 def _create_configured_env(
-    config: dict[str, Any], env_type: str, *, image: str, cwd: str, timeout: int,
+    config: dict[str, Any], env_type: str, *, image: str, cwd: str, timeout: float,
     task_id: str, host_cwd: Optional[str],
 ):
     """``_create_environment`` with the ssh/local/container kwargs shaped from *config*
