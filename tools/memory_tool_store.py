@@ -573,8 +573,8 @@ class MemoryStore:
             if content not in working:  # idempotent -- skip duplicate, don't fail the batch
                 working.append(content)
             return None, None, "none"
-        if act not in ("replace", "remove"):
-            return f"{pos}: unknown action. Use add, replace, or remove.", None, "invalid_args"
+        if act not in ("replace", "remove", "patch"):
+            return f"{pos}: unknown action. Use add, replace, remove, or patch.", None, "invalid_args"
         if not old_text:
             return f"{pos}: old_text is required.", None, "missing_old_text"
         if act == "replace" and not content:

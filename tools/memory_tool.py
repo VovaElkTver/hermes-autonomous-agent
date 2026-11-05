@@ -112,7 +112,10 @@ _STORE_ACTIONS = {
                 lambda label, content, old_text: (f"replace in {label}",
                                                   f"entry matching: {old_text}\nwhole entry becomes: {content}")),
     "remove": (lambda store, target, content, old_text, entry=None: store.remove(target, old_text, entry),
-               lambda label, content, old_text: (f"remove from {label}", old_text or ""))}
+               lambda label, content, old_text: (f"remove from {label}", old_text or "")),
+    "patch": (lambda store, target, content, old_text, entry=None: store.patch(target, old_text, content, entry),
+              lambda label, content, old_text: (f"patch in {label}",
+                                                f"span: {old_text}\nbecomes: {content}"))}
 
 
 def _batch_op_line(op: dict[str, Any]) -> str:
@@ -165,7 +168,7 @@ def _validate_single_op(store, action, target, content, old_text) -> Optional[st
     return None
 
 
-_BG_DELETE_ACTIONS = ("replace", "remove")
+_BG_DELETE_ACTIONS = ("replace", "remove", "patch")
 
 
 def destructive_ops(payload: dict[str, Any]) -> list[dict[str, Any]]:
