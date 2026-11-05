@@ -32,7 +32,6 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | [`guardrails-protocol`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-guardrails-protocol.md) | Use when fork-guardrails blocks or approves a tool call. | `autonomous-ai-agents/guardrails-protocol` |
 | [`hermes-agent`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent.md) | Use, configure, theme, extend, and orchestrate Hermes Agent. | `autonomous-ai-agents/hermes-agent` |
 | [`install-fork-agent`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-install-fork-agent.md) | Install or update the VovaElkTver Hermes fork on a host. | `autonomous-ai-agents/install-fork-agent` |
-| [`opencode`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-opencode.md) | Delegate coding to OpenCode CLI (features, PR review). | `autonomous-ai-agents/opencode` |
 | [`supervisor-protocol`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-supervisor-protocol.md) | Use when a tool result or steer is tagged [supervisor]. | `autonomous-ai-agents/supervisor-protocol` |
 
 ## creative
