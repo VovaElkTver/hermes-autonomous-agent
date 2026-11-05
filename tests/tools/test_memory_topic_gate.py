@@ -212,3 +212,82 @@ def test_audit_classifies_manual_leak(gate_env):
     leaks, pointers = classify(_entries(e.mem_path), e.ms.topic_registry)
     assert ("вердикт hermes-agency от 05.11", "hermes-agency") in leaks
     assert f"Канон темы hermes-agency — {e.store}" in pointers
+
+
+# ── v0.2: registry snapshot injected into the system prompt ────────────────
+
+def test_prompt_snapshot_gate_off_unchanged(tmp_path, monkeypatch):
+    """Приёмка v0.2 кейс 1: gate off → промпт байт-в-байт как сейчас."""
+    monkeypatch.setattr("tools.memory_tool.get_memory_dir",
+                        lambda: tmp_path, raising=False)
+    reg = tmp_path / "topics.yaml"
+    reg.write_text(TOPICS_YAML.format(store=tmp_path / "st.md",
+                                      fleet_store=tmp_path / "fl.md"), encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text("старая запись", encoding="utf-8")
+    ms_off = MemoryStore()
+    ms_off.load_from_disk()
+    off = ms_off.format_for_system_prompt("memory") or ""
+    assert "authoritative over this snapshot" not in off
+    assert "старая запись" in off
+    # gate on adds ONLY the snapshot suffix on top of the identical base block
+    ms_on = MemoryStore(topic_gate=True, topic_registry=str(reg))
+    ms_on.load_from_disk()
+    on = ms_on.format_for_system_prompt("memory") or ""
+    assert on.startswith(off)
+    assert "authoritative over this snapshot" in on[len(off):]
+
+
+def test_prompt_snapshot_single_topic_block(tmp_path, monkeypatch):
+    """Приёмка v0.2 кейс 2: одна тема → блок ≤5 строк (4 + дисклеймер)."""
+    monkeypatch.setattr("tools.memory_tool.get_memory_dir",
+                        lambda: tmp_path, raising=False)
+    store = tmp_path / "hermes-agency-topic.md"
+    reg = tmp_path / "topics.yaml"
+    reg.write_text(TOPICS_YAML.format(store=store, fleet_store=tmp_path / "x.md").split("  - name: fleet")[0],
+                   encoding="utf-8")
+    ms = MemoryStore(topic_gate=True, topic_registry=str(reg))
+    ms.load_from_disk()
+    block = ms.format_for_system_prompt("memory") or ""
+    lines = [ln for ln in block.splitlines() if ln.strip()]
+    joined = "\n".join(lines)
+    for frag in ("- hermes-agency",
+                 "  match: ~/projects/hermes-agency/**, re:^V-O\\d+, hermes-agency"):
+        assert frag in joined
+    assert f"  store: {store}" in joined
+    assert "  pointer: Канон темы hermes-agency" in joined
+    # exactly: 4 topic lines + 1 disclaimer
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("- hermes-agency"))
+    chunk = lines[start:]
+    assert len(chunk) == 5
+    assert chunk[-1].startswith("Registry may have changed")
+
+
+def test_prompt_snapshot_absent_registry_no_block(tmp_path, monkeypatch):
+    """gate on, реестра нет → слепок пуст, промпт как у гейта без реестра."""
+    monkeypatch.setattr("tools.memory_tool.get_memory_dir",
+                        lambda: tmp_path, raising=False)
+    ms = MemoryStore(topic_gate=True, topic_registry=str(tmp_path / "no.yaml"))
+    ms.load_from_disk()
+    assert "authoritative over this snapshot" not in (ms.format_for_system_prompt("memory") or "")
+
+
+def test_prompt_snapshot_multiline_fields_folded(tmp_path, monkeypatch):
+    """Многосимвольные значения реестра не ломают построчную форму блока."""
+    reg = tmp_path / "topics.yaml"
+    store = tmp_path / "st.md"
+    reg.write_text(
+        'topics:\n'
+        '  - name: "multi\\nline"\n'
+        '    match: ["re:^X\\\\d+"]\n'
+        f'    store: "{store}"\n'
+        '    pointer: "p1\\np2"\n',
+        encoding="utf-8")
+    monkeypatch.setattr("tools.memory_tool.get_memory_dir",
+                        lambda: tmp_path, raising=False)
+    ms = MemoryStore(topic_gate=True, topic_registry=str(reg))
+    ms.load_from_disk()
+    block = ms.format_for_system_prompt("memory") or ""
+    topic_lines = [ln for ln in block.splitlines() if ln.strip()]
+    # name(1) + match(1) + store(1) + pointer(1) + disclaimer(1)
+    assert "- multi line" in topic_lines
+    assert "  pointer: p1 p2" in topic_lines

@@ -335,6 +335,40 @@ class MemoryStore:
                                path.name, count, limit)
             self._system_prompt_snapshot[target] = self._render_block(target, [_sanitize(e, path.name) for e in entries])
 
+        # topic_gate v0.2 («Вердикт по инжекции слепка реестра в промпт»): a POLICY snapshot of
+        # the registry rides in the memory block, frozen at load time like the entries themselves.
+        # Invariant §2б keeps policy in the prompt; drift is covered by the disclaimer line, not by
+        # session restarts. Gate off / registry unreadable → nothing appended (prompt unchanged).
+        if self.topic_gate:
+            block = self._topic_registry_snapshot()
+            if block:
+                snap = self._system_prompt_snapshot.get("memory") or ""
+                self._system_prompt_snapshot["memory"] = f"{snap}\n\n{block}" if snap else block
+
+    def _topic_registry_snapshot(self) -> str:
+        """≤4 lines per topic (name/match/store/pointer) + one disclaimer line."""
+        if not self.topic_registry:
+            return ""
+        from tools import memory_topic_gate as gate
+
+        rules = gate.load_registry(self.topic_registry)
+        if not rules:
+            return ""
+
+        def one(text) -> str:
+            return " ".join(str(text).split())
+
+        lines: list[str] = []
+        for rule in rules:
+            lines.append(f"- {one(rule.name)}")
+            lines.append("  match: " + ", ".join(one(p) for p in rule.match))
+            lines.append(f"  store: {one(rule.store)}")
+            if rule.pointer:
+                lines.append(f"  pointer: {one(rule.pointer)}")
+        lines.append("Registry may have changed since this session started; "
+                     "the memory tool's reply is authoritative over this snapshot.")
+        return "\n".join(lines)
+
     @staticmethod
     @contextmanager
     def _file_lock(path: Path):
