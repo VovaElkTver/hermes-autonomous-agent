@@ -1177,6 +1177,37 @@ class MatrixAdapter(BasePlatformAdapter):
             olm = OlmMachine(client, crypto_store, crypto_state)
             olm.share_keys_min_trust = TrustState.UNVERIFIED
             olm.send_keys_min_trust = TrustState.UNVERIFIED
+
+            # Key requests from OTHER users' devices (e.g. a human DMing the bot over
+            # E2EE): mautrix's default_allow_key_share silently ignores anyone but our
+            # own mxid, so Element clients stuck on "waiting for decryption key" never
+            # get an answer. Allow same-trust devices of room members instead: requester
+            # must be in the (encrypted) room whose session they ask for, and pass the
+            # same send trust threshold as outgoing encryption does.
+            async def _allow_key_share(device, request):
+                try:
+                    if not await crypto_state.is_encrypted(request.room_id):
+                        return False
+                    members = await client.get_joined_members(request.room_id)
+                    member_ids = {m.user_id for m in members}
+                    if device.user_id not in member_ids:
+                        logger.info(
+                            "Matrix: denying key request from non-member %s/%s",
+                            device.user_id, device.device_id)
+                        return False
+                    if await olm.resolve_trust(device) < olm.send_keys_min_trust:
+                        logger.info("Matrix: denying key request from below-trust device %s/%s",
+                                    device.user_id, device.device_id)
+                        return False
+                    logger.debug("Matrix: serving key request from %s/%s for %s",
+                                 device.user_id, device.device_id, request.session_id)
+                    return True
+                except Exception:
+                    logger.exception("Matrix: allow_key_share check failed for "
+                                     "%s/%s", device.user_id, device.device_id)
+                    return False
+
+            olm.allow_key_share = _allow_key_share
             await olm.load()
             if not await self._verify_device_keys_on_server(client, olm):
                 return await self._abort_connect(api, crypto_db)
