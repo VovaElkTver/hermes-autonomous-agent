@@ -1248,6 +1248,8 @@ def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
                     user_char_limit=mem_config.get("user_char_limit", 1375),
                     memory_enabled=agent._memory_enabled,
                     user_profile_enabled=agent._user_profile_enabled,
+                    topic_gate=bool(mem_config.get("topic_gate", False)),
+                    topic_registry=mem_config.get("topic_registry"),
                 )
                 agent._memory_store.load_from_disk()
 
