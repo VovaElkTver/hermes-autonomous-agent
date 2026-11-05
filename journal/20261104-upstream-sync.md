@@ -495,3 +495,13 @@ VERDICT: [заполняется по завершении параллельн�
 - GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin (ahead/behind 0; origin/fleet/upstream-sync..HEAD = коммиты теневой ветки, ожидание); sync-up dbc3c2ef87 == origin/upstream-sync-20261103.
 - Логи 15 мин: только tool_executor WARNING (чужие сессии), 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов в секции приёмки нет.
 - NEXT TICK: шторм-патруль e2e a1 (frozen-crit окно ≥20s); при NO-CLEAN e2e — остаётся weak/zero-XML, count-diff на вердикте; затем desktop — последний chunk base до base ALL-DONE и VERDICT.
+
+@05.11 13:0x tick (шлюз-тик):
+- СОБЫТИЕ: base `e2e` a1 rc=3 ACCEPTED 12:31:24 — e2e.a1.xml высадил 1352tc/216F (merged e2e 1356tc/130F; base-oweInternalErrors rc=3 шторм-наследие раздувает fails — на вердикте count-diff 1352/1356 симметричен, имена сверять с триджем шторма). .done base 22.
+- Base `desktop` a1 ЖИВА с 12:31: лог статичен 149B с 12:31:36 (~32 мин, bring-up «node down» F-паттерн как merged-истории desktop), НО cgroup chunkbasev6 215ms/25s ≫ frozen-crit → band one-long-test, НЕ оттаивать. Дедлайн wrapper (14400s от 12:31) ~16:31 → a2/a3 storm-watch. desktop исторически NO-CLEAN симметричен → r3-список в силе.
+- hermes_events: base SKIP-nodir 18:15:31 (tests/hermes_events нет в base-дереве a81996241e — чанк принесён upstream-мержем; merged NO-CLEAN rc=143×3). Для name-equality гейта baseline не нужен, фиксировать на вердикте как upstream-only.
+- Счётчик gateway для вердикта: base 13446/282F vs merged 13482/142F (count-diff 36tc — weak-accept правило).
+- merged ALL-DONE 02:08:20 — не трогать.
+- GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin; skills-write-forbidden 464e76d36f == origin; sync-up f0ac310421 == origin/upstream-sync-20261103 (до этого коммита). hermes-sync-base грязный — by design.
+- Логи шлюза 15 мин: 1 tool_executor WARNING (чужая сессия), 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов нет; контроллер-очередь: task-e29db8067b (ports-fidelity) needs_human — шаг done, ждёт Вл, не агента.
+- NEXT TICK: desktop a1 шторм-патруль (frozen-crit: лог статичен И cgroup <10ms/30s, окно ≥20s); при высадке/NO-CLEAN desktop — base ALL-DONE → тогда VERDICT (r3-список: desktop, security, monitoring, skills, tools, plugins, hermes_cli, hermes_platform, e2e-count-diff, acp_adapter, verify, website + install/manual rc=5 симметрия; executed-counts по чанкам, не только имена).
