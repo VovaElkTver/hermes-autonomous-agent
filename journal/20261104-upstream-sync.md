@@ -479,3 +479,11 @@ VERDICT: [заполняется по завершении параллельн�
 - pm a2 rc=3 ACCEPTED 05:41:36 (pm.done есть) — pm закрыт weak-accept, executed-count сверить на вердикте. Осталось base после website: gateway (жив), e2e, desktop; hermes_events SKIP-nodir (симметрично merged).
 - Шлюз 15 мин: только tool_executor WARNING (чужие сессии), 0 ERROR/Traceback. GIT: more-mem-layer 401f7edea2 == origin (ahead/behind 0), дерево hermes-agent чистое; hermes-sync-up HEAD == origin/upstream-sync-20261103 (ls-remote). ToDo 118: «ждёт агента»/~~/самозакрывов нет.
 - NEXT TICK: шторм-патруль base gateway a1 (оттаивать ТОЛЬКО frozen-crit: лог статичен AND CPU<10ms/30s, окно ≥20s; при CPU≠0 не трогать — 4h wrapper рециклит сам); проверка .done/hвост _meta; сверить статус pm a2/e2e/desktop.
+
+@05.11 10:1x tick (шлюз-тик):
+- Прогноз тиков 08:1x/08:2x подтверждён: base `gateway` a1 завершился rc=124 ровно 10:09:38 (4h wrapper), XML НЕ высадил (gateway.a1.xml отсутствует) — band «жив, но не высаживает» (577-926ms/25s с 07:53) оказался never-land. Драйвер сам перешёл на a2 (~10:09:38).
+- a2 — реальный прогон: лог 808→988B за тик, mtime = время проверки (10:12:20), 4%+; cgroup chunkbasev6 20649ms/25s ≫ frozen-crit → не трогать. Дедлайн wrapper a2 ~14:10 → a3 (storm-watch; при NO-CLEAN gateway остаётся в VERDICT r3-списке как base-gap, merged-side 13509tc уже принят).
+- .done base 20/24 без изменений (gateway ещё не закрыт); после gateway осталось base: e2e, desktop. merged ALL-DONE 02:08:20 — не трогать.
+- GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin (ahead 0); skills-write-forbidden 464e76d36f == origin. В hermes-sync-up был 1 не запушенный docs-коммит 095365661a (opencode → optional-skills, чужая сессия, дерево чисто) — запушен FF в origin/upstream-sync-20261103 этим тиком. hermes-sync-base грязный — by design, не чистить.
+- Шлюз 15 мин: 1 строка, 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов в секции приёмки нет.
+- NEXT TICK: шторм-патруль base gateway a2 (оттаивать только frozen-crit, окно ≥20s; CPU≠0 не трогать); при высадке gateway.a2.xml либо NO-CLEAN — проверить .done 21 и переход полосы на e2e.
