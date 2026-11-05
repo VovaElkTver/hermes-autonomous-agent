@@ -100,9 +100,10 @@ def test_one_item_remove_or_duplicate_add_works_on_a_store_already_over_a_lowere
     assert store.memory_entries == facts[:2]
 
 
-def test_background_review_one_item_remove_of_the_last_entry_is_staged_not_applied(tmp_path, monkeypatch):
+def test_background_review_one_item_remove_of_the_last_entry_is_refused_not_applied(tmp_path, monkeypatch):
     """A one-item remove may empty a store, but an unattended background review never gets
-    that far: the #105921 delete gate stages it, so #103419's USER.md wipe stays closed."""
+    that far: the #105921 delete guard refuses it outright, so #103419's USER.md wipe
+    stays closed."""
     from tools.memory_tool import memory_tool
     from tools.skill_provenance import reset_current_write_origin, set_current_write_origin
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -115,5 +116,5 @@ def test_background_review_one_item_remove_of_the_last_entry_is_staged_not_appli
         result = json.loads(memory_tool(target="user", operations=[{"action": "remove", "old_text": "Alice"}], store=store))
     finally:
         reset_current_write_origin(token)
-    assert result["staged"] is True
+    assert result["success"] is not True and result.get("staged") is None
     assert store.user_entries == ["Name: Alice"]

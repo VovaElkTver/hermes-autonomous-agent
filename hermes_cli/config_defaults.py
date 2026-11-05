@@ -4,6 +4,7 @@ Pure-data leaf module — must not import from hermes_cli.config. Comments are t
 docs of config.yaml.
 """
 
+from hermes_cli.config_defaults_auxiliary import _aux
 
 #: Image every container terminal backend (docker/modal/daytona, the singularity plugin) uses unless the
 #: user pins one. LEGACY_SANDBOX_IMAGES are the plain defaults that preceded the desktop stack
@@ -15,19 +16,6 @@ LEGACY_SANDBOX_IMAGE = LEGACY_SANDBOX_IMAGES[0]
 # Vercel Sandbox managed image (Vercel deprecated its `runtime` presets in Aug 2026).
 DEFAULT_VERCEL_IMAGE = "vercel/sandbox/universal:latest"
 LEGACY_VERCEL_RUNTIME = "node24"  # the seeded pre-49 default, never a user choice
-
-
-def _aux(timeout, *, reasoning_effort=True, **extra):
-    """Standard auxiliary-task model block (see DEFAULT_CONFIG["auxiliary"]).
-
-    reasoning_effort=False omits that key (MoA blocks configure depth per slot);
-    ``extra`` keys are appended after the standard ones.
-    """
-    d = {"provider": "auto", "model": "", "base_url": "", "api_key": "", "timeout": timeout, "extra_body": {}}
-    if reasoning_effort:
-        d["reasoning_effort"] = ""
-    d.update(extra)
-    return d
 
 
 DEFAULT_CONFIG = {
@@ -48,8 +36,8 @@ DEFAULT_CONFIG = {
         "wal_autocheckpoint": None,
         "journal_size_limit": None,
     },
-    # Soft fd limit for long-running server processes; clamped to OS hard limit. 0/false/null = off.
-    "runtime": {"nofile_soft_limit": 4096},
+    # Server-process fd soft limit (clamped to the hard limit) + glibc arena cap; 0/false/null = off.
+    "runtime": {"nofile_soft_limit": 4096, "malloc_arena_max": 4},
     # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
     "max_concurrent_sessions": None,
     # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the
@@ -163,9 +151,9 @@ DEFAULT_CONFIG = {
         # turn), "cold" (first turn of a session only).
         "service_tier": "",
         "fast_auto_seconds": 60,
-        # Responses API final-answer length (`text.verbosity`): "" = not sent (provider default),
-        # or low | medium | high. Responses-family transports only; chat_completions never sends it.
+        # Responses-only `text.verbosity` (never chat_completions): "" = not sent, or low | medium | high.
         "text_verbosity": "",
+        "daybreak": False,  # opt-in; only catalog-listed Codex models (agent/codex_service_tiers.py)
         # System-prompt guidance telling the model to call tools instead of describing actions.
         # "auto" = gpt/codex models; true/false = force for all models; or a list of model-name
         # substrings (e.g. ["gpt", "codex", "gemini", "qwen"]).
@@ -273,11 +261,11 @@ DEFAULT_CONFIG = {
         # message isn't served with a skeleton system prompt. On timeout the gate opens and warm-up
         # finishes in the background. 0 = disable warm-up (lazy init).
         "gateway_startup_warmup_timeout": 20,
-        # Stale-stream ceiling (seconds) for local providers (Ollama, oMLX, llama-cpp). Applied when
-        # the base stale timeout is at its 180s default and a local endpoint is detected, so a
-        # wedged local server eventually trips the detector instead of hanging forever. Env
-        # HERMES_LOCAL_STREAM_STALE_TIMEOUT overrides.
+        # Stale-stream ceiling (s) for local providers (Ollama, oMLX, llama-cpp) when the base stale
+        # timeout is at its 180s default, so a wedged local server eventually trips the detector
+        # instead of hanging forever. Env HERMES_LOCAL_STREAM_STALE_TIMEOUT overrides.
         "local_stream_stale_timeout": 900,
+        "stream_max_lifetime": 0,  # opt-in whole-stream cap in s, 0 = off (agent/stream_max_lifetime.py)
         # How user-attached images reach the main model (gateway, TUI, CLI /attach). "auto" = native
         # when the model reports supports_vision=True AND auxiliary.vision.provider is not
         # explicitly set, else text; "native" = always attach (non-vision models error at the
@@ -440,7 +428,7 @@ DEFAULT_CONFIG = {
         "command_timeout": 30,
         # headed: visible Chromium window (local); skips per-turn cleanup, idle reaper still applies
         "headed": False,
-        "allow_private_urls": False,  # allow private/internal IPs (localhost, 192.168.x.x, ...)
+        "allow_private_urls": False,  # legacy security.allow_private_urls; local/sidecar Chromium ignore it
         # Local browser engine. "auto" = Chromium; "lightpanda" = `lightpanda serve` per session
         # (faster navigation, no screenshots); "chrome" is read as "auto". Ignored while a cloud
         # provider, cdp_url or use_real_profile is active.
@@ -452,7 +440,7 @@ DEFAULT_CONFIG = {
         # profile per session.
         "user_data_dir": "",
         "chromium_args": [],  # extra Chromium flags for local sessions, e.g. ["--lang=de"]
-        # With a cloud provider, auto-spawn local Chromium for LAN/localhost URLs instead
+        # Cloud provider: LAN/localhost URLs open in a local Chromium (ignores allow_private_urls; False refuses)
         "auto_local_for_private_urls": True,
         "cdp_url": "",  # persistent CDP endpoint for attaching to an existing Chromium/Chrome
         # Consent to browse with the user's REAL logins locally: runs on a Hermes-managed SNAPSHOT
@@ -490,8 +478,7 @@ DEFAULT_CONFIG = {
     # and merged are removed; dirty or unpushed ones are archived to refs/hermes/archive/<tree>
     # first (`hermes worktree restore <name>`). Live trees and Kanban t_<hex> trees are never touched.
     "worktrees": {
-        # false = never remove a dirty/unpushed tree (the pre-archive behaviour, exactly).
-        "archive_dirty": True,
+        "archive_dirty": True,  # false = never remove a dirty/unpushed tree (the pre-archive behaviour)
         # Untracked files larger than this (MB) are not archived, so a tree holding one is kept.
         "archive_max_file_mb": 50,
         # The sweep deletes archive refs older than this many days. 0 keeps them forever.
@@ -499,6 +486,7 @@ DEFAULT_CONFIG = {
         # Optional size budget (GB) for idle trees: past it the oldest idle trees are archived and
         # removed first. Live, young and Kanban trees are never counted or touched. 0 = off.
         "max_total_gb": 0,
+        "install_state_retention_days": 14,  # installs/<key> of a missing checkout, unused this long, goes; 0 = never
     },
     # Filesystem checkpoints: snapshot the working directory once per turn (on the first
     # write_file/patch call); restore with /rollback. Opt-in via `hermes chat --checkpoints` or
@@ -1060,9 +1048,9 @@ DEFAULT_CONFIG = {
             "secret": "",
             "session_ttl_seconds": 0,  # 0 → plugin default (12h)
         },
-        # Drain-control token auth (dashboard_auth/drain plugin). The secret is NOT here: env
-        # HERMES_DASHBOARD_DRAIN_SECRET; no-op unless >=256-bit, weak secrets rejected
-        # (fail-closed). scope = capability label; min_secret_chars in url-safe-b64 chars.
+        "session_token_auth": {"enabled": True},  # session_token plugin: a provisioned HERMES_DASHBOARD_SESSION_TOKEN (literal or file:<path>) authorizes the gated dashboard; enabled: false opts out
+        # Drain-control token auth (dashboard_auth/drain plugin): the secret is NOT here (env
+        # HERMES_DASHBOARD_DRAIN_SECRET); no-op unless >=256-bit, weak secrets rejected (fail-closed).
         "drain_auth": {"scope": "drain", "min_secret_chars": 43},
         # Public URL (env HERMES_DASHBOARD_PUBLIC_URL): full authority (scheme + host + optional
         # prefix, e.g. https://example.com/hermes) for the OAuth redirect_uri; its hostname is
@@ -1281,7 +1269,7 @@ DEFAULT_CONFIG = {
         # openWakeWord/pyopen-wakeword only: consecutive over-threshold frames to fire (higher = fewer
         # false triggers, more latency; 1 = single-frame)
         "confirmation_frames": 3,
-        "start_new_session": True,  # fresh session on wake vs. continue the current one
+        "start_new_session": True,  # fresh session on wake vs. continue the current one (detached-spawn: ok — a config key)
         # sherpa only: listen for every wake-enabled profile's phrase and route to it
         "profile_routing": True,
         "openwakeword": {
@@ -1319,10 +1307,6 @@ DEFAULT_CONFIG = {
         "memory_enabled": True,
         "user_profile_enabled": True,
         "prefetch_spill_enabled": False,  # External recall opt-in to hooks.output_spill.
-        # Approval gate for memory writes on BOTH foreground turns and the background review fork.
-        # true = foreground writes prompt inline; background writes are staged (/memory
-        # pending|approve <id>|reject <id>). To disable memory: memory_enabled.
-        "write_approval": False,
         "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
         # Periodic built-in memory review; 0 when an external provider auto-extracts.
@@ -1375,8 +1359,7 @@ DEFAULT_CONFIG = {
         # children fail only from real errors (API, tools, iteration budget). A progressing child (including one
         # waiting on a multi-minute completion) restarts the window; a frozen one is caught.
         "child_timeout_seconds": 0,
-        # Subagent effort: "ultra" | "max" | "xhigh" | "high" | "medium" | "low" | "minimal" |
-        # "none" (empty = inherit)
+        # Subagent effort: "ultra" | "max" | "xhigh" | "high" | "medium" | "low" | "minimal" | "none" (empty = inherit)
         "reasoning_effort": "",
         # Max parallel children per batch AND max concurrent background delegation units; async
         # dispatches beyond it run synchronously. Floor 1, no ceiling.
@@ -1384,6 +1367,7 @@ DEFAULT_CONFIG = {
         # Background fan-outs return as ONE message when the whole call finishes. true = each task
         # (or `group`) returns on its own as it finishes — more new turns for the orchestrator.
         "independent_completions": False,
+        "gateway_mode": "auto",  # gateway: inline (join in the turn) | background | auto = inline where interim msgs are off
         # Orchestrator role controls. Depth floored at 1, no ceiling; each level multiplies cost.
         "max_spawn_depth": 1,  # 1 = flat, 2 = orchestrator→leaf, 3+ = deeper
         "orchestrator_enabled": True,  # kill switch for role="orchestrator"
@@ -1483,10 +1467,6 @@ DEFAULT_CONFIG = {
         # "skillevaluator @ git+https://github.com/NVIDIA/SkillEvaluator.git"). Informational, never
         # blocking; secrets-class findings shown red. No-op without it.
         "tier1_advisory": True,
-        # Approval gate for skill_manage mutations on BOTH foreground turns and the background
-        # review fork. true = ALWAYS stage (SKILL.md too large for an inline prompt): /skills
-        # pending, /skills diff <id>, /skills approve|reject <id>.
-        "write_approval": False,
         # Audit ledger: every skill mutation appends to ~/.hermes/skills/.curator_ledger.jsonl with
         # before/after hashes (blobs under ~/.hermes/.curator_backups/blobs/); powers `hermes
         # curator ledger` / `rollback <entry-id>`. Never a gate — failures can't block.
@@ -1680,11 +1660,9 @@ DEFAULT_CONFIG = {
         # channel — a pending approval there just blocks for the full timeout with nobody to answer (#37284,
         # #87509): deny    — block the command instantly and let the agent find another way (default, safe;
         # mirrors cron_mode deny) approve — auto-approve all dangerous commands on unattended platforms
-        # Shared by the CLI prompt and gateway/messaging waits. Messaging approvals arrive as a push
-        # notification the user may not see immediately — 60s proved too tight on Telegram/Discord (the
-        # prompt expired before the user reached their phone), so the default is 300.
         "mode": "smart",
         "timeout": 300,
+        "discord_prompt_timeout": 300,  # Discord buttons stay clickable (min 30 s, cap MAX_SAFE_TIMEOUT_S)
         "cron_mode": "deny",
         "single_query_mode": "deny",
         "unattended_mode": "deny",
@@ -1774,7 +1752,7 @@ DEFAULT_CONFIG = {
         "codex_login_flow": "device_code",
     },
     "security": {  # Security: URL/private-network guards, redaction and approval presentation.
-        "allow_private_urls": False,  # allow requests to private/internal IPs (OpenWrt, VPNs)
+        "allow_private_urls": False,  # private IPs for web/vision/media + cloud/CDP browsers; not local/sidecar Chromium
         # CIDR blocks a local TUN proxy answers DNS with (Mihomo/Clash fake-ip, Surge enhanced).
         # Answers inside these blocks are the proxy's sentinels, not internal hosts, so the guard
         # dials them instead of rejecting them as private. Empty = normal private-address verdict.
@@ -2103,6 +2081,15 @@ DEFAULT_CONFIG = {
         # OTLP destination. headers_env maps header names to ENVIRONMENT VARIABLE NAMES (never
         # secret values); values are read from the environment at export time.
         "export": {"otlp": {"enabled": False, "endpoint": "", "headers_env": {}}},
+    },
+    # Native hosted-room Discussion ceilings, shared by all members per discussion.
+    # Positive integers only (no unlimited/0). Read from the root owner's config at service
+    # startup for all hosted rooms; restart the owning service after changing them.
+    "hosted_rooms": {
+        "discussion": {
+            "max_rounds": 3,
+            "max_messages": 10,
+        },
     },
     "gateway": {  # Gateway settings (messaging platforms: Telegram, Discord, Slack, ...).
         "unmanaged_idle_exit_seconds": 600,  # client-auto-started gateway only; 0 disables
@@ -2725,13 +2712,13 @@ DEFAULT_CONFIG = {
 }
 
 
-from hermes_cli.config_defaults_env import _base_url, _env, _msg, _prov, _setting, _skill, _tool
+from hermes_cli.config_defaults_env import OptionalEnvVars, _base_url, _env, _msg, _prov, _setting, _skill, _tool
 
 
 # Optional environment variables that enhance functionality. Feeds the dashboard keys page and setup
 # checklists; category: provider|tool|skill|messaging|setting, advanced=True hides from checklists,
-# tools=[...] lists the model tools the key unlocks.
-OPTIONAL_ENV_VARS = {
+# tools=[...] lists the model tools the key unlocks. Provider entries: config_provider_env (on first read).
+OPTIONAL_ENV_VARS = OptionalEnvVars({
     # ── Provider (handled in provider selection, not shown in checklists) ──
     "NOUS_BASE_URL": _base_url("Nous Portal"),
     "HERMES_ANON_API_SECRET": _env(
@@ -3144,8 +3131,7 @@ OPTIONAL_ENV_VARS = {
     "HERMES_EPHEMERAL_SYSTEM_PROMPT": _setting(
         "Ephemeral system prompt injected at API-call time (never persisted to sessions)",
         "Ephemeral system prompt", None),
-}
-
+})
 
 # Fork-explore defaults live in a sibling (config_defaults size ratchet); merged here
 # so DEFAULT_CONFIG / OPTIONAL_ENV_VARS stay the single registry every reader already uses.

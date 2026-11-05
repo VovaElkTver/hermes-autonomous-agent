@@ -1372,3 +1372,93 @@ async def test_startup_boot_sends_still_run_when_they_finish_quickly(monkeypatch
     runner._claim_pending_obligations.assert_awaited_once()
     runner._redeliver_claimed_obligations.assert_awaited_once()
 
+
+
+# ---------------------------------------------------------------------------
+# Admission-ledger veto at startup auto-resume (31.10 regression)
+# ---------------------------------------------------------------------------
+
+
+class _StubAdmissionDB:
+    """Minimal stand-in for the authority store: one in-memory admissions table."""
+
+    def __init__(self, statuses):
+        import sqlite3
+        self._conn = sqlite3.connect(":memory:")
+        self._conn.execute(
+            "CREATE TABLE session_admissions (target_session_id TEXT, status TEXT)"
+        )
+        for status in statuses:
+            self._conn.execute(
+                "INSERT INTO session_admissions VALUES ('sid', ?)", (status,)
+            )
+
+    def _read_one(self, sql, params):
+        return self._conn.execute(sql, params).fetchone()
+
+
+class _StubAuthority:
+    def __init__(self, statuses):
+        self.db = _StubAdmissionDB(statuses)
+        self.retiring = False
+
+    def logical_owner(self, session_id):
+        return None
+
+
+def _resume_entry_for_admission_veto():
+    source = make_restart_source(chat_id="veto-chat")
+    return SessionEntry(
+        session_key="agent:main:telegram:dm:veto-chat",
+        session_id="sid",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        origin=source,
+        platform=Platform.TELEGRAM,
+        chat_type="dm",
+        resume_pending=True,
+        resume_reason="restart_interrupted",
+        last_resume_marked_at=datetime.now(),
+    )
+
+
+@pytest.mark.parametrize(
+    "statuses,expected",
+    [
+        ([], 1),                       # never admitted: plain auto-resume
+        (["terminal"], 1),             # settled history must NOT veto (the 31.10 bug)
+        (["terminal", "terminal"], 1),  # many settled rows still do not veto
+        (["queued"], 0),               # FIFO owns this input
+        (["started"], 0),              # a live turn owns this session
+        (["unknown"], 0),              # operator acknowledgement owns uncertainty
+    ],
+)
+@pytest.mark.asyncio
+async def test_admission_ledger_veto_only_counts_live_rows(statuses, expected):
+    """Terminal admissions settle the past; only live statuses veto auto-resume.
+
+    Regression for the status-blind ``holds_admission``: it vetoed every messaging
+    session forever (any admission row ever written), so the restart-interrupted
+    turn waited for a human instead of resuming on boot.
+    """
+    runner, adapter = make_restart_runner()
+    runner.session_authority = _StubAuthority(statuses)
+    runner._is_user_authorized = lambda _source: True
+    runner._persist_active_agents = MagicMock()
+    entry = _resume_entry_for_admission_veto()
+    runner.session_store._entries = {entry.session_key: entry}
+
+    gate = asyncio.Event()
+
+    async def _slow_handle(event):
+        await gate.wait()
+
+    adapter.handle_message = _slow_handle
+
+    scheduled = runner._schedule_resume_pending_sessions()
+    assert scheduled == expected
+    if expected:
+        assert entry.session_key in runner._running_agents
+        gate.set()
+        await asyncio.sleep(0.05)
+        assert entry.session_key not in runner._running_agents

@@ -9,6 +9,7 @@ methods here are additive; sessions without branches never touch this table.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 import uuid
@@ -22,19 +23,44 @@ class SessionBranchMixin:
     def create_branch_row(
         self, branch_id: str, parent_session_id: str, child_session_id: str,
         base_message_uid: str | None, created_by_turn: str | None = None,
+        title: str | None = None,
     ) -> None:
-        """Register a new active branch. Idempotent per branch_id."""
+        """Register a new active branch. Idempotent per branch_id.
+
+        ``title`` is stored immutably in ``meta_json`` — the console name a
+        fork speaks with (``⎇ <title>:``).  The session title is display-only
+        and gets re-summarized by the auto-titler, so it cannot be the label.
+        """
+        meta = json.dumps({"title": title}) if title else None
         self._execute_write(
             lambda conn: conn.execute(
                 """INSERT OR IGNORE INTO session_branches (
                        branch_id, parent_session_id, child_session_id, base_message_uid,
-                       created_at, created_by_turn, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'active')""",
+                       created_at, created_by_turn, status, meta_json)
+                   VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
                 (branch_id, parent_session_id, child_session_id,
-                 base_message_uid, time.time(), created_by_turn),
+                 base_message_uid, time.time(), created_by_turn, meta),
             ),
             patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S,
         )
+
+    def set_branch_title(self, branch_id: str, title: str) -> None:
+        """Merge ``title`` into the branch's meta_json (idempotent)."""
+        def _do(conn: sqlite3.Connection) -> None:
+            row = conn.execute(
+                "SELECT meta_json FROM session_branches WHERE branch_id = ?",
+                (branch_id,)).fetchone()
+            meta = {}
+            if row and row[0]:
+                try:
+                    meta = json.loads(row[0])
+                except Exception:
+                    meta = {}
+            meta["title"] = title
+            conn.execute(
+                "UPDATE session_branches SET meta_json = ? WHERE branch_id = ?",
+                (json.dumps(meta), branch_id))
+        self._execute_write(_do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S)
 
     @staticmethod
     def new_branch_id() -> str:
@@ -65,6 +91,22 @@ class SessionBranchMixin:
         try:
             row = self._read_one(
                 "SELECT * FROM session_branches WHERE branch_id = ?", (branch_id,))
+        except Exception:
+            return None
+        return dict(row) if row else None
+
+    def get_bound_active_branch(self, child_session_id: str) -> dict | None:
+        """Branch row for ``child_session_id`` iff it is an ACTIVE branch whose child session is
+        bound to a chat thread (``/forkb``). This row is the sticky lock: while it stays active,
+        the thread's console must not be repointed to another stream except by closing the branch
+        (``/return`` / ``/leave``) — Вл 31.10."""
+        try:
+            row = self._read_one(
+                """SELECT b.* FROM session_branches b
+                   JOIN sessions s ON s.id = b.child_session_id
+                   WHERE b.child_session_id = ? AND b.status = 'active'
+                     AND s.thread_id IS NOT NULL AND s.thread_id <> ''""",
+                (child_session_id,))
         except Exception:
             return None
         return dict(row) if row else None
@@ -146,6 +188,16 @@ class SessionBranchMixin:
             return None
         return row["session_key"] if row else None
 
+    def move_branch_rows_to_parent(self, branch: dict) -> bool:
+        """Public join-append entry point (stage001 п.5).
+
+        ``gateway.slash_commands_fork.join_branch`` awaits this name through the
+        AsyncSessionDB facade; only the ``_…_sync`` implementation existed, so
+        ``/join <name> --append`` died on AttributeError. Pure alias — same
+        semantics, same guardrails as ``_move_branch_rows_to_parent_sync``.
+        """
+        return self._move_branch_rows_to_parent_sync(branch)
+
     def _move_branch_rows_to_parent_sync(self, branch: dict) -> bool:
         """Append strategy: reparent the branch's own rows onto the parent.
 
@@ -170,11 +222,17 @@ class SessionBranchMixin:
                 if row is None:
                     return 0
                 floor = row[0]
-                # parent tail must be clean: no compacted/summary rows after the base
+                # parent tail must be clean: no compacted/summary rows after the base.
+                # Value check, not IS NOT NULL: the writer stores 0/1 integers
+                # (`1 if msg.get(...) else 0`), never NULL — a null-check flags every
+                # ordinary row and makes append-join impossible once the parent kept
+                # living after the fork (live натурка 02.11). Legacy rows may hold
+                # NULL/summary-text, hence COALESCE + explicit flag truthiness.
                 dirty = conn.execute(
                     """SELECT COUNT(*) FROM messages
                        WHERE session_id = ? AND id > ?
-                         AND (_compressed_summary IS NOT NULL OR active = 0 OR compacted = 1)""",
+                         AND (COALESCE(_compressed_summary, 0) NOT IN (0, '')
+                              OR active = 0 OR compacted = 1)""",
                     (parent_id, floor)).fetchone()
                 if dirty and dirty[0]:
                     return 0

@@ -41,19 +41,13 @@ class TestCommandRegistry:
                     assert resolve_command(alias).name == cmd.name or alias == cmd.name, \
                         f"Alias '{alias}' of '{cmd.name}' shadows canonical '{target.name}'"
 
-    def test_skills_desktop_meta_limits_exec_to_review_subcommands(self):
-        # #98330: /skills mixes desktop-relevant write-approval review verbs with CLI-hub
-        # mutations; desktop_subcommands exposes only the review slice to the desktop
-        # surface (completion + exec) without widening the whole family.
-        skills = resolve_command("skills")
-        assert skills is not None
-        assert skills.desktop is None
-        assert command_desktop_meta(skills) == {
-            "argument_mode": "options",
-            "desktop": None,
-            "desktop_subcommands": ["pending", "approve", "reject", "diff", "approval"],
-        }
-        assert set(skills.desktop_subcommands or ()) <= set(skills.subcommands)
+    def test_skills_and_memory_have_no_review_surface_left(self):
+        # The pending-store review verbs are gone from the registry entirely.
+        for name in ("skills", "memory"):
+            cmd = resolve_command(name)
+            assert cmd is not None
+            assert not set(cmd.subcommands) & {"pending", "approve", "reject", "diff", "approval"}
+            assert not cmd.desktop_subcommands
 
     def test_empty_desktop_subcommand_scope_serializes_as_deny_all(self):
         assert command_desktop_meta(

@@ -291,9 +291,13 @@ def test_corrupt_non_root_page_plus_drift_is_not_written(tmp_path):
     path = _lagging_store_with_history(_profile_home(tmp_path))
     with closing(sqlite3.connect(path)) as conn:
         page_size = conn.execute("PRAGMA page_size").fetchone()[0]
-        root = conn.execute("SELECT rootpage FROM sqlite_master WHERE name='messages'").fetchone()[0]
-        pages = conn.execute("PRAGMA page_count").fetchone()[0]
-    victim = max(root + 5, pages // 2)  # a messages leaf, never page 1 / sqlite_master
+        # Corrupt a real messages LEAF page, resolved via dbstat: fixed-offset
+        # arithmetic (root+5 / pages//2) broke the moment the canonical schema
+        # grew tables (ctl_* ports 01.11) and shifted page allocation.
+        victim_pool = [r[0] for r in conn.execute(
+            "SELECT pageno FROM dbstat WHERE name='messages' AND pagetype='leaf'")]
+        assert victim_pool, "messages b-tree has no leaf pages"
+        victim = victim_pool[len(victim_pool) // 2]
     with open(path, "r+b") as fh:
         fh.seek((victim - 1) * page_size + 8)
         fh.write(b"\xde\xad\xbe\xef" * ((page_size - 16) // 4))

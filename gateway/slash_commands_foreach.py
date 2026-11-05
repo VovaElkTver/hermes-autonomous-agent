@@ -13,7 +13,7 @@ class GatewayForEachCommandsMixin:
     """Slash surface for /for."""
 
     async def _handle_for_command(self, event) -> str:
-        """Handle ``/for <path|glob> [instruction...] [--limit N] [--go]``."""
+        """Handle ``/for <A> in <set> [instruction...] [--limit N] [--go]``."""
         from hermes_cli.foreach_queue import build_plan, parse_for_args
 
         arg = event.get_command_args().strip()
@@ -23,7 +23,8 @@ class GatewayForEachCommandsMixin:
             return f"❌ /for: {exc}"
 
         try:
-            plan = build_plan(parsed["path"], parsed["instruction"], parsed["limit"])
+            plan = build_plan(parsed["path"], parsed["instruction"],
+                              parsed["limit"], var=parsed.get("var"))
         except ValueError as exc:
             return f"❌ /for: {exc}"
 

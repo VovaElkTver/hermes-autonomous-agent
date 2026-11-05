@@ -141,6 +141,7 @@ def _spawn_detached_update(hermes_cmd, output_path, exit_code_path) -> None:
         subprocess.Popen(
             [sys.executable, "-c", _WINDOWS_UPDATE_HELPER, str(output_path), str(exit_code_path),
              sys.executable, "-m", "hermes_cli.main", "update", "--gateway"],
+            # detached-spawn: ok — /update runs `hermes update`, which must outlive the gateway it restarts
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **windows_detach_popen_kwargs())
         return
     hermes_cmd_str = " ".join(shlex.quote(part) for part in hermes_cmd)
@@ -156,6 +157,7 @@ def _spawn_detached_update(hermes_cmd, output_path, exit_code_path) -> None:
     # calls os.setsid() in the child.
     setsid_bin = shutil.which("setsid")
     argv = [setsid_bin, "bash", "-c", update_cmd] if setsid_bin else ["bash", "-c", update_cmd]
+    # detached-spawn: ok — /update runs `hermes update`, which must outlive the gateway it restarts
     subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
@@ -248,28 +250,6 @@ class GatewaySlashCommandsMixin(
         # AIAgent kwargs are ``checkpoint_<field>``; CheckpointManager takes the bare field names.
         fields = {k[len("checkpoint_"):]: v for k, v in cp.items() if k.startswith("checkpoint_")}
         return CheckpointManager(enabled=True, **fields)
-
-    def _write_approval_setter(self, section: str, event: MessageEvent):
-        """``set_mode_fn`` for /memory and /skills: persist ``<section>.write_approval``. Raw read is
-        correct for the write-back round-trip (merged defaults must not be persisted back to the
-        user's file); the cached agent is dropped so the setting takes effect next message."""
-        from gateway.run import _gateway_config_home
-        # Persist to config (default) unless --session opted out, mirroring the text /model command path
-        # above so a picked model survives across sessions like a typed one (#49066).
-        from hermes_cli.config import read_user_config_raw
-        config_path = _gateway_config_home() / "config.yaml"
-        session_key = self._session_key_for_source(event.source)
-
-        def _set_approval(enabled: bool):
-            user_config = read_user_config_raw(config_path)
-            user_config.setdefault(section, {})["write_approval"] = bool(enabled)
-            atomic_config_write(config_path, user_config)
-            # Evict any cached agent for this session so the next message rebuilds with the correct
-            # session_id end-to-end — mirrors /branch and /reset. Without this, the cached AIAgent (and its
-            # memory provider, which cached `_session_id` during initialize()) keeps writing into the wrong
-            # session's record. See #6672.
-            self._evict_cached_agent(session_key)
-        return _set_approval
 
     async def _deliver_approval_confirmation(self, event: MessageEvent, confirmation_text: str, verb: str):
         """Return *confirmation_text* for normal delivery, or push it on native-streaming adapters
@@ -444,13 +424,16 @@ class GatewaySlashCommandsMixin(
             await self._interrupt_and_clear_session(
                 key, source, interrupt_reason=_INTERRUPT_REASON_STOP,
                 invalidation_reason=invalidation_reason)
-        agent = self._running_agents.get(session_key)
+        # A turn the app started while the chat was elsewhere still runs on its own key (/resume).
+        from gateway.session_detached import chat_running_key
+        run_key = chat_running_key(self, session_key, session_entry)
+        agent = self._running_agents.get(run_key)
         if agent is _AGENT_PENDING_SENTINEL:  # force-clean the sentinel so the session is unlocked
-            await _stop(session_key, "stop_command_pending")
-            logger.info("STOP (pending) for session %s — sentinel cleared", session_key)
+            await _stop(run_key, "stop_command_pending")
+            logger.info("STOP (pending) for session %s — sentinel cleared", run_key)
             return EphemeralReply(t("gateway.stop.stopped_pending"))
         if agent:  # force-clean the session lock so a truly hung agent doesn't keep it forever
-            await _stop(session_key, "stop_command_handler")
+            await _stop(run_key, "stop_command_handler")
             return EphemeralReply(t("gateway.stop.stopped"))
 
         # No run under the caller's own key: a live turn in THIS chat may still carry a differently
@@ -920,43 +903,27 @@ class GatewaySlashCommandsMixin(
         return t("gateway.btw.started", preview=preview)
 
     async def _handle_memory_command(self, event: MessageEvent) -> str:
-        """Handle /memory — review pending memory writes + toggle the approval gate. Entries are small
-        enough to review inline, so the full flow works on every platform."""
-        from hermes_cli.write_approval_commands import handle_pending_subcommand
-        from tools import write_approval as wa
+        """Handle /memory — built-in memory store usage snapshot. Writes go through the
+        memory tool directly; entries are small enough to review in the reply itself."""
         from tools.memory_tool import load_on_disk_store
-        # Apply approved writes against a fresh on-disk store (the gateway has no long-lived agent;
-        # the store persists to the same MEMORY/USER.md and honors the configured char limits).
-        out = handle_pending_subcommand(
-            wa.MEMORY, event.get_command_args().strip().split(), memory_store=load_on_disk_store(),
-            set_mode_fn=self._write_approval_setter("memory", event),
-            # hints must name the sigil this client can deliver (Matrix/Slack reserve "/")
-            sigil=self._typed_command_prefix_for(getattr(event.source, "platform", None)))
-        return out if out is not None else t("gateway.memory.unknown_subcommand")
+        store = load_on_disk_store()
+        lines = []
+        for target, label in (("memory", "MEMORY.md"), ("user", "USER.md")):
+            try:
+                if not store.target_enabled(target):
+                    continue
+                lines.append(f"{label}: {len(store._entries_for(target))} entries, {store._usage(target)} chars")
+            except Exception:
+                continue
+        return "\n".join(lines) or "Memory stores are disabled in config."
 
     async def _handle_skills_command(self, event: MessageEvent) -> str:
-        """Handle /skills on the gateway — pending skill-write review only (hub stays CLI-only). Gated
-        by ``skills.write_approval`` but still answers when staged writes exist after the gate is off
-        (never stranded). ``diff`` is truncated for chat."""
-        from hermes_cli.write_approval_commands import handle_pending_subcommand
-        from tools import write_approval as wa
-        args = event.get_command_args().strip().split()
-        sub = args[0].lower() if args else ""
-        gate_off = not wa.write_approval_enabled(wa.SKILLS) and sub not in {"approval", "mode"}
-        if gate_off and wa.pending_count(wa.SKILLS) == 0:
-            return t("gateway.skills.gate_off")
-        out = handle_pending_subcommand(
-            wa.SKILLS, args, set_mode_fn=self._write_approval_setter("skills", event),
-            sigil=self._typed_command_prefix_for(getattr(event.source, "platform", None)))
-        if out is None:
-            return t("gateway.skills.unknown_subcommand")
-
-        # Chat bubbles can't hold a full skill diff — truncate and point at the pending JSON file
-        # (NOT `hermes skills diff <name>`, which diffs a bundled skill against its stock version).
-        if sub == "diff" and len(out) > 3000:
-            pending_id = args[1] if len(args) > 1 else "<id>"
-            out = out[:3000] + t("gateway.skills.diff_truncated", pending_id=pending_id)
-        return out
+        """Handle /skills on the gateway — installed skill count. Hub management
+        (search/install/uninstall) is a terminal surface."""
+        from agent.skill_commands import get_skill_commands
+        cmds = get_skill_commands()
+        return (f"{len(cmds)} skills available as /<skill> commands. "
+                "Skill management runs in the terminal (hermes /skills).")
 
     async def _handle_approvals_command(self, event: MessageEvent) -> str:
         """Show or persist the profile-wide dangerous-command approval mode."""

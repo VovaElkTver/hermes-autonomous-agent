@@ -41,6 +41,13 @@ def housekeeping_media_caches() -> None:
                 logger.info("%s cache cleanup: removed %d stale file(s)", name, removed)
         _housekeeping_chore(f"{cache_name} cache cleanup", _one)
 
+    def _prune_media_pins():
+        from gateway.platforms.media_pin import prune_expired
+        dropped = prune_expired()
+        if dropped:
+            logger.info("Media-pin registry prune: dropped %d stale entr(ies)", dropped)
+    _housekeeping_chore("Media-pin registry prune", _prune_media_pins)
+
 
 def maybe_post_auto_prune_prompt(runner, loop) -> None:
     """One housekeeping tick: post the prompt to every served profile that has a home channel, a

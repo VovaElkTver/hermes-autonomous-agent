@@ -56,6 +56,7 @@ from agent.tool_dispatch_helpers import (
     make_tool_result_message,
 )
 from tools.terminal_tool_lifecycle import get_active_env
+from agent import investigation_hooks
 from tools.thread_context import propagate_context_to_thread
 from tools.tool_result_storage import (
     maybe_persist_tool_result,
@@ -811,6 +812,7 @@ def _run_agent_tool_execution_middleware(
         request_result = apply_tool_request_middleware(
             function_name,
             relay_args,
+            original_args=function_args,
             skip_relay=True,
             **tool_hook_ids(agent, effective_task_id, tool_call_id),
         )
@@ -1173,6 +1175,11 @@ def _commit_tool_result(
     messages.append(tool_message)
     if not _flush_session_db_after_tool_progress(agent, messages, stage=f"tool result {function_name}"):
         return None
+    # INVESTIGATION-HOOK: H2 capture (docs/design/investigation-mechanism.md §3 H2) —
+    # a durable real tool result becomes an observation-candidate on the session's
+    # open investigation; interpretation belongs to the model's ``assess``. Fail-open.
+    investigation_hooks.capture_tool_result(
+        agent, function_name, function_args, tool_call_id, tool_message)
 
     if not blocked:
         # ``tool.completed`` projects AFTER the canonical append + flush so resume can

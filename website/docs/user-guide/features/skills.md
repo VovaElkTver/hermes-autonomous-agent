@@ -76,10 +76,10 @@ Every installed skill is automatically available as a slash command:
 
 ```bash
 # In the CLI or any messaging platform:
-/gif-search funny cats
+/excalidraw sketch the request flow for our API
 /axolotl help me fine-tune Llama 3 on my dataset
 /github-pr-workflow create a PR for the auth refactor
-/songsee analyze the frequency spread of this mix
+/youtube-content summarize https://youtu.be/dQw4w9WgXcQ
 
 # Just the skill name loads it and lets the agent ask what you need:
 /excalidraw
@@ -166,8 +166,7 @@ with a directory field, a URL field, and an open-ended text box; it composes a
 
 There is no model-tool footprint: `/learn` builds a standards-guided prompt and
 hands it to the agent as a normal turn. The agent saves the result with the
-`skill_manage` tool, so the [write-approval gate](#gating-agent-skill-writes-skillswrite_approval)
-applies if you have it on.
+`skill_manage` tool.
 
 ## Progressive Disclosure
 
@@ -609,9 +608,9 @@ The agent can create, update, and delete its own skills via the `skill_manage` t
 
 Skills and memory work together in the self-improvement loop: memory stores
 small durable facts that should always be in context, while skills store longer
-procedures that should load only when relevant. The background review can
-suggest or stage skill changes after a session, but the write-approval gate
-below lets you require human review before those changes land.
+procedures that should load only when relevant. The background review can suggest
+and add skill material after a session, but destructive changes from an unattended
+review are refused outright — overwrites and deletions need a foreground action.
 
 ### When the Agent Creates Skills
 
@@ -697,6 +696,12 @@ The review surface works in the interactive CLI and on messaging platforms
 (diff output is truncated for chat bubbles — read the full diff on the CLI or
 in the pending JSON file). Memory writes have the same gate under
 `memory.write_approval` — see [Controlling memory writes](./memory.md#controlling-memory-writes-write_approval).
+
+To stop the agent from changing one *specific* skill at all, lock it:
+`hermes curator lock <skill>` (or the lock switch in Desktop). A locked skill stays
+readable and auto-loadable, but `skill_manage`, `write_file`, `patch` and `terminal`
+all refuse to change it, in every kind of session; your own edits still work. See
+[Locking a skill](./curator.md#locking-a-skill).
 
 > The separate `skills.guard_agent_created` setting is a content scanner
 > (dangerous-pattern heuristics), not an approval gate — the two are
@@ -801,6 +806,7 @@ Default taps (browsable without any setup):
 - [anthropics/skills](https://github.com/anthropics/skills)
 - [huggingface/skills](https://github.com/huggingface/skills)
 - [NVIDIA/skills](https://github.com/NVIDIA/skills) — NVIDIA-verified skills (signed `skill.oms.sig` + governance `skill-card.md`)
+- [wandb/skills](https://github.com/wandb/skills), [qdrant/skills](https://github.com/qdrant/skills), [pinecone-io/skills](https://github.com/pinecone-io/skills) — each vendor's own skills for its product
 - [garrytan/gstack](https://github.com/garrytan/gstack)
 - [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) and [synthetic-sciences/openscience](https://github.com/synthetic-sciences/openscience) — ~480 scientific research skills (bioinformatics, chemistry, physics, ML training, scholarly tooling), grouped under one `science` category. Community trust: every install is security-scanned. Many wrap third-party tools with their own licenses (some GPL; KEGG requires a commercial license for non-academic use) — check each skill's prerequisites.
 
@@ -921,7 +927,7 @@ Important behavior:
 |-------|--------|--------|
 | `builtin` | Ships with Hermes | Always trusted |
 | `official` | `optional-skills/` in the repo | Built-in trust, no third-party warning |
-| `trusted` | Trusted registries/repos such as `openai/skills`, `anthropics/skills`, `huggingface/skills`, `NVIDIA/skills` | More permissive policy than community sources |
+| `trusted` | Trusted registries/repos such as `openai/skills`, `anthropics/skills`, `huggingface/skills`, `NVIDIA/skills`, `wandb/skills`, `qdrant/skills`, `pinecone-io/skills` | More permissive policy than community sources |
 | `community` | Everything else (`skills.sh`, well-known endpoints, custom GitHub repos, most marketplaces) | Non-dangerous findings can be overridden with `--force`; `dangerous` verdicts stay blocked |
 
 ### Update lifecycle

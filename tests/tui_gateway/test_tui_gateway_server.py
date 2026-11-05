@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from gateway.owner_identity import host_owner_subject as _owner
 from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 from hermes_cli.active_sessions import active_session_registry_snapshot
 from hermes_cli.browser_connect import ChromeDebugLaunch
@@ -3125,93 +3126,6 @@ def test_command_dispatch_and_catalog_resolve_project_skills_from_the_session_cw
     # Nothing leaks past the RPC: the thread's logical cwd is unbound again.
     assert skill_utils.find_project_root() is None
 
-
-def test_command_dispatch_reviews_staged_skill_writes(tmp_path, monkeypatch):
-    # #98330/#118812: command.dispatch is the desktop/TUI FALLBACK stage when the slash
-    # worker cannot start. With no /skills route there, a failed worker turned every
-    # review command into the routing refusal, stranding staged writes with no surface
-    # left. The review slice (pending/approve/reject/diff/approval) must answer; the
-    # CLI-hub mutations must keep refusing.
-    from tools import write_approval as wa
-
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.yaml").write_text("skills:\n  write_approval: true\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    rec = wa.stage_write(
-        wa.SKILLS,
-        {"action": "create", "name": "demo-review",
-         "content": "---\nname: demo-review\ndescription: Use when testing staged review.\n---\n\nBody.\n"},
-        summary="create demo-review", origin="background_review")
-    server._sessions["sid-wa"] = _session(profile_home=str(home))
-    try:
-        pending = server._methods["command.dispatch"](
-            "d1", {"name": "skills", "arg": "pending", "session_id": "sid-wa"})
-        assert pending["result"]["type"] == "exec", pending
-        assert rec["id"] in pending["result"]["output"]
-        assert "demo-review" in pending["result"]["output"]
-
-        diff = server._methods["command.dispatch"](
-            "d2", {"name": "skills", "arg": f"diff {rec['id']}", "session_id": "sid-wa"})
-        assert diff["result"]["type"] == "exec", diff
-        assert "demo-review" in diff["result"]["output"]
-
-        reject = server._methods["command.dispatch"](
-            "d3", {"name": "skills", "arg": f"reject {rec['id']}", "session_id": "sid-wa"})
-        assert "Rejected pending skills write" in reject["result"]["output"], reject
-        assert wa.pending_count(wa.SKILLS) == 0
-
-        # The hub mutations are NOT routed — the desktop allowlist mirrors this refusal.
-        refused = server._methods["command.dispatch"](
-            "d4", {"name": "skills", "arg": "install demo", "session_id": "sid-wa"})
-        assert refused["error"]["code"] == 4018, refused
-    finally:
-        server._sessions.pop("sid-wa", None)
-
-
-def test_command_dispatch_skills_gate_off_answers_instead_of_refusing(tmp_path, monkeypatch):
-    # Gateway parity: the gate being off must not strand writes that are already staged,
-    # and with an empty pile it points at the toggle instead of the routing refusal.
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.yaml").write_text("skills:\n  write_approval: false\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    server._sessions["sid-wa"] = _session(profile_home=str(home))
-    try:
-        res = server._methods["command.dispatch"](
-            "d", {"name": "skills", "arg": "pending", "session_id": "sid-wa"})
-        assert res["result"]["type"] == "exec", res
-        assert "write_approval" in res["result"]["output"], res
-    finally:
-        server._sessions.pop("sid-wa", None)
-
-
-def test_command_dispatch_memory_pending_reviews_staged_writes(tmp_path, monkeypatch):
-    # Same fallback for /memory (#118812): the store must resolve under the session's
-    # profile home, applying the write on approve instead of dropping it.
-    from tools import write_approval as wa
-
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.yaml").write_text("memory:\n  write_approval: true\n", encoding="utf-8")
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    wa.stage_write(wa.MEMORY, {"action": "add", "target": "memory", "content": "dispatched fact"},
-                   summary="add dispatched fact", origin="foreground")
-    server._sessions["sid-wa"] = _session(profile_home=str(home))
-    try:
-        res = server._methods["command.dispatch"](
-            "d1", {"name": "memory", "arg": "pending", "session_id": "sid-wa"})
-        assert res["result"]["type"] == "exec", res
-        assert "dispatched fact" in res["result"]["output"]
-
-        approve = server._methods["command.dispatch"](
-            "d2", {"name": "memory", "arg": "approve all", "session_id": "sid-wa"})
-        assert "Approved 1" in approve["result"]["output"], approve
-        assert wa.pending_count(wa.MEMORY) == 0
-    finally:
-        server._sessions.pop("sid-wa", None)
-
-
 def test_complete_slash_and_skills_reload_are_bound_to_the_session_cwd(tmp_path, monkeypatch):
     # The '/' popup and /reload-skills ran the registry unbound: the popup never offered a project skill
     # ``command.dispatch`` accepts, and a rescan after that dispatch reported the session's project skills
@@ -4665,18 +4579,17 @@ def _capture_make_agent_kwargs(monkeypatch) -> dict:
 
 
 @pytest.mark.parametrize("identity, user_id", [
-    ({"user_id": "oidc|abc123", "provider": "oidc"}, "oidc:oidc|abc123"),
-    ({"user_id": "alice", "provider": "basic"}, "basic:alice"),
-    ({"user_id": "alice", "provider": "oidc"}, "oidc:alice"),
+    ({"user_id": "oidc|abc123", "provider": "oidc"}, _owner()),
+    ({"user_id": "alice", "provider": "basic"}, _owner()),
+    ({"user_id": "alice", "provider": "oidc"}, _owner()),
     (None, None),
     ({"user_id": "server-internal", "provider": "server-internal"}, None),
     ({"user_id": "", "provider": "oidc"}, None),
     ({"user_id": "abc", "provider": ""}, None),
 ])
 def test_make_agent_passes_the_authenticated_dashboard_user_as_user_id(monkeypatch, identity, user_id):
-    """WSTransport.auth_identity reaches the agent as ``user_id`` prefixed with the login provider, so a
-    basic-auth ``alice`` and an OIDC ``alice`` stay two memory peers. The legacy token, stdio and the PTY
-    child's server-internal credential name no human, so the agent gets no user id for them."""
+    """A signed-in login is the machine owner (gateway.owner_identity): the agent gets native Desktop's OS subject
+    as ``user_id``. The legacy token, stdio and the PTY child's server-internal credential stay unstamped."""
     captured = _capture_make_agent_kwargs(monkeypatch)
     transport = types.SimpleNamespace(auth_identity=identity)
     monkeypatch.setitem(server._sessions, "sid-auth", {"session_key": "k", "transport": transport})
@@ -4723,11 +4636,11 @@ def test_make_agent_keeps_the_login_after_a_second_window_attaches_and_detaches(
 
     assert server._attach_session_transport(record, popout)
     server._make_agent("sid-popout", "k")
-    assert captured["user_id"] == "basic:alice"
+    assert captured["user_id"] == _owner()
 
     server._detach_session_transport(record, popout)
     server._make_agent("sid-popout", "k")
-    assert captured["user_id"] == "basic:alice"
+    assert captured["user_id"] == _owner()
 
 
 def test_build_branch_agent_carries_the_parent_login(monkeypatch, tmp_path):
@@ -4750,8 +4663,8 @@ def test_build_branch_agent_carries_the_parent_login(monkeypatch, tmp_path):
     finally:
         reset_transport(token)
 
-    assert captured["user_id"] == "basic:alice"
-    assert server._sessions["sid-branch"]["auth_user_id"] == "basic:alice"
+    assert captured["user_id"] == _owner()
+    assert server._sessions["sid-branch"]["auth_user_id"] == _owner()
 
 
 def test_deferred_session_record_stamps_the_creating_login():
@@ -4762,8 +4675,8 @@ def test_deferred_session_record_stamps_the_creating_login():
     finally:
         reset_transport(token)
 
-    assert record["auth_user_id"] == "oidc:carol"
-    assert server._session_auth_user_id(record) == "oidc:carol"
+    assert record["auth_user_id"] == _owner()
+    assert server._session_auth_user_id(record) == _owner()
 
 
 def test_compute_host_turn_frame_carries_the_session_login(monkeypatch):
@@ -4773,7 +4686,7 @@ def test_compute_host_turn_frame_carries_the_session_login(monkeypatch):
 
     frame = server._compute_host_turn_frame("rid", "sid-host", record, "hello")
 
-    assert frame["auth_user_id"] == "basic:alice"
+    assert frame["auth_user_id"] == _owner()
 
 
 def test_attaching_a_different_login_keeps_the_creator_and_warns_once(monkeypatch):
@@ -4785,7 +4698,7 @@ def test_attaching_a_different_login_keeps_the_creator_and_warns_once(monkeypatc
     assert server._attach_session_transport(record, other)
     assert server._attach_session_transport(record, other)
 
-    assert server._session_auth_user_id(record) == "basic:alice"
+    assert server._session_auth_user_id(record) == _owner()
 
 
 def test_background_agent_kwargs_preserves_full_fallback_chain(monkeypatch):
@@ -18769,43 +18682,6 @@ def test_sniff_image_ext_magic_and_filename():
     assert server._sniff_image_ext(b"\x89PNG", "photo.jpeg") == ".jpeg"
 
 
-def test_slash_worker_close_reaps_zombie_and_closes_fds():
-    """A hung worker is SIGKILLed, the zombie reaped, all pipes closed — once."""
-    calls = {k: 0 for k in ("terminate", "kill", "wait", "stdin", "stdout", "stderr")}
-
-    class FakeStream:
-        def __init__(self, name):
-            self.name = name
-
-        def close(self):
-            calls[self.name] += 1
-
-    class FakeProc:
-        stdin, stdout, stderr = (FakeStream(n) for n in ("stdin", "stdout", "stderr"))
-
-        def poll(self):
-            return None  # always alive -> forces terminate then kill
-
-        def terminate(self):
-            calls["terminate"] += 1
-
-        def kill(self):
-            calls["kill"] += 1
-
-        def wait(self, timeout=None):
-            calls["wait"] += 1
-            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
-
-    worker = object.__new__(server._SlashWorker)
-    worker.proc = FakeProc()
-
-    worker.close()
-    worker.close()  # idempotent
-
-    assert calls["terminate"] == 1
-    assert calls["kill"] == 1
-    assert calls["wait"] >= 2  # reaped after both terminate and kill
-    assert calls["stdin"] == calls["stdout"] == calls["stderr"] == 1
 
 
 def test_close_session_by_id_is_idempotent_and_full(monkeypatch):

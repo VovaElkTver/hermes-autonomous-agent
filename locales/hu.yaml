@@ -66,6 +66,9 @@ gateway:
     usage_switch_model: "`/model <name>` — modell váltása"
     usage_switch_provider: "`/model <name> --provider <slug>` — szolgáltató váltása"
     usage_persist: "`/model <name> --global` — megőrzés"
+    usage_reset: "`/model reset` — a munkamenet felülbírálásának törlése"
+    reset_done: "A munkamenet modell-felülbírálása törölve — mostantól a `{model}` (csatorna/globális alapértelmezés) van használatban. A beszélgetés előzményei megmaradnak."
+    reset_none: "Nincs aktív modell-felülbírálás ebben a munkamenetben — már a `{model}` (csatorna/globális alapértelmezés) van használatban."
     err_skew: "Ez az átjáró a(z) {boot_rev} revízió kódját futtatja, de a lemezen már a(z) {disk_rev} van kicsekkolva. A modellváltás elavult modul miatti összeomlást kockáztatna — indítsd újra az átjárót az új kód betöltéséhez: hermes gateway restart"
     err_switch_failed: "A(z) {model} modellre váltás nem sikerült ({error}); marad: {current}."
     err_config_not_updated: "a config.yaml nem frissült ({error})"
@@ -714,9 +717,6 @@ gateway:
     disabled_for_platform: "A(z) **{name}** skill ki van kapcsolva ezen a platformon: {platform}.\nBekapcsolás: `hermes skills config`"
     stacked_disabled: "Az összefűzött hívásban szereplő **{names}** skill(ek) ki vannak kapcsolva ezen a platformon: {platform}.\nBekapcsolás: `hermes skills config`"
     stacked_load_failed: "Nem sikerült betölteni az összefűzött skilleket a /{command} parancshoz."
-    gate_off: "A skillírások jóváhagyása ki van kapcsolva (skills.write_approval). Kapcsold be a /skills approval on paranccsal, majd nézd át itt a várakozó írásokat a /skills pending paranccsal."
-    unknown_subcommand: "Ismeretlen /skills alparancs ezen a platformon. Használható: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (A keresés/telepítés csak CLI-ből érhető el.)"
-    diff_truncated: "\n… (levágva — a teljes diff itt: ~/.hermes/pending/skills/{pending_id}.json)"
   busy:
     action_restarting: "újraindul"
     action_shutting_down: "leáll"
@@ -911,7 +911,6 @@ gateway:
     item: "• `/{slug}` — {desc} _({count} skill)_"
     invoke_hint: "Egy csomag összes skilljét a `/<slug>` paranccsal töltheted be."
   memory:
-    unknown_subcommand: "Ismeretlen /memory alparancs. Használható: pending, approve <id>, reject <id>, approval <on|off>."
   approvals:
     admin_only: "A tartós jóváhagyási módot csak az átjáró adminjai módosíthatják."
   heartbeat:
@@ -1022,6 +1021,8 @@ platform:
       confirm_title: "Megerősítés"
       already_resolved: "Ez a jóváhagyás már eldőlt~"
       expired: "⌛ A jóváhagyás lejárt — a parancs nem futott le (időtúllépés, vagy máshol már eldőlt)"
+      no_longer_pending: "⌛ Ez a jóváhagyás már nincs függőben (lejárt, vagy máshol válaszoltak rá)"
+      click_failed: "⚠️ Nem sikerült rögzíteni a választásodat. Kattints újra, vagy válaszolj a /approve vagy /deny paranccsal."
       by_user: "{label} — {user}"
       resolved_once: "Egyszer jóváhagyva"
       resolved_session: "Jóváhagyva a munkamenetre"
@@ -2024,6 +2025,8 @@ cli:
     usage_switch_reasoning: "váltás és gondolkodási szint beállítása"
     usage_switch_provider: "szolgáltató váltása"
     usage_refresh: "élő modellisták újratöltése"
+    reset_none: "Már a beállított alapértelmezés ({model}) van használatban — nincs mit visszaállítani."
+    reset_no_default: "Nincs model.default a config.yaml-ban — nincs mire visszaállni."
     choice_switch_anyway: "Váltás mindenképp"
     desc_switch_anyway: "Ennek a modellnek a használata a jelenlegi Hermes-munkamenetben."
     choice_cancel: "Mégse"
@@ -2977,7 +2980,6 @@ cli:
     kanban:
       failed: "(._.) kanban hiba: {error}"
     memory:
-      unknown_subcommand: "Ismeretlen /memory alparancs. Használható: pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Skill tanulása a leírásod alapján..."
       from_conversation: "⚡ Skill tanulása ebből a beszélgetésből..."

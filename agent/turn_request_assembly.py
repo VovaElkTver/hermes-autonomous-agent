@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from agent.message_sanitization import _sanitize_messages_surrogates
+from agent import investigation_hooks
 from agent.usage_anchor import anchored_context_tokens
 from agent.prompt_caching import build_prompt_cache_plan, effective_cache_ttl
 from agent.turn_context import build_api_messages
@@ -185,6 +186,16 @@ def assemble_api_request(
         api_messages, drop_codex_reasoning_items=_cross_protocol,
         drop_nudge_marker=_CODEX_INCOMPLETE_NUDGE if _cross_protocol else None,
     )
+
+    # INVESTIGATION-HOOK: H1 render (docs/design/investigation-mechanism.md §3 H1) —
+    # the active investigation's service record goes at the tail of the API COPY
+    # only: durable history never carries the store's own echo, and with no open
+    # investigation nothing is appended (byte-identical prefix preserved). Placed
+    # after user-merge and before the normalization/surrogate passes so the note
+    # rides the same hygiene as every other outbound row.
+    _inv_note = investigation_hooks.render_note(agent)
+    if _inv_note:
+        api_messages.append({"role": "user", "content": _inv_note})
 
     # Normalize whitespace and tool-call JSON for bit-perfect prefixes across turns
     # (KV-cache reuse on local servers, better cloud cache hits); API copy only.

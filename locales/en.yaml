@@ -69,6 +69,9 @@ gateway:
     usage_switch_model: "`/model <name>` — switch model"
     usage_switch_provider: "`/model <name> --provider <slug>` — switch provider"
     usage_persist: "`/model <name> --global` — persist"
+    usage_reset: "`/model reset` — clear this session's override"
+    reset_done: "Session model override cleared — now using `{model}` (the channel/global default). Conversation history kept."
+    reset_none: "No session model override is active — already using `{model}` (the channel/global default)."
     err_skew: "This gateway is running code from {boot_rev} but the checkout on disk is now {disk_rev}. Switching models would risk a stale-module crash — restart the gateway to load the new code: hermes gateway restart"
     err_switch_failed: "Model switch to {model} failed ({error}); staying on {current}."
     err_config_not_updated: "config.yaml not updated ({error})"
@@ -134,6 +137,21 @@ gateway:
     branched_thread_one: "⑂ Branched to **{title}** in a new thread ({count} message copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     branched_thread_many: "⑂ Branched to **{title}** in a new thread ({count} messages copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     thread_fallback: "No thread could be created here, so the branch replaced this chat's session."
+    bound_locked: "⛔ {action} cannot switch a bound (/forkb) branch thread off its stream. While branch **{name}** is open this thread stays on it; close it with `/return` (into the parent) or `/leave` (step out, branch stays open). For a side branch: `/forkb` from this thread."
+  fork:
+    created: "⑂ Forked to **{title}** (lazy branch `{branch}`, shares history with `{parent}`)\nFork session: `{new}`\nStep back with `/return` (or `/leave` to keep it open); from the parent: `/join {title}`; full copy: `/branch`."
+    no_conversation: "Nothing to fork — the parent has no messages yet."
+    create_failed: "Failed to create fork: {error}"
+  join:
+    none_active: "No active forked branches on this session. Start one with /fork."
+    not_found: "No such active branch: {arg}. Run /join to list branches by name."
+    ambiguous: "Several active branches, name one: {branches}"
+    append_unavailable: "--append is only possible while the parent tail after the branch point is uncompressed; use the default work-note join for {branch}."
+    joined: "✓ Joined branch {branch} ({strategy})."
+    db_unavailable: "Session database not available."
+  leave:
+    not_in_branch: "This chat is not standing inside a forked branch — nothing to step out of."
+    left: "↩ Left branch {branch} (still open — resume it with /resume or close it from the parent with /join)."
   commands:
     usage: "Usage: `/commands [page]`"
     skill_header: "⚡ **Skill Commands**:"
@@ -713,9 +731,6 @@ gateway:
     disabled_for_platform: "The **{name}** skill is disabled for {platform}.\nEnable it with: `hermes skills config`"
     stacked_disabled: "The **{names}** skill(s) in this stacked invocation are disabled for {platform}.\nEnable them with: `hermes skills config`"
     stacked_load_failed: "Failed to load stacked skills for /{command}."
-    gate_off: "Skill write approval is off (skills.write_approval). Enable it with /skills approval on, then review staged writes here with /skills pending."
-    unknown_subcommand: "Unknown /skills subcommand on this platform. Use: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (Search/install are CLI-only.)"
-    diff_truncated: "\n… (truncated — full diff in ~/.hermes/pending/skills/{pending_id}.json)"
   busy:
     action_restarting: "restarting"
     action_shutting_down: "shutting down"
@@ -929,7 +944,6 @@ gateway:
     invoke_hint: "Invoke a bundle with `/<slug>` to load all its skills."
 
   memory:
-    unknown_subcommand: "Unknown /memory subcommand. Use: pending, approve <id>, reject <id>, approval <on|off>."
 
   approvals:
     admin_only: "Only gateway admins can change the persistent approval mode."
@@ -1051,6 +1065,8 @@ platform:
       confirm_title: "Confirm"
       already_resolved: "This approval has already been resolved~"
       expired: "⌛ Approval expired — command was not run (already timed out or resolved elsewhere)"
+      no_longer_pending: "⌛ This approval is no longer pending (it timed out or was answered elsewhere)"
+      click_failed: "⚠️ Couldn't record your choice. Click again, or answer with /approve or /deny."
       by_user: "{label} by {user}"
       resolved_once: "Approved once"
       resolved_session: "Approved for session"
@@ -2100,6 +2116,8 @@ cli:
     usage_switch_reasoning: "switch and set reasoning effort"
     usage_switch_provider: "switch provider"
     usage_refresh: "re-fetch live model lists"
+    reset_none: "Already on the configured default ({model}) — nothing to reset."
+    reset_no_default: "No model.default in config.yaml — nothing to reset to."
     choice_switch_anyway: "Switch anyway"
     desc_switch_anyway: "Use this model for the current Hermes session."
     choice_cancel: "Cancel"
@@ -3060,7 +3078,6 @@ cli:
     kanban:
       failed: "(._.) kanban error: {error}"
     memory:
-      unknown_subcommand: "Unknown /memory subcommand. Use: pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Learning a skill from what you described..."
       from_conversation: "⚡ Learning a skill from this conversation..."

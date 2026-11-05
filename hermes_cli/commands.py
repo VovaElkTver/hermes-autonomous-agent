@@ -111,8 +111,12 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="<platform>", cli_only=True, argument_mode="options"),
     CommandDef("branch", "Branch the current session (new thread on Discord/Telegram/Slack/Matrix; --here stays here)",
                "Session", args_hint="[--here] [name]"),
-    CommandDef("fork", "Fork the conversation into a lazy branch sharing the parent history (join with /join)",
+    CommandDef("fork", "Fork the conversation into a lazy branch sharing the parent history — stays in this room (thread-bound variant: /forkb; merge back with /join, step out with /return or /leave)",
                "Session", aliases=("branch-lazy",), args_hint="[name]"),
+    CommandDef("forkb", "Fork bound to its own chat thread: the branch lives in a dedicated thread (own-thread isolation); /fork stays in the room",
+               "Session", args_hint="[name]"),
+    CommandDef("return", "Close the fork branch you are standing in: merge it into its parent (work-note by default) and return the console to the parent",
+               "Session", args_hint="[--discard|--append]", busy_policy="dispatch"),
     CommandDef("join", "Join a forked branch back into this session (default: work-note summary)",
                "Session", args_hint="[branch-id] [--discard] [--append]", busy_policy="dispatch"),
     CommandDef("worktree", "Show, list, create, or prune isolated git worktrees", "Session",
@@ -157,8 +161,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                busy_policy="dispatch", busy_handler="queue"),
     CommandDef("steer", "Inject a message after the next tool call without interrupting", "Session",
                aliases=("s",), args_hint="<prompt>", busy_policy="dispatch", busy_handler="steer"),
-    CommandDef("for", "Itemize a directory/glob into controller-queue steps (one agent turn per item, pump-driven)", "Session",
-               gateway_only=True, args_hint="<path|glob> [instruction...] [--limit N] [--go]",
+    CommandDef("for", "Itemize a set (dir/glob/{a,b,c}/@file) into controller-queue steps (one agent turn per item, pump-driven)", "Session",
+               gateway_only=True, args_hint="<A> in <set> [instruction... [--A...]] | <set> [instruction...] [--limit N] [--go]",
                busy_policy="dispatch"),
     CommandDef("goal", "Set a standing goal Hermes works on across turns until achieved", "Session",
                args_hint="[text | -- <text> | draft <text> | show | gate add <cmd> | pause | resume | clear | status | wait <pid> | unwait]",
@@ -201,7 +205,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("config", "Show current configuration", "Configuration",
                cli_only=True),
     CommandDef("model", "Switch model (session-scoped; --global to persist)", "Configuration",
-               args_hint="[model] [--provider name] [--reasoning level] [--global|--session] [--refresh]",
+               args_hint="[model|reset] [--provider name] [--reasoning level] [--global|--session] [--refresh]",
                busy_policy="reject", busy_handler="model", desktop="hidden"),
     CommandDef("codex-runtime", "Toggle codex app-server runtime for OpenAI/Codex models",
                "Configuration", aliases=("codex_runtime",), args_hint="[auto|codex_app_server]",
@@ -264,20 +268,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
     CommandDef("toolsets", "List available toolsets", "Tools & Skills",
                cli_only=True, desktop="terminal"),
     CommandDef("skills", "Search, install, inspect, or manage skills",
-               "Tools & Skills", cli_only=True,
-               gateway_config_gate="skills.write_approval",
-               subcommands=("search", "browse", "inspect", "install", "audit",
-                            "pending", "approve", "reject", "diff", "approval"),
-               # Desktop exposes only the write-approval review slice — the
-               # same surface the gateway handler offers.  The hub mutations
-               # (search/browse/inspect/install/audit) run a full interactive
-               # CLI hub that must not be reachable from a desktop exec
-               # (#98330 review).
-               desktop_subcommands=("pending", "approve", "reject", "diff",
-                                    "approval")),
-    CommandDef("memory", "Review pending memory writes / toggle the approval gate",
-               "Tools & Skills", args_hint="[pending|approve|reject|approval] [id|on|off]",
-               subcommands=("pending", "approve", "reject", "approval")),
+               "Tools & Skills", cli_only=True, desktop="terminal"),
+    CommandDef("memory", "Show built-in memory store usage", "Tools & Skills"),
     CommandDef("bundles", "List skill bundles (aliases /<name> for multiple skills)",
                "Tools & Skills", execute="bundles"),
     CommandDef("pet", "Toggle or adopt a petdex mascot (/pet, /pet list, /pet <slug>)", "Tools & Skills",
@@ -360,7 +352,9 @@ COMMAND_REGISTRY: list[CommandDef] = [
 
     # Exit
     CommandDef("quit", "Exit the CLI (use --delete to also remove session history)", "Exit",
-               cli_only=True, aliases=("exit",), args_hint="[--delete]", desktop="terminal")]
+               cli_only=True, args_hint="[--delete]", desktop="terminal"),
+    CommandDef("leave", "Leave the fork branch you are standing in without closing it (console returns to the branch's parent)",
+               "Session", busy_policy="dispatch")]
 
 
 # Distinguishes ``mixed`` (subcommands plus free-text) from ``options``; no subcommands => ``text``.

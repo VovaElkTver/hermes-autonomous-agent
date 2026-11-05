@@ -1,9 +1,10 @@
 """Text-response stop gates for the conversation turn loop.
 
-When the model stops with a text answer, four gates may instead append the answer as an
+When the model stops with a text answer, five gates may instead append the answer as an
 interim row plus a user-role nudge and continue the turn: late language-server verdicts on this
 turn's edits (a durable row, see ``_late_lsp_verdicts``), verify-on-stop (#65919),
-the ``pre_verify`` plugin hook after code edits, and the kanban worker terminal-tool guard.
+the ``pre_verify`` plugin hook after code edits, the kanban worker terminal-tool guard,
+and the investigation H4 unassessed-observations nudge (one per turn).
 Each keeps the candidate answer as a budget-exhaustion fallback
 (``pending_verification_response``) and clears ``final_response`` so the finalizer can tell
 this gate from error exits (#61631). Nothing here imports ``agent.conversation_loop`` at
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agent.message_metadata import append_message
+from agent import investigation_hooks
 
 logger = logging.getLogger("agent.conversation_loop")
 
@@ -216,6 +218,23 @@ def apply_stop_gates(
             "(kanban_complete/kanban_request_review/kanban_block) — nudging to finish"
         )
         return verdict
+    # INVESTIGATION-HOOK: H4 stop gate (docs/design/investigation-mechanism.md §3 H4) —
+    # one nudge per turn while captured results are still unassessed: the agent
+    # decides what they mean, the core only refuses silent forgetting. If the
+    # turn ends again anyway, nothing is lost — the investigation stays open
+    # with its observations (the render shows them next turn).
+    if getattr(agent, "_investigation_stop_nudges", 0) < 1:
+        _inv_nudge = investigation_hooks.stop_nudge(agent)
+        if _inv_nudge:
+            agent._investigation_stop_nudges = 1
+            final_msg["finish_reason"] = "investigation_unassessed"
+            _append_interim_answer(
+                agent, final_msg, messages, conversation_history,
+                "investigation stop gate interim flush failed"
+            )
+            verdict = _continue(_inv_nudge, "_investigation_stop_synthetic")
+            logger.debug("investigation stop nudge issued (unassessed observations)")
+            return verdict
     return StopGateVerdict(
         continue_turn=False, final_response=final_response,
         pending_verification_response=pending_verification_response,

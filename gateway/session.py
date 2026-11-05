@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any
 
 from .config import Platform, GatewayConfig, HomeChannel
 from .whatsapp_identity import canonical_whatsapp_identifier
+from gateway.session_detached import detached_route_of
 from gateway.session_identity import transport_profile_of
 from gateway.session_persistence import SessionPersistenceMixin, _DB_UNPINNED
 from gateway.session_prompt_pin import SessionPromptPinMixin, sanitize_prompt_pin
@@ -100,6 +101,10 @@ class SessionSource:
     # over the authenticated relay WebSocket. ``platform`` is the UNDERLYING platform, not
     # ``relay``, so authz must key upstream trust off THIS flag.
     delivered_via_upstream_relay: bool = False
+    # Wire-INVISIBLE: the key of a conversation its chat moved past, still run from the apps
+    # (gateway/session_detached.py). It replaces the chat's key, so nothing keyed by route reaches
+    # the chat's current conversation, and delivery goes nowhere.
+    detached_route: Optional[str] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         # Mirror scope_id/guild_id onto each other (scope_id wins) so readers of EITHER agree.
@@ -448,6 +453,17 @@ def build_session_context_prompt(context: SessionContext, *, redact_pii: bool = 
         uid = _hash_sender_id(src.user_id) if redact_pii else src.user_id
         lines.append(f"**User ID:** {_format_untrusted_prompt_value(uid)}")
 
+    # Session birth as an O(1) fact. Only STABLE fields belong here (the rendered block is part
+    # of the agent-cache signature): created_at is constant per session generation, so the line
+    # never busts prompt caching. An agent that must reconstruct "did /new already happen" from
+    # narrative history gets it wrong (2026-11-03 incident); read it from this stamp instead.
+    if context.created_at:
+        lines += [
+            "",
+            f"**Session started:** {_iso(context.created_at)}. Everything earlier in history "
+            "belongs to previous session generations.",
+        ]
+
     lines.extend(_PLATFORM_NOTES.get(src.platform, lambda ctx: [])(context))
     platforms_list = ["local (files on this machine)"] + [
         f"{p.value}: Connected ✓" for p in context.connected_platforms if p != Platform.LOCAL
@@ -708,6 +724,8 @@ def build_session_key(
     session per platform. Groups add the participant id only when ``group_sessions_per_user`` and
     not in a thread (threads are shared unless ``thread_sessions_per_user``).
     """
+    if detached := detached_route_of(source):
+        return detached
     is_dm = source.chat_type == "dm"
     chat_id = source.chat_id
     if is_dm and source.platform == Platform.WHATSAPP:
@@ -864,6 +882,14 @@ class SessionStore(
         # session_id -> owning key for ids proven but not yet published in ``_entries`` (a
         # compression child row is written before its reroute is published).
         self._session_owner_hints: dict[str, str] = {}
+        # session_id -> origin, registered the first time a route names the session (stage001 п.3:
+        # origin is NON-EVICTABLE). The routing index answers "where does this key point NOW"; the
+        # ledger answers the different question the /resume guard asks — "where does this session
+        # COME FROM" — and survives switch_session/fork/resume repoints and restarts (state.db meta).
+        self._origin_ledger: dict[str, SessionSource] = {}
+        # Called with (key, session id, origin) once a route names another conversation; the owner
+        # wires it so a conversation its chat moved past detaches at once (gateway/session_detached.py).
+        self.route_named = None
         from gateway.session_db_recovery import RecoverableHandleCache
 
         self._db_handle_cache = RecoverableHandleCache(
@@ -921,6 +947,9 @@ class SessionStore(
         """Single-flight session lookup/create per routing key: overlapping calls for one key (even
         concurrent ``force_new``) share the owner's result so only one transition and SQLite row is
         created. ``touch_activity=False`` (internal events) preserves the user-activity clock."""
+        if detached_route_of(source):
+            from gateway.session_detached import detached_entry
+            return detached_entry(self, source)
         session_key = self._generate_session_key(source)
         inflight_lock = self._lazy("_inflight_lock", threading.Lock)
         self._lazy("_inflight_sessions", dict)
@@ -981,7 +1010,7 @@ class SessionStore(
                 self._route_reset_reason(observed),
             )
         # Phase 2 (lock): apply the decisions to _entries.
-        decision = self._apply_route_checks(session_key, checks, force_new, touch_activity, now)
+        decision = self._apply_route_checks(session_key, checks, force_new, touch_activity, now, source)
 
         # Phase 3 (no lock): recovery + create + save + DB ops.
         if decision.needs_recover and decision.prev_session_id is None:
@@ -1006,11 +1035,13 @@ class SessionStore(
         finally:
             if create_kwargs:
                 self._row_settled(create_kwargs["session_id"])
+        if observed is None or decision.entry.session_id != observed.session_id:
+            self._announce_route(session_key, decision.entry)
         return decision.entry
 
     def _apply_route_checks(
         self, session_key: str, checks: Optional[_RouteChecks], force_new: bool,
-        touch_activity: bool, now: datetime,
+        touch_activity: bool, now: datetime, source: SessionSource,
     ) -> _RouteDecision:
         """Apply stale/reset decisions to ``_entries`` under ``_lock``. If another thread replaced
         the entry during the lock-free window the snapshot no longer applies: route is healthy."""
@@ -1050,9 +1081,19 @@ class SessionStore(
                 # Internal/system events preserve the user-activity clock.
                 if touch_activity:
                     entry.updated_at = now
+                # Creation is the only other writer of origin, so an entry persisted without one
+                # (#146696) stays unroutable for completions, recovery and lane naming until an
+                # inbound turn on this very route fills it.
+                if touch_activity and entry.origin is None:
+                    entry.origin = source
                 decision.entry = entry
                 decision.needs_save = touch_activity or healed
                 decision.metadata_only_save = touch_activity and not healed
+                # Only creation wrote the receiving bot, and /reset, /new and switches copy it, so a
+                # route saved before the column existed stays NULL and its completions stay pending
+                # after a restart. Its next inbound turn records the bot that verifiably received it.
+                if touch_activity and entry.transport_profile is None:
+                    entry.transport_profile = transport_profile_of(source)
         return decision
 
     def _route_recover(
@@ -1065,6 +1106,9 @@ class SessionStore(
         self._reopen_session_row(session_key, recovered.session_id)
         with self._lock:
             decision.entry = self._entries.setdefault(session_key, recovered)
+        # A recovered route was born before this process (or before the ledger existed): adopt its
+        # origin so the non-evictable answer does not depend on having watched the creation.
+        self._record_session_origin(recovered.session_id, recovered.origin)
         decision.needs_save = True
 
     def _route_create(
@@ -1091,6 +1135,8 @@ class SessionStore(
             if current is None or (force_new and current is observed):
                 self._entries[session_key] = current = candidate
                 self._rows_pending.add(session_id)  # the caller settles it once create_kwargs land
+                # stage001 п.3: origin is registered AT CREATION and never evicted afterwards.
+                self._record_session_origin(session_id, source)
         decision.entry = current
         decision.needs_save = True
         return create_kwargs if current is candidate else None
@@ -1193,6 +1239,7 @@ class SessionStore(
             )
         finally:
             self._row_settled(session_id)
+        self._announce_route(session_key, new_entry)
         return new_entry
 
     def _replace_route_locked(self, session_key, old_entry, session_id, now, **fields) -> SessionEntry:
@@ -1203,6 +1250,9 @@ class SessionStore(
             transport_profile=old_entry.transport_profile, **fields,
         )
         self._entries[session_key] = new_entry
+        # stage001 п.3: a repoint (switch_session/resume/fork/auto-reset) registers the TARGET's
+        # origin when none was ever proven; it can never overwrite a proven one (first wins).
+        self._record_session_origin(session_id, new_entry.origin)
         self._save()
         self._rows_pending.add(session_id)  # after the save: a raising save leaves nothing pending
         return new_entry
@@ -1338,6 +1388,7 @@ class SessionStore(
                 )
         finally:
             self._row_settled(target_session_id)
+        self._announce_route(session_key, new_entry)
         return new_entry
 
     def list_sessions(self, active_minutes: Optional[int] = None) -> list[SessionEntry]:
@@ -1351,6 +1402,59 @@ class SessionStore(
         # Legacy local timestamps and canonical UTC timestamps can coexist after recovery.
         entries.sort(key=lambda e: e.updated_at.timestamp(), reverse=True)
         return entries
+
+    # ------------------------------------------------ origin ledger (stage001 п.3)
+
+    _ORIGIN_META_PREFIX = "gateway_session_origin:"
+
+    def _record_session_origin(self, session_id: str, origin: Optional["SessionSource"]) -> None:
+        """Register ``session_id`` → *origin*; the FIRST registration wins and is never evicted
+        (switch_session/fork/resume repoints, stale-prune pops, profile purges). Safe to call with
+        ``_lock`` held: ``dict.setdefault`` is atomic and the meta write mirrors the ``_save``
+        those lock-held paths already perform. Persisted as routing-store meta when a state.db
+        handle is available, so the answer survives restarts; JSONL-fallback stores keep it
+        in-process only."""
+        if not session_id or not isinstance(origin, SessionSource):
+            return
+        if self._lazy("_origin_ledger", dict).setdefault(session_id, origin) is not origin:
+            return  # an earlier turn already proved the provenance: a repoint must not forge it
+        try:
+            setter = self._routing_db_method("set_meta")
+            if setter is not None:
+                setter(self._ORIGIN_META_PREFIX + session_id, json.dumps(origin.to_dict()))
+        except Exception:
+            logger.debug("gateway.session: origin-ledger write failed for %s", session_id,
+                         exc_info=True)
+
+    def lookup_session_origin(self, session_id: str) -> Optional["SessionSource"]:
+        """Where *session_id* was born — as registered at creation, NOT evicted by
+        switch_session/fork/resume rotation (stage001 п.3). None = the session was never routed
+        by this routing layer, so no origin is proven (callers fail closed)."""
+        if not session_id:
+            return None
+        ledger = self._lazy("_origin_ledger", dict)
+        origin = ledger.get(session_id)
+        if isinstance(origin, SessionSource):
+            return origin
+        try:
+            getter = self._routing_db_method("get_meta")
+            if getter is None:
+                return None
+            raw = getter(self._ORIGIN_META_PREFIX + session_id)
+        except Exception:
+            logger.debug("gateway.session: origin-ledger read failed for %s", session_id,
+                         exc_info=True)
+            return None
+        if not isinstance(raw, str) or not raw:
+            return None
+        try:
+            parsed = SessionSource.from_dict(json.loads(raw))
+        except Exception:
+            return None
+        if isinstance(parsed, SessionSource):
+            ledger.setdefault(session_id, parsed)
+            return parsed
+        return None
 
     def lookup_by_session_id(self, session_id: str) -> Optional[SessionEntry]:
         """Return the active session entry for a persisted session ID, if any."""

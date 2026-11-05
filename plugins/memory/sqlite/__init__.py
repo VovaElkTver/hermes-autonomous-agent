@@ -461,11 +461,17 @@ class SqliteMemoryProvider(MemoryProvider):
 
     def _prefetch_worker(self, query: str) -> None:
         try:
+            if self._conn is None:  # provider shut down between spawn and run
+                return
             rows = self._search(query, int(self._cfg("recall_top_k", 5)))
             if rows:
                 lines = "\n".join(f"- ({r['kind']}) {r['text']}" for r in rows)
                 self._prefetch_cache[query] = "## Recalled from local memory\n" + lines
                 self._last_recall_count = len(rows)
+        except AssertionError:
+            # _search asserts _conn under the lock; a concurrent shutdown()
+            # nulling it is benign for best-effort recall (31.10 gateway-crash)
+            logger.debug("sqlite prefetch skipped: provider closed")
         except (RuntimeError, OSError, KeyError, sqlite3.Error) as e:
             logger.debug("sqlite prefetch failed: %s", e)
 

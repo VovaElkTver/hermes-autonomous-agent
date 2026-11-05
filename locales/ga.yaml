@@ -66,6 +66,9 @@ gateway:
     usage_switch_model: "`/model <name>` — athraigh an tsamhail"
     usage_switch_provider: "`/model <name> --provider <slug>` — athraigh an soláthraí"
     usage_persist: "`/model <name> --global` — coinnigh"
+    usage_reset: "`/model reset` — glan sárú an tseisiúin seo"
+    reset_done: "Glanadh sárú mhúnla an tseisiúin — `{model}` (réamhshocrú an chainéil/domhanda) in úsáid anois. Coinníodh stair an chomhrá."
+    reset_none: "Níl aon sárú múnla gníomhach sa seisiún seo — tá `{model}` (réamhshocrú an chainéil/domhanda) in úsáid cheana."
     err_skew: "Tá an gateway seo ag rith cód ó {boot_rev} ach is {disk_rev} atá sa seiceáil amach ar an diosca anois. D'fhéadfadh athrú samhla tuairt modúil sheanchaite a tharraingt — atosaigh an gateway chun an cód nua a lódáil: hermes gateway restart"
     err_switch_failed: "Theip ar athrú go dtí an tsamhail {model} ({error}); ag fanacht ar {current}."
     err_config_not_updated: "níor nuashonraíodh config.yaml ({error})"
@@ -704,9 +707,6 @@ gateway:
     disabled_for_platform: "Tá an scil **{name}** díchumasaithe do {platform}.\nCumasaigh í le: `hermes skills config`"
     stacked_disabled: "Tá an scil/na scileanna **{names}** sa ghlao cruachta seo díchumasaithe do {platform}.\nCumasaigh iad le: `hermes skills config`"
     stacked_load_failed: "Theip ar scileanna cruachta a lódáil do /{command}."
-    gate_off: "Tá cead scríofa scileanna as (skills.write_approval). Cumasaigh é le /skills approval on, ansin déan athbhreithniú ar scríobhanna stáitsithe anseo le /skills pending."
-    unknown_subcommand: "Fo-ordú /skills anaithnid ar an ardán seo. Úsáid: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (Tá cuardach/suiteáil ar fáil ón CLI amháin.)"
-    diff_truncated: "\n… (giorraithe — an diff iomlán i ~/.hermes/pending/skills/{pending_id}.json)"
   busy:
     action_restarting: "ag atosú"
     action_shutting_down: "ag múchadh"
@@ -897,7 +897,6 @@ gateway:
     item: "• `/{slug}` — {desc} _({count} scil)_"
     invoke_hint: "Glaoigh ar chuach le `/<slug>` chun a scileanna uile a lódáil."
   memory:
-    unknown_subcommand: "Fo-ordú /memory anaithnid. Úsáid: pending, approve <id>, reject <id>, approval <on|off>."
   approvals:
     admin_only: "Ní féidir ach le riarthóirí gateway an mód ceadaithe buan a athrú."
   heartbeat:
@@ -1005,6 +1004,8 @@ platform:
       confirm_title: "Dearbhaigh"
       already_resolved: "Tá an cead seo réitithe cheana féin~"
       expired: "⌛ Tá an cead imithe in éag — níor ritheadh an t-ordú (chuaigh sé thar am cheana nó réitíodh é in áit eile)"
+      no_longer_pending: "⌛ Níl an cead seo ar feitheamh a thuilleadh (chuaigh sé in éag nó freagraíodh in áit eile é)"
+      click_failed: "⚠️ Níorbh fhéidir do rogha a thaifeadadh. Cliceáil arís, nó freagair le /approve nó /deny."
       by_user: "{label} ag {user}"
       resolved_once: "Ceadaithe uair amháin"
       resolved_session: "Ceadaithe don seisiún"
@@ -2007,6 +2008,8 @@ cli:
     usage_switch_reasoning: "athraigh agus socraigh iarracht réasúnaíochta"
     usage_switch_provider: "athraigh an soláthraí"
     usage_refresh: "faigh liostaí beo na samhlacha arís"
+    reset_none: "Ar an réamhshocrú cumraithe cheana ({model}) — níl aon rud le hathshocrú."
+    reset_no_default: "Níl model.default in config.yaml — níl aon rud le filleadh air."
     choice_switch_anyway: "Athraigh ar aon nós"
     desc_switch_anyway: "Úsáid an tsamhail seo don seisiún Hermes reatha."
     choice_cancel: "Cealaigh"
@@ -2960,7 +2963,6 @@ cli:
     kanban:
       failed: "(._.) earráid kanban: {error}"
     memory:
-      unknown_subcommand: "Fo-ordú /memory anaithnid. Úsáid: pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Ag foghlaim scile ón gcur síos a thug tú..."
       from_conversation: "⚡ Ag foghlaim scile ón gcomhrá seo..."

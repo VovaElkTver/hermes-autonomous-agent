@@ -66,6 +66,9 @@ gateway:
     usage_switch_model: "`/model <name>` — changer de modèle"
     usage_switch_provider: "`/model <name> --provider <slug>` — changer de fournisseur"
     usage_persist: "`/model <name> --global` — conserver"
+    usage_reset: "`/model reset` — effacer l'override de cette session"
+    reset_done: "Override de modèle de session effacé — utilisation de `{model}` (valeur par défaut du canal/globale). Historique de conversation conservé."
+    reset_none: "Aucun override de modèle actif pour cette session — `{model}` (valeur par défaut du canal/globale) est déjà utilisé."
     err_skew: "Ce gateway exécute le code de {boot_rev}, mais le checkout sur disque est maintenant à {disk_rev}. Changer de modèle risquerait un plantage dû à des modules obsolètes — redémarrez le gateway pour charger le nouveau code : hermes gateway restart"
     err_switch_failed: "Le passage au modèle {model} a échoué ({error}) ; le modèle {current} est conservé."
     err_config_not_updated: "config.yaml non mis à jour ({error})"
@@ -823,9 +826,6 @@ gateway:
       La ou les skills **{names}** de cet appel empilé sont désactivées pour {platform}.
       Activez-les avec : `hermes skills config`
     stacked_load_failed: "Échec du chargement des skills empilées pour /{command}."
-    gate_off: "L'approbation des écritures de skills est désactivée (skills.write_approval). Activez-la avec /skills approval on, puis examinez ici les écritures en attente avec /skills pending."
-    unknown_subcommand: "Sous-commande /skills inconnue sur cette plateforme. Utilisez : pending, approve <id>, reject <id>, diff <id>, approval <on|off>. (Recherche et installation : CLI uniquement.)"
-    diff_truncated: |2-
 
       … (tronqué — diff complet dans ~/.hermes/pending/skills/{pending_id}.json)
   busy:
@@ -1080,7 +1080,6 @@ gateway:
     item: "• `/{slug}` — {desc} _({count} skills)_"
     invoke_hint: "Invoquez un bundle avec `/<slug>` pour charger toutes ses skills."
   memory:
-    unknown_subcommand: "Sous-commande /memory inconnue. Utilisez : pending, approve <id>, reject <id>, approval <on|off>."
   approvals:
     admin_only: "Seuls les administrateurs du gateway peuvent modifier le mode d'approbation persistant."
   heartbeat:
@@ -1201,6 +1200,8 @@ platform:
       confirm_title: "Confirmer"
       already_resolved: "Cette approbation a déjà été traitée~"
       expired: "⌛ Approbation expirée — la commande n'a pas été exécutée (délai dépassé ou déjà traitée ailleurs)"
+      no_longer_pending: "⌛ Cette approbation n'est plus en attente (expirée ou traitée ailleurs)"
+      click_failed: "⚠️ Impossible d'enregistrer ton choix. Clique à nouveau ou réponds avec /approve ou /deny."
       by_user: "{label} par {user}"
       resolved_once: "Approuvé une fois"
       resolved_session: "Approuvé pour la session"
@@ -2259,6 +2260,8 @@ cli:
     usage_switch_reasoning: "changer et définir l'effort de raisonnement"
     usage_switch_provider: "changer de fournisseur"
     usage_refresh: "recharger les listes de modèles en direct"
+    reset_none: "Déjà sur le modèle par défaut configuré ({model}) — rien à réinitialiser."
+    reset_no_default: "Aucun model.default dans config.yaml — rien vers quoi revenir."
     choice_switch_anyway: "Changer quand même"
     desc_switch_anyway: "Utiliser ce modèle pour la session Hermes en cours."
     choice_cancel: "Annuler"
@@ -3257,7 +3260,6 @@ cli:
     kanban:
       failed: "(._.) erreur kanban : {error}"
     memory:
-      unknown_subcommand: "Sous-commande /memory inconnue. Utilisez : pending, approve <id>, reject <id>, approval <on|off>."
     learn:
       from_description: "⚡ Apprentissage d'une skill à partir de votre description..."
       from_conversation: "⚡ Apprentissage d'une skill à partir de cette conversation..."

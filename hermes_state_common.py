@@ -764,12 +764,93 @@ CREATE TABLE IF NOT EXISTS session_branches (
     created_by_turn TEXT,
     join_strategy TEXT,
     joined_at REAL,
-    status TEXT NOT NULL DEFAULT 'active'
+    status TEXT NOT NULL DEFAULT 'active',
+    -- immutable branch facts (console name given at /fork time, etc.)
+    meta_json TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_branches_child
     ON session_branches(child_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_branches_parent
     ON session_branches(parent_session_id, status);
+-- Investigation self-check mechanism (docs/design/investigation-mechanism.md): an
+-- investigation is the agent's own hypothesis-checking state — question, hypotheses,
+-- probes whose discriminating predictions are written BEFORE the probe runs, observation
+-- candidates captured by the runtime from real tool-calls / joined branch results, and a
+-- model-authored close. The core stores conditions only (provenance, delivery dedup via
+-- the UNIQUE observations.dedup_key, restart settle); it never decides which hypothesis
+-- is right. status lifecycle: investigations open → closed (close refused while any
+-- observation is unassessed: the refusal stays recorded as a meta_json diagnostic);
+-- probes pending → dispatched → observed | unknown_outcome (a dispatched probe whose
+-- result never arrived across a restart is settled to unknown_outcome, never re-run).
+CREATE TABLE IF NOT EXISTS investigations (
+    investigation_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    question TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    revision INTEGER NOT NULL DEFAULT 1,
+    opened_at REAL NOT NULL,
+    closed_at REAL,
+    summary TEXT,
+    constraints TEXT,
+    meta_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigations_open
+    ON investigations(session_id) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_investigations_session
+    ON investigations(session_id, status);
+CREATE TABLE IF NOT EXISTS investigation_hypotheses (
+    hypothesis_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    statement TEXT NOT NULL,
+    -- verdict words are recorded by the model through assess; the core never derives one
+    status TEXT NOT NULL DEFAULT 'standing',
+    created_at REAL NOT NULL,
+    meta_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_hypotheses
+    ON investigation_hypotheses(investigation_id);
+CREATE TABLE IF NOT EXISTS investigation_probes (
+    probe_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at REAL NOT NULL,
+    -- structural provenance of the /fork this probe runs as (no embedding)
+    branch_id TEXT,
+    meta_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_probes
+    ON investigation_probes(investigation_id);
+CREATE TABLE IF NOT EXISTS investigation_predictions (
+    prediction_id TEXT PRIMARY KEY,
+    probe_id TEXT NOT NULL REFERENCES investigation_probes(probe_id),
+    hypothesis_id TEXT NOT NULL REFERENCES investigation_hypotheses(hypothesis_id),
+    expected TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigation_predictions_pair
+    ON investigation_predictions(probe_id, hypothesis_id);
+CREATE TABLE IF NOT EXISTS investigation_observations (
+    observation_id TEXT PRIMARY KEY,
+    investigation_id TEXT NOT NULL REFERENCES investigations(investigation_id),
+    probe_id TEXT REFERENCES investigation_probes(probe_id),
+    -- 'tool' (runtime hook on a real tool-call) | 'branch' (joined /fork result)
+    source TEXT NOT NULL,
+    -- delivery-dedup key: '<session>|call:<call_id>' | '<session>|branch:<branch_id>';
+    -- UNIQUE so a duplicate delivery inserts nothing (Top-1 verdict condition, 01.11)
+    dedup_key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    -- an observation-candidate becomes accounted ONLY through assess
+    assessed INTEGER NOT NULL DEFAULT 0,
+    assessed_at REAL,
+    verdict TEXT,
+    meta_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_investigation_observations_dedup
+    ON investigation_observations(dedup_key);
+CREATE INDEX IF NOT EXISTS idx_investigation_observations_unassessed
+    ON investigation_observations(investigation_id, assessed);
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
@@ -895,6 +976,153 @@ CREATE TABLE IF NOT EXISTS ctl_alert_state (
   alert_key TEXT PRIMARY KEY, digest TEXT NOT NULL, last_ts REAL NOT NULL,
   count INTEGER NOT NULL DEFAULT 0
 );
+-- Ports from dsh-superagent-prototype @6337fc8 (audit 2026-11-01, mechanism donor,
+-- runtime NOT adopted). Writers: the controller package only (same invariant as ctl_*).
+-- ctl_effect — durable side-effect queue (controller/effects.py): coalescing upsert
+-- inside the caller's transaction, generation guards a running attempt's finish-up
+-- against a fresher payload, Later() retries without growing the failure count.
+CREATE TABLE IF NOT EXISTS ctl_effect (
+  kind TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL DEFAULT '',
+  seq INTEGER NOT NULL, generation INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL,
+  since REAL NOT NULL, error TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (kind, key)
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_effect_kind_due ON ctl_effect(kind, due);
+-- ctl_outbox — outbound-message receipts (controller/outbox.py): idempotent message
+-- ids (INSERT OR IGNORE), per-conversation ordering barrier over still-pending
+-- earlier messages, dropped messages keep why forever and never queue again.
+CREATE TABLE IF NOT EXISTS ctl_outbox (
+  msg_id TEXT PRIMARY KEY, task_id TEXT, conv_key TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'reply', text TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','sent','dropped')),
+  dropped_reason TEXT, created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_outbox_conv ON ctl_outbox(conv_key, status);
+-- ctl_followup — async consequences on the 1 Hz beat (controller/followups.py,
+-- mini-spec journal/20261103-async-followups-spec.md): a consequence is a ROW,
+-- the ticker finds due rows and delivers via the live chat port. Reminder:
+-- due_at + repeat_beats/max_repeats (donor evals REQUEUES→unavailable parity);
+-- review: periodic by period_s. Created in-task scope only (stage003 rule).
+CREATE TABLE IF NOT EXISTS ctl_followup (
+  followup_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('reminder','review')),
+  scope_task TEXT NOT NULL,
+  scope_project TEXT,
+  text TEXT NOT NULL,
+  due_at REAL,
+  period_s INTEGER,
+  state TEXT NOT NULL DEFAULT 'pending'
+       CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
+  last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
+  repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
+  created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
+CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);
+-- ctl_mandate — immutable authorization a task entered running under
+-- (controller/mandate.py): recorded by transitions.py at every ready->running,
+-- revalidated against the CURRENT policy before blocked/failed/needs_human resume;
+-- a policy change delivers effects, it does not silently retro-authorize.
+CREATE TABLE IF NOT EXISTS ctl_mandate (
+  task_id TEXT PRIMARY KEY, strength TEXT NOT NULL,
+  policy_version TEXT NOT NULL, basis TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '',
+  issued_at REAL NOT NULL, withdrawn_at REAL
+);
+-- ctl_event_disposition — where an absorbed event went (controller/disposition.py):
+-- unit of audit next to ctl_event idempotency (donor TriggerDisposition).
+CREATE TABLE IF NOT EXISTS ctl_event_disposition (
+  event_id TEXT PRIMARY KEY, fanout TEXT NOT NULL DEFAULT '[]',
+  context TEXT NOT NULL DEFAULT '[]', handbacks TEXT NOT NULL DEFAULT '[]',
+  acked TEXT NOT NULL DEFAULT '[]', requeued INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT '', at REAL NOT NULL
+);
+-- ctl_input_receipt — read-receipt discipline for inputs handed to a run
+-- (controller/receipts.py): delivered_at marks executor take-up, read_at marks the
+-- step actually consuming it; an interrupted run requeues only what no step took.
+CREATE TABLE IF NOT EXISTS ctl_input_receipt (
+  run_id TEXT NOT NULL, event_id TEXT NOT NULL,
+  delivered_at REAL, read_at REAL,
+  PRIMARY KEY (run_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_input_receipt_run ON ctl_input_receipt(run_id);
+-- Topic memory (stage003, ToDo «тематическая память ядра»): scope-isolated facts
+-- so task-local directives never leak into the global context. Writers: the
+-- controller package only (controller/topic_memory.py), same invariant as ctl_*.
+-- Hierarchy task → project → global; global is read-only for scoped writers.
+CREATE TABLE IF NOT EXISTS ctl_mem_scope (
+  scope_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('task','project','global')),
+  ref TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL,
+  UNIQUE (kind, ref)
+);
+-- One active record per subject WITHIN a scope: a newer item supersedes the
+-- older one on the same (scope_id, subject) — cross-scope it coexists by design
+-- («новее затирает старое» только при совпадении предмета И области действия).
+CREATE TABLE IF NOT EXISTS ctl_mem_item (
+  item_id TEXT PRIMARY KEY,
+  scope_id TEXT NOT NULL REFERENCES ctl_mem_scope(scope_id),
+  kind TEXT NOT NULL CHECK (kind IN ('fact','constraint','decision','preference')),
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('user-directive','tool-result','agent-proposal','hypothesis')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','superseded')),
+  superseded_by TEXT,
+  confirmed INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  created_run_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_mem_item_scope ON ctl_mem_item(scope_id, status);
+-- Applicability chain beyond ctl_task.project_id: which parent scope a scope
+-- inherits memory from (task → project; global is implicit and last).
+CREATE TABLE IF NOT EXISTS ctl_mem_binding (
+  scope_id TEXT PRIMARY KEY REFERENCES ctl_mem_scope(scope_id),
+  parent_scope_id TEXT NOT NULL REFERENCES ctl_mem_scope(scope_id),
+  created_at REAL NOT NULL
+);
+-- Controlled cross-topic import with provenance: an import never edits the
+-- source item; it creates a new item in the destination scope, linked here.
+CREATE TABLE IF NOT EXISTS ctl_mem_import (
+  import_id TEXT PRIMARY KEY,
+  dst_item_id TEXT NOT NULL REFERENCES ctl_mem_item(item_id),
+  src_item_id TEXT NOT NULL REFERENCES ctl_mem_item(item_id),
+  imported_at REAL NOT NULL,
+  by_run_id TEXT
+);
+-- Stage003 step 6 shadow ledger. Shadow mode changes NO behaviour: it measures
+-- Вл's three error classes while the legacy MEMORY.md flow keeps running
+-- unimpeded. kinds: leak_global (scoped process wrote via a builtin store),
+-- foreign_rule (manual annotation of someone else's rule in my context),
+-- missing_decision (accepted decisions exist in scope but did not fit the
+-- prompt block). Interpretation belongs to the human; these are proxies.
+CREATE TABLE IF NOT EXISTS ctl_mem_shadow (
+  shadow_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('leak_global','foreign_rule','missing_decision')),
+  scope_id TEXT REFERENCES ctl_mem_scope(scope_id),
+  detail TEXT NOT NULL DEFAULT '{}',
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_mem_shadow_kind ON ctl_mem_shadow(kind, created_at);
+-- Stage003 step 7: implicit-topic detector for interactive agents (observer
+-- only; gate memory.topic_detect_enabled defaults OFF — zero rows, zero HTTP
+-- until Вл turns it on). One row per observed user turn with the best topic
+-- candidate and its score; proposed_new carries a no-match message excerpt
+-- (candidate for a new topic). Read back ONLY for acceptance, never into
+-- behaviour: the detector changes nothing until приёмка.
+CREATE TABLE IF NOT EXISTS ctl_topic_detect (
+  detect_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  message_excerpt TEXT NOT NULL DEFAULT '',
+  best_scope_id TEXT,
+  best_label TEXT NOT NULL DEFAULT '',
+  score REAL NOT NULL DEFAULT 0.0,
+  method TEXT NOT NULL CHECK (method IN ('embed','lexical','skip')),
+  proposed_new TEXT,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ctl_topic_detect_session ON ctl_topic_detect(session_id, created_at);
 -- ---- end controller ----
 -- ---- transport observations (agency-model.md §16.9; hermes-agency-003 §7) ----------
 -- Layer between platform adapters and the semantic journal (phantom-inbound fix).

@@ -3287,6 +3287,100 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
             result = result.replace(f"\x00PROTECTED{idx}\x00", original)
         return result
 
+    def owns_session(self, source, session_id: str, *, origin=None, name: str = "",
+                     allow_cross_room: bool = False):
+        """Origin-реестр hook (stage001 п.3) — the contract is documented on
+        ``_proves_same_origin`` beside ``register()``, where the layer declares it.
+
+        The core /resume IDOR guard asks the PLATFORM LAYER instead of branching on the platform
+        itself: is this session one of the consoles of the room the caller speaks from, including
+        every console of its lineage? The registry DATA (session → room origin, registered at
+        creation, never evicted by switch_session/fork/resume) is the core session-store ledger;
+        the room SEMANTICS — chat_id + thread_id scope — are ours and live here."""
+        return _proves_same_origin(source, session_id, origin=origin, name=name,
+                                   allow_cross_room=allow_cross_room)
+
+    def resume_text(self, source, key: str, **ctx):
+        """Wording hook for /resume and /sessions lines (stage001 A3) — the contract is on
+        ``_resume_layer_text`` beside ``register()``, where the layer declares it."""
+        return _resume_layer_text(source, key, **ctx)
+
+    def describe_scope(self, source, session_key: str):
+        """The /status scope block (stage001 A3): the layer's own topology lines, read from this
+        adapter's ``_matrix_session_scope`` (env fallback) — no core code holds those fields."""
+        return _matrix_describe_scope(source, session_key,
+                                      scope=getattr(self, "_matrix_session_scope", None))
+
+
+def _proves_same_origin(source, session_id: str, *, origin=None, name: str = "",
+                        allow_cross_room: bool = False) -> bool | str:
+    """Matrix-layer answer to «does *session_id* belong to *source*'s room?» (stage001 п.3).
+
+    Declared on the platform entry (``owns_session_fn`` in ``register()``) and mirrored by the
+    adapter's ``owns_session``; the core's /resume guard consumes whichever it can reach.
+    True = allow; non-empty str = refusal shown to the caller. The room scope mirrors the session
+    key: thread_id is part of the key, so another thread of the SAME room is a DIFFERENT session;
+    non-threaded rooms compare "" == "". ``--cross-room`` is an explicit human override — always
+    allows. A target with NO recorded origin fails closed: an id is a routing handle, not
+    authority (IDOR); only the registry may prove a room, never the caller's word."""
+    if allow_cross_room:
+        return True
+    if origin is None:
+        return t("gateway.resume.matrix_blocked_no_origin", name=name)
+    same_room = (
+        getattr(origin, "platform", None) == Platform.MATRIX
+        and getattr(origin, "chat_id", None) == getattr(source, "chat_id", None)
+        and str(getattr(origin, "thread_id", "") or "")
+        == str(getattr(source, "thread_id", "") or "")
+    )
+    if same_room:
+        return True
+    return t("gateway.resume.matrix_blocked_other_room", name=name,
+             room=origin.chat_name or origin.chat_id)
+
+
+def _resume_layer_text(source, key: str, *, title: str = "", msg_count: int = 0,
+                       room: str = "", allow_all: bool = False, origin=None):
+    """Matrix-layer wording for /resume and /sessions lines (stage001 A3).
+
+    Declared on the platform entry (``resume_text_fn`` in ``register()``) and mirrored by the
+    adapter's ``resume_text``; the core asks instead of holding Matrix texts. Keys:
+    ``cross_room_success`` (explicit ``--cross-room`` resume succeeded), ``list_empty`` (no named
+    sessions — the room-scoped hint only applies without admin ``--all``), ``list_row`` (under
+    admin ``--all`` every row carries its room signature). ``None`` = no layer opinion, the core
+    prints its generic line."""
+    if key == "cross_room_success":
+        msg_part = (t("gateway.resume.msg_count_one" if msg_count == 1
+                      else "gateway.resume.msg_count_other", count=msg_count)
+                    if msg_count else "")
+        return t("gateway.resume.matrix_cross_room_success", title=title, room=room,
+                 msg_part=msg_part)
+    if key == "list_empty":
+        return t("gateway.resume.matrix_no_named_sessions") if not allow_all else None
+    if key == "list_row":
+        if allow_all and origin is not None:
+            return f"{title} — {getattr(origin, 'chat_name', None) or getattr(origin, 'chat_id', '')}"
+        return None
+    return None
+
+
+def _matrix_describe_scope(source, session_key: str, *, scope=None):
+    """The /status "Matrix scope" block (stage001 A3), owned by the layer: room, room id, thread,
+    session-scope mode (live adapter field, env fallback), and a stable key fingerprint so a
+    shared room can show which console is live without leaking the raw session key."""
+    import hashlib
+    scope = scope or os.getenv("MATRIX_SESSION_SCOPE", "auto")
+    digest = hashlib.sha256(str(session_key or "").encode("utf-8")).hexdigest()[:12]
+    return [
+        t("gateway.status.matrix_scope_header"),
+        t("gateway.status.matrix_scope_room", room=source.chat_name or source.chat_id),
+        t("gateway.status.matrix_scope_room_id", room_id=source.chat_id),
+        t("gateway.status.matrix_scope_thread",
+          thread_id=source.thread_id or t("gateway.shared.none_value")),
+        t("gateway.status.matrix_scope_mode", scope=scope),
+        t("gateway.status.matrix_scope_key", session_key=f"sha256:{digest}"),
+    ]
+
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
     """standalone_sender_fn: out-of-process delivery via the Client-Server API (cron without gateway)."""
@@ -3454,4 +3548,11 @@ def register(ctx) -> None:
         display_tier="medium",
         env_overrides=gateway_env.ENV_OVERRIDES,
         env_enable_credentials=gateway_env.ENV_ENABLE_CREDENTIALS, **gateway_env.AUTHZ,
+        # stage001 п.3: the layer declares its origin-registry contract here — the core /resume
+        # IDOR guard asks this instead of branching on Platform.MATRIX itself.
+        owns_session_fn=_proves_same_origin,
+        # stage001 A2/A3: room-scoped listing + the layer's own /resume, /sessions and /status
+        # wording — the core keeps no Matrix texts, no MATRIX_SESSION_SCOPE read, no room math.
+        resume_text_fn=_resume_layer_text,
+        describe_scope_fn=_matrix_describe_scope,
     )

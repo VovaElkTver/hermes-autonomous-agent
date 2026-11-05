@@ -79,31 +79,6 @@ controller и pump, durable approvals, dev-контур `@rtx5000` (комнат
   (`spec vN`, `plan`, `final`) без префикса проекта на флоте пересекаются.
 
 **Состояние направления (срезы по датам):**
-- **Memory-gate.** 24.10 включён флаг `memory.write_approval=true` на rtx5090-main
-  (foreground writes из Matrix стаджились в `~/.hermes/pending/`, review-команда
-  `!memory pending|approve|reject`). 27.10 ОТКАЧЁН по команде Вл «на стандартный
-  механизм» — writes прямые. Директива 24.10 «правь косяк для всех» значила «починить
-  баг в коде, чтобы было у всех», а не «включить гейт на всех нодах»; гейт на других
-  нодах никогда не стоял. 28.10 неприменённые memory pending-карточки (очередь +
-  архив `cancelled/`, всего 86) отменены командой Вл и удалены без следа
-  (`!memory pending` = 0). В тот же день по той же команде снесены и skills-
-  карточки (pending 32 + cancelled 15) — вся очередь `~/.hermes/pending/`
-  пуста. Причина отмены, названная Вл: датированные срезы-карточки неразличимы для
-  агента (идентификация), датировки склеиваются в «один проект».
-- **Pump/ticker.** `state='running'` открывает pump — шаги идут в headless
-  `hermes chat --oneshot` (PR#63: budget expiry → graceful pause). Новый workdir
-  задачи требует `ctl_autonomy_permission(enabled=1, epoch)` — без строки pump молчит
-  «permission off». Мандат делегации («го субагенты») живёт только в последнем
-  user-turn; при блокировке — pump-очередь (ready + autonomy_permission),
-  execution_epoch из неё же.
-- **Dev-контур @rtx5000.** `hermes-gateway-dev.service` (не enabled),
-  `HERMES_HOME=~/.hermes-dev`, worktree `~/hermes-dev` @17e581e27b, аккаунт @rtx5000,
-  слушает только комнату отладки, require-mention. WSL-патч `pass` в
-  `runtime_ownership.start_writer` в fleet НЕ закатывать как есть — ломает запуск
-  housekeeping-треда; нужен идемпотентный start_writer.
-- **Обновление живого экземпляра.** Запущенный гейтвей может отставать от кода ветки;
-  накат — только по явной команде владельца («обновись» = checkout + gw_cycle), т.к.
-  рестарт трогает живые сессии.
 
 ## Quick Install
 

@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import json
 import logging
 import os
 import shlex
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from agent.i18n import t
 from agent.turn_context import extract_api_content_sidecar
@@ -21,6 +22,7 @@ from gateway.platforms.base import EphemeralReply
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.session import SessionSource, build_session_key, is_shared_multi_user_session
 from gateway.session_transcript import TranscriptReadError
+from gateway.platform_layers import PlatformLayerHooksMixin
 from gateway.slash_commands_branch_thread import (
     BRANCH_THREAD_PLATFORMS, branch_dest_source, branch_thread_parent, format_thread_ref, parse_branch_args,
 )
@@ -135,8 +137,14 @@ async def discard_lost_turns(authority, session_id) -> str:
     return t("gateway.discard.done", count=done) if done else t("gateway.discard.nothing")
 
 
-class GatewaySessionCommandsMixin:
+class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
     """Session-transcript slash commands (/new, /resume, /sessions, /branch, /title, /save, /undo, /retry, /topic, /compress)."""
+
+    if TYPE_CHECKING:  # provided by the composite GatewayRunner
+        session_store: Any
+        async_session_store: Any
+        _session_db: Any
+        adapters: Any
 
     # ------------------------------------------------------------------ /new, /reset
 
@@ -197,6 +205,12 @@ class GatewaySessionCommandsMixin:
         """Handle /new or /reset command."""
         source = event.source
         session_key = self._session_key_for_source(source)
+        # Sticky /forkb branch (Вл 31.10): /new would rotate this thread's console to a blank
+        # stream mid-branch; close the branch first with /return or /leave.
+        _entry = self.session_store._entries.get(session_key)
+        _lock = await self._bound_branch_lock(str(getattr(_entry, "session_id", "") or ""))  # type: ignore[attr-defined]
+        if _lock is not None:
+            return self._bound_locked_reply("/new", _lock)  # type: ignore[attr-defined]
         await self._hm_stop_owner_turn(session_key)  # idle and confirmed resets too (N53)
         self._invalidate_session_run_generation(session_key, reason="session_reset")
         # Evict the running-agent slot now that the generation is bumped: the in-flight run's own
@@ -292,26 +306,72 @@ class GatewaySessionCommandsMixin:
     # ------------------------------------------------------- origin / ownership guards
 
     def _gateway_session_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
-        """Best-effort origin lookup for gateway session IDs."""
+        """Resolve a gateway session's ORIGIN from durable kernel state first: the sessions row's
+        ``origin_json`` (written at creation) is the birth provenance and the only authority for
+        the resume proof ("where was this session started"). Gateway routing state — the live
+        routing entry and the stage001 п.3 origin ledger — is mutable: switch_session/fork/resume
+        repoint it, restarts prune it, and pre-rotation lineage can contradict it. It therefore
+        stays only as an advisory fallback for sessions whose row has not reached the DB yet."""
+        db = getattr(self._session_db, "_db", self._session_db)
+        getter = getattr(db, "get_session", None)
+        if callable(getter):
+            try:
+                row = getter(session_id)
+            except Exception:
+                row = None
+            raw = row.get("origin_json") if isinstance(row, dict) else None
+            if isinstance(raw, str) and raw:
+                try:
+                    parsed = SessionSource.from_dict(json.loads(raw))
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, SessionSource):
+                    # Observability (critic Q1): when live routing disagrees with the birth row,
+                    # the two scenarios — stale routing after rotation vs a legitimate /move — are
+                    # indistinguishable here. Birth wins; log the conflict for the operator.
+                    try:
+                        live_origin = self._live_routing_origin_for_id(session_id)
+                    except Exception:
+                        live_origin = None
+                    if isinstance(live_origin, SessionSource) and not self._same_origin_chat(
+                            live_origin, parsed):
+                        logger.warning(
+                            "resume origin conflict: session %s birth chat %r vs live route %r — "
+                            "birth wins (legitimate moves need /resume --cross-room until the "
+                            "move re-stamps provenance)", session_id, parsed.chat_id,
+                            live_origin.chat_id)
+                    return parsed
+        # Advisory fallback: live routing entry (still pointing at the session), then test-double
+        # stores, then the ledger — only used when no birth row proves the origin.
+        live_origin = self._live_routing_origin_for_id(session_id)
+        if live_origin is not None:
+            return live_origin
+        ledger = getattr(self.session_store, "lookup_session_origin", None)
+        if callable(ledger):
+            try:
+                origin = ledger(session_id)
+            except Exception:
+                origin = None
+            if isinstance(origin, SessionSource):
+                return origin
+        return None
+
+    def _live_routing_origin_for_id(self, session_id: str) -> Optional[SessionSource]:
+        """Mutable gateway routing: the live route while it still points at the session
+        (plus test-double stores exposing ``_entries``). Advisory only — never authority."""
         lookup = getattr(type(self.session_store), "lookup_by_session_id", None)
         if callable(lookup):
             entry = lookup(self.session_store, session_id)
-            return getattr(entry, "origin", None) if entry is not None else None
-        # Test doubles / older stores lack the public lookup; fail closed when nothing resolves.
+            origin = getattr(entry, "origin", None) if entry is not None else None
+            if isinstance(origin, SessionSource):
+                return origin
         entries = getattr(self.session_store, "_entries", {}) or {}
-        return next((getattr(e, "origin", None) for e in entries.values()
+        live = next((getattr(e, "origin", None) for e in entries.values()
                      if getattr(e, "session_id", None) == session_id), None)
-
-    @staticmethod
-    def _same_matrix_room(current: SessionSource, origin: Optional[SessionSource]) -> bool:
-        # thread_id is part of the session key, so another thread of the SAME room is a DIFFERENT
-        # session; non-threaded rooms compare "" == "".
-        return (origin is not None and origin.platform == Platform.MATRIX
-                and current.platform == Platform.MATRIX and origin.chat_id == current.chat_id
-                and _sattr(current, "thread_id") == _sattr(origin, "thread_id"))
+        return live if isinstance(live, SessionSource) else None
 
     def _same_origin_chat(self, current: SessionSource, origin: Optional[SessionSource]) -> bool:
-        """Platform-agnostic counterpart to ``_same_matrix_room``.  Per-participant sessions must be
+        """Platform-agnostic origin check.  Per-participant sessions must be
         participant-scoped here too, else a co-member could resume another member's live session
         (IDOR); only an explicitly shared group/thread shares."""
         if origin is None or current is None:
@@ -413,12 +473,18 @@ class GatewaySessionCommandsMixin:
 
     async def _resume_row_visible(self, source: SessionSource, row: dict, allow_all: bool) -> bool:
         """Whether a listing *row* belongs to the caller's origin (blocks cross-origin enumeration of
-        ids/previews); Matrix is room-scoped, ``--all`` needs a configured admin everywhere."""
+        ids/previews). Which consoles belong to a chat-space is platform-LAYER property (stage001
+        A2): the caller's layer answers ``owns_session`` for the row's id; layers that do not answer
+        keep the platform-agnostic owner check. ``--all`` needs a configured admin everywhere.
+        No platform enum branch lives here."""
         if allow_all and self._resume_caller_is_admin(source):
             return True
         sid = str(row.get("id") or "")
-        if source.platform == Platform.MATRIX:
-            return self._same_matrix_room(source, self._gateway_session_origin_for_id(sid))
+        verdict = await self._layer_proves_same_origin(source, sid, allow_cross_room=False)
+        if verdict is True:
+            return True
+        if verdict is False or (isinstance(verdict, str) and verdict):
+            return False  # proven foreign (or the layer's own refusal): not enumerable here
         return await self._resume_target_allowed(source, sid, allow_override=False)
 
     # ------------------------------------------------------------------ /retry, /undo
@@ -1009,7 +1075,8 @@ class GatewaySessionCommandsMixin:
         titled = [s for s in sessions if s.get("title")][:10]
         return [s for s in titled if await self._resume_row_visible(source, s, allow_all)]
 
-    async def _resolve_resume_target(self, source, session_key: str, name: str, allow_all: bool):
+    async def _resolve_resume_target(self, source, session_key: str, name: str, allow_all: bool,
+                                     current_session_id: str | None = None):
         """``(target_id, name)`` for a numbered choice, session id or title; else the error reply."""
         if name.isdigit():
             try:
@@ -1025,6 +1092,14 @@ class GatewaySessionCommandsMixin:
         else:  # session id first, then title
             session = await self._session_db.get_session(name)
             target_id = session["id"] if session else await self._session_db.resolve_session_by_title(name)
+        if not target_id and current_session_id and name:
+            # Multi-console names: /resume main (root console) or an active
+            # branch name — sessions carry no title, so the plain lookup misses.
+            from gateway.branch_prefix import resolve_console_session
+            try:
+                target_id = await resolve_console_session(self._session_db, current_session_id, name)
+            except Exception as e:
+                logger.debug("console-name resume failed for %r: %s", name, e)
         if not target_id:
             return t("gateway.resume.not_found", name=name)
         # Follow compression continuations to the live transcript (matches CLI /resume).
@@ -1038,15 +1113,20 @@ class GatewaySessionCommandsMixin:
     async def _resume_access_denied_reply(self, source, target_id: str, name: str, allow_all: bool,
                                           allow_cross_room: bool) -> Optional[str]:
         """IDOR guard: a session id/title is a routing handle, not authority — bind /resume to the
-        caller's own room (Matrix) or platform/user/chat (other adapters)."""
-        if source.platform == Platform.MATRIX:
-            target_origin = self._gateway_session_origin_for_id(target_id)
-            if self._same_matrix_room(source, target_origin) or allow_cross_room:
-                return None
-            if target_origin is None:
-                return t("gateway.resume.matrix_blocked_no_origin", name=name)
-            return t("gateway.resume.matrix_blocked_other_room", name=name,
-                     room=target_origin.chat_name or target_origin.chat_id)
+        caller's own origin. Which consoles (incl. every lineage console, origin registered at
+        session creation and NON-EVICTABLE across switch_session/fork/resume) belong to a
+        chat-space is platform-LAYER property (stage001 п.3): the caller's layer answers
+        ``owns_session`` and may return its own refusal text; layers that do not answer — every
+        platform without the hook — keep the platform-agnostic owner check below. No platform
+        enum branch lives here."""
+        verdict = await self._layer_proves_same_origin(
+            source, target_id, name=name, allow_cross_room=allow_cross_room)
+        if verdict is True:
+            return None
+        if isinstance(verdict, str) and verdict:
+            return verdict
+        if verdict is False:
+            return t("gateway.resume.blocked_not_owner", name=name)
         if await self._resume_target_allowed(source, target_id, allow_override=(allow_all or allow_cross_room)):
             return None
         return t("gateway.resume.blocked_not_owner", name=name)
@@ -1067,12 +1147,23 @@ class GatewaySessionCommandsMixin:
         if not name:
             try:
                 titled = await self._list_titled_sessions(source, session_key, allow_all)
-                return self._resume_listing_reply(source, titled, allow_all)
+                return await self._resume_listing_reply(source, titled, allow_all)
             except Exception as e:
                 logger.debug("Failed to list titled sessions: %s", e)
                 return t("gateway.resume.list_failed", error=e)
 
-        resolved = await self._resolve_resume_target(source, session_key, name, allow_all)
+        try:
+            _cur = await self.async_session_store.get_or_create_session(source)
+            _cur_sid = _cur.session_id if _cur else None
+        except Exception:
+            _cur_sid = None
+        # Sticky /forkb branch (Вл 31.10): a bound thread's console keeps its stream until the
+        # branch is closed with /return or /leave — /resume must not silently repoint the thread.
+        _lock = await self._bound_branch_lock(_cur_sid or "")  # type: ignore[attr-defined]
+        if _lock is not None:
+            return self._bound_locked_reply("/resume", _lock)  # type: ignore[attr-defined]
+        resolved = await self._resolve_resume_target(source, session_key, name, allow_all,
+                                                     current_session_id=_cur_sid)
         if isinstance(resolved, str):
             return resolved
         target_id, name = resolved
@@ -1115,35 +1206,41 @@ class GatewaySessionCommandsMixin:
             # The resume itself succeeded; only the count is missing — say so rather than "empty".
             return t("gateway.resume.resumed_no_count", title=title) + "\n" + history_unreadable()
         msg_count = len([m for m in history if m.get("role") == "user"]) if history else 0
-        if source.platform == Platform.MATRIX and allow_cross_room:
-            msg_part = t("gateway.resume.msg_count_one" if msg_count == 1 else "gateway.resume.msg_count_other",
-                         count=msg_count) if msg_count else ""
-            return t("gateway.resume.matrix_cross_room_success", title=title,
-                     room=source.chat_name or source.chat_id, msg_part=msg_part)
+        if allow_cross_room:
+            # An explicit cross-space resume: the layer may own the success wording (stage001 A3);
+            # no answer = the core's generic resumed_* line below.
+            note = await self._layer_resume_text(source, "cross_room_success", title=title,
+                                                 msg_count=msg_count,
+                                                 room=source.chat_name or source.chat_id)
+            if note:
+                return note
         if not msg_count:
             return t("gateway.resume.resumed_no_count", title=title)
         if msg_count == 1:
             return t("gateway.resume.resumed_one", title=title, count=msg_count)
         return t("gateway.resume.resumed_many", title=title, count=msg_count)
 
-    def _resume_listing_reply(self, source, titled: list[dict], allow_all: bool) -> str:
+    async def _resume_listing_reply(self, source, titled: list[dict], allow_all: bool) -> str:
         """Numbered /resume list; a non-admin ``--all`` falls back to same-origin scoping and says so
-        (sibling of the /sessions notice)."""
+        (sibling of the /sessions notice). Platform wording (empty-list hint, cross-origin room
+        labels) is the LAYER's — asked via ``resume_text`` (stage001 A3), generic fallback stays."""
         scope_note = None
         if allow_all and not self._resume_caller_is_admin(source):
             scope_note = t("gateway.resume.all_requires_admin")
         if not titled:
-            if source.platform == Platform.MATRIX and not allow_all:
-                return t("gateway.resume.matrix_no_named_sessions")
+            hint = await self._layer_resume_text(source, "list_empty", allow_all=allow_all)
+            if hint:
+                return hint
             base = t("gateway.resume.no_named_sessions")
             return f"{base}\n{scope_note}" if scope_note else base
         lines = [t("gateway.resume.list_header")]
         for idx, s in enumerate(titled[:10], start=1):
             title = s["title"]
-            if source.platform == Platform.MATRIX and allow_all:
-                origin = self._gateway_session_origin_for_id(str(s.get("id") or ""))
-                if origin:
-                    title = f"{title} — {origin.chat_name or origin.chat_id}"
+            labeled = await self._layer_resume_text(
+                source, "list_row", title=title, allow_all=allow_all,
+                origin=self._gateway_session_origin_for_id(str(s.get("id") or "")))
+            if labeled:
+                title = labeled
             preview = s.get("preview", "")[:40]
             preview_part = t("gateway.resume.list_preview_suffix", preview=preview) if preview else ""
             lines.append(t("gateway.resume.list_item_numbered", index=idx, title=title, preview_part=preview_part))

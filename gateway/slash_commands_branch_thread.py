@@ -1,9 +1,11 @@
 """``/branch`` destination on thread-capable platforms (#66023).
 
-On Discord, Telegram, Slack and Matrix a plain ``/branch`` opens a NEW sibling thread for the
-clone and leaves the current chat bound to the original session, so the user can keep both paths
-alive. ``/branch --here`` keeps the legacy in-place switch; platforms without threads (and the CLI)
-always branch in place. Pure helpers only — the handler lives in ``slash_commands_session.py``.
+On Discord, Telegram and Slack a plain ``/branch`` opens a NEW sibling thread for the clone and
+leaves the current chat bound to the original session, so the user can keep both paths alive.
+``/branch --here`` keeps the legacy in-place switch; platforms without the primitive (and the CLI)
+always branch in place. Matrix branches IN PLACE by design: a session fork is a dialogue branch
+(``session_branches`` row), not a Matrix thread — materializing the fork as a room thread confused
+the two concepts. Pure helpers only — the handler lives in ``slash_commands_session.py``.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from gateway.config import Platform
 from gateway.session import SessionSource
 
 # Adapters that override ``BasePlatformAdapter.create_handoff_thread`` (the base returns None).
-BRANCH_THREAD_PLATFORMS = frozenset({Platform.DISCORD, Platform.TELEGRAM, Platform.SLACK, Platform.MATRIX})
+BRANCH_THREAD_PLATFORMS = frozenset({Platform.DISCORD, Platform.TELEGRAM, Platform.SLACK})
 BRANCH_HERE_FLAG = "--here"
 
 
@@ -44,7 +46,8 @@ def branch_thread_parent(source: SessionSource) -> Optional[str]:
         # text channel, which only ``parent_chat_id`` names.
         if source.thread_id or source.chat_type == "thread":
             return str(source.parent_chat_id) if source.parent_chat_id else None
-    # Telegram forum topics, Slack threads and Matrix threads all key on the parent chat/room id.
+    # Telegram forum topics and Slack threads key on the parent chat/room id (Matrix is not in
+    # BRANCH_THREAD_PLATFORMS — its forks branch in place, see the module docstring).
     return str(source.chat_id) if source.chat_id else None
 
 
@@ -59,8 +62,8 @@ def branch_dest_source(source: SessionSource, *, parent_id: str, thread_id: str,
         # Discord keys an in-thread message on the thread's OWN id as chat_id.
         return dataclasses.replace(source, chat_id=str(thread_id), chat_name=title or source.chat_name,
                                    chat_type="thread", parent_chat_id=str(parent_id), **common)
-    # Telegram (``group:<chat>:<topic>``, private-chat topics stay ``dm``), Slack (parent channel's
-    # dm/group + workspace scope) and Matrix (room type) key a thread reply on the PARENT chat's type.
+    # Telegram (``group:<chat>:<topic>``, private-chat topics stay ``dm``) and Slack (parent
+    # channel's dm/group + workspace scope) key a thread reply on the PARENT chat's type.
     chat_type = "group" if source.chat_type == "thread" else source.chat_type
     return dataclasses.replace(source, chat_id=str(parent_id), chat_type=chat_type, **common)
 

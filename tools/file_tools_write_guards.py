@@ -171,6 +171,9 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
             f"Refusing to write to Hermes config file: {filepath}\n"
             "Agent cannot modify security-sensitive configuration. "
             "Edit ~/.hermes/config.yaml directly or use 'hermes config' instead.")
+    from tools.skill_lock import path_refusal
+    if reason := path_refusal(candidates):
+        return f"Refusing to write to {filepath}: {reason}"
     return None
 
 
@@ -230,7 +233,7 @@ def _protected_instruction_reason(filepath: str, task_id: str = "default",
         resolved = os.path.realpath(normalized)
 
     # ~/.hermes itself is governed by its own guards (config.yaml hard-block,
-    # mirror guard, write_approval); this gate targets PROJECT-LOCAL files only.
+    # mirror guard); this gate targets PROJECT-LOCAL files only.
     # Must run before the ``.hermes`` component rule, which would match the home.
     # ``_hermes_exempt_homes`` also covers the ROOT when the active home is a named
     # profile, so ~/.hermes/<file> cannot read as project-local ``.hermes`` config.
@@ -500,7 +503,7 @@ def _check_binary_document_write(filepath: str, task_id: str = "default") -> str
             f"Refusing to write plain text to binary document '{filepath}' ({ext}). "
             "A text write cannot produce a valid document container and would "
             "corrupt the file (read_file showed you EXTRACTED text, not the real "
-            "bytes). Use the docx/xlsx/powerpoint skills or a library like "
+            "bytes). Use the microsoft-office skill or a library like "
             "python-docx/openpyxl/python-pptx via the terminal to create or edit "
             "this document.")
     # A -wal/-shm/-journal path is never a legitimate text target, even when

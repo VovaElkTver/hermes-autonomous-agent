@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import time
 
-from . import model
+from . import mandate, model
+
+OPEN_TASK_STATES_FOR_RESUME = ("blocked", "failed", "needs_human")
 
 ALLOWED: dict[str, set[str]] = {
     "draft": {"needs_clarification", "deferred", "ready"},
@@ -88,8 +90,22 @@ def _reviews_current(conn, task, kw) -> str | None:
     return None
 
 
+def _mandate_still_valid(conn, t, **kw) -> str | None:
+    """Resume revalidation (donor `Policy.revalidate` at resume): a task accepted
+    under an older policy does not silently continue under a changed one."""
+    reason = mandate.stale_reason(conn, t["task_id"])
+    if reason:
+        return f"mandate: {reason}"
+    return None
+
+
+for _edge in ((s, "ready") for s in OPEN_TASK_STATES_FOR_RESUME):
+    GUARDS.setdefault(_edge, []).append(_mandate_still_valid)
+
+
 def transition(conn, task_id: str, to_state: str, *, basis: str,
-               permission: dict | None = None, expected_epoch: int | None = None) -> dict:
+               permission: dict | None = None,
+               expected_epoch: int | None = None) -> dict:
     task = model.get_task(conn, task_id)
     if task is None:
         raise LookupError(task_id)
@@ -104,4 +120,13 @@ def transition(conn, task_id: str, to_state: str, *, basis: str,
     conn.execute("INSERT INTO ctl_state_transition(ts,task_id,from_state,to_state,basis)"
                  " VALUES (?,?,?,?,?)", (time.time(), task_id, frm, to_state, basis))
     model.set_task_state(conn, task_id, to_state)
+    if to_state == "running":
+        # Mandate (dsh-superagent port): record what this entering-running was
+        # authorized by; guards above already passed — never a second opinion.
+        mandate.issue(conn, task_id, strength="explicit", basis=basis,
+                      actor=task["owner"], scope=task["workdir"])
+    elif to_state == "cancelled":
+        # A person's stop withdraws the mandate (donor: stopTicket). Terminal
+        # otherwise stays immutable per the state machine rules.
+        mandate.withdraw(conn, task_id)
     return {"task_id": task_id, "from": frm, "to": to_state}

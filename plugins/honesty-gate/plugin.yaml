@@ -1,0 +1,10 @@
+name: honesty-gate
+version: "0.1.0"
+description: "Честный контур исполнения: stage_open записывает задание в REPORTS.md ДО исполнения; stage_close после исполнения отправляет задание+результат критику с фиксированным вопросом «Что ещё можно было сделать для полноты исполнения?», сохраняет запрос и ответ критика в REPORTS.md и возвращает ответ исполнителю."
+kind: standalone
+platforms: [linux, macos, windows]
+provides_tools:
+  - stage_open
+  - stage_close
+  - stage_list
+provides_hooks: []

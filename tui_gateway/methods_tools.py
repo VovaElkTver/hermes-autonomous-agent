@@ -919,30 +919,21 @@ def _cmd_compress(rid, params, session, name, arg):
         return _err(rid, 5009, f"compress failed: {exc}")
 
 
-# ─── /memory + /skills write-approval review ─────────────────────────────────
-# The review surface (pending / approve / reject / diff / approval) is owned by the shared handler
-# hermes_cli/write_approval_commands.handle_pending_subcommand, which the classic CLI and the
-# messaging gateway already reach. Desktop/TUI clients normally get it through slash.exec ->
-# _SlashWorker (a private HermesCLI), but command.dispatch is their FALLBACK stage — with no
-# route here, a failed worker turned every /memory into the routing refusal "not a quick/
-# plugin/bundle/skill command: memory", so staged writes had no review path at all.
-#
+# ─── /memory store usage ─────────────────────────────────────────────────────
+# --- /memory on the command.dispatch fallback stage -------------------------------------------
+# Desktop/TUI clients normally get slash commands through slash.exec -> _SlashWorker (a private
+# HermesCLI), but command.dispatch is their FALLBACK stage — with no route here, a failed worker
+# turned every /memory into the routing refusal "not a quick/plugin/bundle/skill command: memory".
 # The store must resolve under the SAME home as the command, which is why these run inside the
 # dispatcher's `_session_home_scope(session)` block: `load_on_disk_store()` reads the profile's
 # MEMORY.md/USER.md and its memory char limits (see the scope note on `_session_home_scope`,
 # #110695).
-_MEMORY_USAGE = ("Unknown /memory subcommand. "
-                 "Use: pending, approve <id>, reject <id>, approval <on|off>.")
-_SKILLS_USAGE = ("Unknown /skills subcommand here. "
-                 "Use: pending, approve <id>, reject <id>, diff <id>, approval <on|off>. "
-                 "(Search/install/browse are terminal-side.)")
 
 
-def _pending_subcommand_store(session):
+def _memory_store_for_session(session):
     """Memory store for the session's own profile: the live agent's store when there is one, else a
-    freshly loaded on-disk store — mirroring cli.py's /memory handler and the gateway's (Desktop/TUI
-    sessions have no long-lived agent store). ``None`` when even that fails, which the shared handler
-    reports as "memory store unavailable" instead of claiming the write was applied."""
+    freshly loaded on-disk store — mirroring the classic CLI and gateway /memory handlers
+    (Desktop/TUI sessions have no long-lived agent store). ``None`` when even that fails."""
     if session:
         with contextlib.suppress(Exception):
             store = getattr(session.get("agent"), "_memory_store", None)
@@ -953,48 +944,18 @@ def _pending_subcommand_store(session):
     return None
 
 
-def _write_approval_mode_setter(subsystem: str):
-    """Persist ``<subsystem>.write_approval`` into the SESSION's profile config (this runs inside
-    ``_session_home_scope``, so ``_write_config_key`` writes the right profile's config.yaml)."""
-    return lambda enabled: _write_config_key(f"{subsystem}.write_approval", bool(enabled))
-
-
-def _run_pending_review(rid, subsystem: str, arg: str, session, *, unknown: str):
-    from hermes_cli.write_approval_commands import handle_pending_subcommand
-    from tools import write_approval as wa
-    out = handle_pending_subcommand(
-        subsystem, (arg or "").split(),
-        memory_store=_pending_subcommand_store(session) if subsystem == wa.MEMORY else None,
-        set_mode_fn=_write_approval_mode_setter(subsystem))
-    return _exec_out(rid, out if out is not None else unknown)
-
-
 def _cmd_memory(rid, params, session, name, arg):
-    """/memory — review staged memory writes, approve/reject them, toggle the gate."""
-    return _run_pending_review(rid, "memory", arg, session, unknown=_MEMORY_USAGE)
-
-
-def _cmd_skills(rid, params, session, name, arg):
-    """/skills write-approval subcommands only; the hub subcommands stay with the slash worker.
-
-    Returns None (falls through to the routing refusal, unchanged behaviour) for anything outside
-    the review surface — ``search``/``install``/``browse``/``inspect`` are the CLI skills hub's,
-    never a staged-write review. The allowlist mirrors the registry-declared review slice
-    (``CommandDef("skills", desktop_subcommands=...)`` in hermes_cli/commands.py)."""
-    sub = (arg or "").split()
-    commands = _tools_mod("hermes_cli.commands")
-    allowed = getattr(commands.resolve_command("skills"), "desktop_subcommands", None) or ()
-    if not sub or sub[0].lower() not in allowed:
-        return None
-    from tools import write_approval as wa
-    # The gate being off must not strand writes that are already staged (gateway parity): still
-    # answer when a pile exists, and point at the toggle when there is nothing to review.
-    if (sub[0].lower() not in {"approval", "mode"} and not wa.write_approval_enabled(wa.SKILLS)
-            and wa.pending_count(wa.SKILLS) == 0):
-        return _exec_out(rid, "Skill write approval is off (skills.write_approval). "
-                              "Enable it with /skills approval on, then review staged writes "
-                              "with /skills pending.")
-    return _run_pending_review(rid, "skills", arg, session, unknown=_SKILLS_USAGE)
+    """/memory — show built-in memory store usage."""
+    store = _memory_store_for_session(session)
+    if store is None:
+        return _exec_out(rid, "Memory is not available in this profile.")
+    lines = []
+    for target, label in (("memory", "MEMORY.md"), ("user", "USER.md")):
+        with contextlib.suppress(Exception):
+            if not store.target_enabled(target):
+                continue
+            lines.append(f"{label}: {len(store._entries_for(target))} entries, {store._usage(target)} chars")
+    return _exec_out(rid, "\n".join(lines) or "Memory stores are disabled in config.")
 
 
 _SLASH_BUILTINS = {
@@ -1002,7 +963,7 @@ _SLASH_BUILTINS = {
     "moa": _cmd_moa, "focus": _cmd_focus, "retry": _cmd_retry, "steer": _cmd_steer, "goal": _cmd_goal,
     "loop": _cmd_loop, "undo": _cmd_undo, "snapshot": _cmd_snapshot, "snap": _cmd_snapshot,
     "compress": _cmd_compress, "compact": _cmd_compress,
-    "memory": _cmd_memory, "skills": _cmd_skills}
+    "memory": _cmd_memory}
 
 @method("command.dispatch")
 def _(rid, params: dict) -> dict:
@@ -1675,15 +1636,15 @@ def _plugin_rows() -> list[dict]:
         # enable: _plugin_status reports the truthful default instead of "not enabled" (reads as OFF).
         status = pc._plugin_status(name, enabled, disabled, key=key, source=source, dir_path=_dir, active=active)
         # key = canonical registry key (names collide across category dirs); portable = Agent Plugins v1.
-        # ``has_desktop_half``: the package also ships a Desktop UI half (``desktop/plugin.js``). The
-        # desktop app pairs its app-level copy of that half with this row so one package is ONE row.
+        # ``has_desktop_half``: the package also ships a Desktop UI half (``desktop_source``: a root or
+        # ``desktop/`` plugin.js). The app pairs its app-level copy of that half with this ONE row.
         _dir_path = Path(str(_dir)) if _dir else None
         portable = pc._is_portable_plugin_dir(_dir)
         out.append({
             "name": name, "key": key, "version": str(version or ""), "description": desc or "",
             "source": source, "status": status, "portable": portable,
             "install_dir": str(_dir_path) if _dir_path else "",
-            "has_desktop_half": bool(_dir_path and (_dir_path / "desktop" / "plugin.js").is_file()),
+            "has_desktop_half": bool(_dir_path and _tools_mod("hermes_cli.desktop_plugin_halves").desktop_source(_dir_path)),
             # Manifest ``config_schema`` + current values: the Plugins hub renders these as a form.
             "settings_schema": _tools_mod("hermes_cli.plugins_settings").plugin_settings_fields(key, _dir_path),
             "servers": _plugin_server_rows(_dir_path, key, portable=portable, catalog_titles=titles),
@@ -1754,6 +1715,12 @@ def _plugins_toggle(rid, params):
         "name": key, "plugin": row}, key))
 
 
+def _source_moved_data(result: dict) -> dict | None:
+    """The structured marker of an install refused because the source left the reviewed commit: the
+    client re-inspects on ``reason``, never on the message, which echoes text a git server controls."""
+    return {"reason": "source_moved"} if result.get("source_moved") else None
+
+
 def _plugins_install(rid, params):
     # ``catalog_name`` alone installs a curated entry at its pinned SHA (resolved server-side, kill list
     # enforced, no bypass) — same contract as the dashboard endpoint.
@@ -1764,10 +1731,48 @@ def _plugins_install(rid, params):
     _ensure_plugin_activation_listener()
     result = _tools_mod("hermes_cli.plugins_cmd").dashboard_install_plugin(
         ident, force=bool(params.get("force")), enable=params.get("enable", True), catalog_name=catalog_name or None,
-        ref=str(params.get("ref") or "").strip() or None)
+        ref=str(params.get("ref") or "").strip() or None,
+        inspected_sha=str(params.get("inspected_sha") or "").strip() or None)
     if not result.get("ok"):
-        return _err(rid, 5026, result.get("error") or "install failed")
+        return _err(rid, 5026, result.get("error") or "install failed", data=_source_moved_data(result))
     return _ok(rid, _with_activation(result, str(result.get("plugin_name") or "")) if result.get("enabled") else result)
+
+
+def _plugins_inspect(rid, params):
+    """Read-only pre-install check of ``identifier``/``repo`` (or ``catalog_name`` at its pin): which halves it
+    ships. Nothing is installed or run; a source that cannot be read answers ``ok: false`` + ``error``."""
+    ident = (params.get("identifier") or params.get("repo") or "").strip()
+    catalog_name = str(params.get("catalog_name") or "").strip()
+    if not ident and not catalog_name:
+        return _err(rid, 4019, "plugins.inspect requires 'identifier', 'repo', or 'catalog_name'")
+    inspect = _tools_mod("hermes_cli.plugins_cmd_inspect").inspect_plugin_source
+    return _ok(rid, inspect(ident, catalog_name=catalog_name or None))
+
+
+def _plugins_install_desktop(rid, params):
+    """Install a repository's desktop half onto this host (``desktop-plugins/<name>``) — what Electron's
+    ``installDesktopPlugin`` does, for a browser-hosted client with no disk of its own. ``ref`` is the
+    commit the install dialog reviewed; the loader picks the folder up on its next scan."""
+    ident = (params.get("identifier") or params.get("repo") or "").strip()
+    catalog_name = str(params.get("catalog_name") or "").strip()
+    if not ident and not catalog_name:
+        return _err(rid, 4019, "plugins.manage install_desktop requires 'identifier', 'repo', or 'catalog_name'")
+    result = _tools_mod("hermes_cli.desktop_plugin_install").install_desktop_plugin(
+        ident, ref=params.get("ref"), catalog_name=catalog_name or None, force=bool(params.get("force")))
+    if not result.get("ok"):
+        return _err(rid, 5026, result.get("error") or "desktop install failed", data=_source_moved_data(result))
+    return _ok(rid, result)
+
+
+def _plugins_remove_desktop(rid, params):
+    """Delete one installed desktop plugin folder from this host. The desktop half of a package is
+    refused: that package's own removal takes it away."""
+    name = (params.get("name") or params.get("key") or "").strip()
+    if not name:
+        return _err(rid, 4019, "plugins.manage remove_desktop requires a 'name'")
+    result = _tools_mod("hermes_cli.desktop_plugin_install").remove_desktop_plugin(
+        name, force=bool(params.get("force")))
+    return _ok(rid, result) if result.get("ok") else _err(rid, 5026, result.get("error") or "desktop remove failed")
 
 
 def _plugins_update(rid, params):
@@ -1858,7 +1863,8 @@ def _plugins_presence(rid, params):
 
 
 _PLUGINS_ACTIONS = {"list": _plugins_list, "onboarding": _plugins_onboarding, "presence": _plugins_presence,
-                    "toggle": _plugins_toggle, "install": _plugins_install,
+                    "toggle": _plugins_toggle, "install": _plugins_install, "inspect": _plugins_inspect,
+                    "install_desktop": _plugins_install_desktop, "remove_desktop": _plugins_remove_desktop,
                     "update": _plugins_update, "remove": _plugins_remove, "settings": _plugins_settings}
 
 
@@ -1867,7 +1873,7 @@ def _(rid, params: dict) -> dict:
     """TUI Plugins Hub backend (shares primitives with ``hermes plugins`` / the dashboard):
     ``list`` → {plugins, user_count, bundled_count}; ``toggle`` flips ``key``/``name`` per ``enable``;
     ``install`` git-clones ``identifier``/``repo`` or a curated ``catalog_name`` (``force``, ``enable``
-    default True); ``update`` re-pins a catalog install or pulls a git install (``force`` accepts a caution scan); ``remove`` deletes
+    default True); ``inspect`` reports which halves that source ships, installing nothing; ``update`` re-pins a catalog install or pulls a git install (``force`` accepts a caution scan); ``remove`` deletes
     a user install by ``name``; ``settings`` writes manifest-declared ``values`` for ``key``."""
     return _run_action(rid, params, _PLUGINS_ACTIONS, "plugins")
 

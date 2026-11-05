@@ -1,5 +1,5 @@
 """Atomic multi-op batch path for ``skill_manage``. Origin state
-(``skill_manage``/``_find_skill``/``_skill_gate_bypass``) is reached lazily
+(``skill_manage``/``_find_skill``) is reached lazily
 through ``tools.skill_manager_tool`` so that module owns it."""
 
 from contextlib import suppress
@@ -241,15 +241,6 @@ def _skill_manage_batch(operations, default_name: str | None = None, task_id: st
     names, err = _validate_batch_ops(operations, default_name, tool_error)
     if err is not None:
         return err
-    if not _smt._skill_gate_bypass.get():
-        # Approval gate for the WHOLE batch as one pending write.
-        def _staging(wa):
-            acts = ", ".join(op["action"] for op in operations)
-            gist = f"batch({len(operations)} ops: {acts}) on {', '.join(sorted(set(names)))}"
-            return {"action": "batch", "operations": operations}, gist
-        staged = _smt._run_write_gate(_staging)
-        if staged is not None:
-            return staged
     # Every target's lock is held from the snapshot through commit or rollback; the per-op
     # skill_manage() calls re-enter them. Without the outer fence a concurrent writer landing
     # between the snapshot and a rollback would be silently reverted.
@@ -261,10 +252,8 @@ def _skill_manage_batch(operations, default_name: str | None = None, task_id: st
         if snap_err is not None:
             shutil.rmtree(snap_root, ignore_errors=True)
             return tool_error(snap_err, success=False)
-        # Single-op path with the gate bypassed (the batch already cleared/staged it).
         results = []
         rollback_failed = False
-        token = _smt._skill_gate_bypass.set(True)
         try:
             for i, op in enumerate(operations):
                 raw = _smt._skill_manage_from({**op, "name": names[i], "operations": None},
@@ -293,7 +282,6 @@ def _skill_manage_batch(operations, default_name: str | None = None, task_id: st
                 entry.update({k: parsed[k] for k in _ADVISORY_KEYS if parsed.get(k) is not None})
                 results.append(entry)
         finally:
-            _smt._skill_gate_bypass.reset(token)
             if rollback_failed:
                 # Keep the snapshots so the operator can still recover by hand.
                 logger.warning("skill_manage batch rollback failed, snapshots kept at %s", snap_root)

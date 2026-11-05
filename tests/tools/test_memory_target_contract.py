@@ -1,4 +1,4 @@
-"""Memory calls must name one store before writing or staging a proposal."""
+"""Memory calls must name one store before writing."""
 
 import copy
 import json
@@ -7,33 +7,29 @@ from types import SimpleNamespace
 import pytest
 
 from agent.inline_tool_executors import INLINE_TOOL_EXECUTORS
-from hermes_cli.config import load_config, save_config
-from tools.memory_tool import MemoryStore, apply_memory_pending
+from tools.memory_tool import MemoryStore
 from tools.registry import registry
 from tools.skill_provenance import reset_current_write_origin, set_current_write_origin
-from tools import write_approval as wa
 
 
 def _call(route, store, args):
     if route == "store":
         return store.apply_batch(args.get("target"), args["operations"])
-    if route == "replay":
-        return apply_memory_pending({"action": "batch", **args}, store)
     if route == "inline":
         agent = SimpleNamespace(_memory_store=store, _memory_manager=None)
         return json.loads(INLINE_TOOL_EXECUTORS["memory"](agent, args, None))
     return json.loads(registry.dispatch("memory", args, store=store))
 
 
-@pytest.mark.parametrize("route", ["registry", "inline", "store", "replay"])
-@pytest.mark.parametrize("origin", ["direct", "foreground", "background_review"])
+@pytest.mark.parametrize("route", ["registry", "inline", "store"])
+@pytest.mark.parametrize("origin", ["direct", "background_review"])
 @pytest.mark.parametrize("target_fields,nested_fields", [
     ({}, {}),
     ({"target": None}, {}),
     ({}, {"target": "user"}),
     ({"target": "memory"}, {"target": "user"}),
 ])
-def test_invalid_targets_leave_files_and_pending_queue_unchanged(
+def test_invalid_targets_leave_store_unchanged(
     route, origin, target_fields, nested_fields,
 ):
     store = MemoryStore()
@@ -41,9 +37,6 @@ def test_invalid_targets_leave_files_and_pending_queue_unchanged(
     for target in ("memory", "user"):
         assert store.add(target, f"Existing {target} fact")["success"]
     before = {t: store._path_for(t).read_bytes() for t in ("memory", "user")}
-    config = load_config()
-    config.setdefault("memory", {})["write_approval"] = origin != "direct"
-    save_config(config)
     # A bad target in a later operation must reject the entire batch.
     args = {**target_fields, "operations": [
         {"action": "add", "content": "First fact"},
@@ -58,13 +51,11 @@ def test_invalid_targets_leave_files_and_pending_queue_unchanged(
     assert result["success"] is False, result
     assert "target" in result["error"] and "top level" in result["error"]
     assert "retry" in result["error"].lower()
-    assert not result.get("staged")
-    assert wa.list_pending(wa.MEMORY) == []
     assert args == original
     assert {t: store._path_for(t).read_bytes() for t in before} == before
 
 
-@pytest.mark.parametrize("route", ["registry", "inline", "store", "replay"])
+@pytest.mark.parametrize("route", ["registry", "inline", "store"])
 @pytest.mark.parametrize("nested", ["user", None])
 def test_nested_target_matching_the_call_is_accepted(route, nested):
     store = MemoryStore()

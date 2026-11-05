@@ -210,20 +210,16 @@ class TestMemoryStoreReplace:
         assert batch_result["success"] is True
         assert batch_result["replaced_entries"] == {1: "second entry"}
 
-    def test_replace_same_across_single_batch_and_approval_replay(self, tmp_path, monkeypatch):
-        """The three dispatch surfaces (store.replace, apply_batch, apply_memory_pending
-        write-approval replay) must agree on the final entry for the same op (#117952).
-        Each surface gets its OWN store dir — the surfaces share nothing but the op."""
-        from tools.memory_tool import apply_memory_pending
+    def test_replace_same_across_single_and_batch(self, tmp_path, monkeypatch):
+        """The two dispatch surfaces (store.replace, apply_batch) must agree on the final
+        entry for the same op (#117952). Each surface gets its OWN store dir."""
         entry = "alpha fact. beta fact. gamma fact."
         op = {"action": "replace", "old_text": "beta fact.", "content": "beta fact, updated."}
         results = {}
 
         for surface, run in (
                 ("single", lambda s: s.replace("memory", op["old_text"], op["content"])),
-                ("batch", lambda s: s.apply_batch("memory", [op])),
-                ("replay", lambda s: apply_memory_pending({"action": "batch", "target": "memory",
-                                                           "operations": [{**op, "matched_entry": entry}]}, s))):
+                ("batch", lambda s: s.apply_batch("memory", [op]))):
             store_dir = tmp_path / surface
             store_dir.mkdir()
             monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda d=store_dir: d)
@@ -232,7 +228,7 @@ class TestMemoryStoreReplace:
             assert run(store)["success"] is True
             results[surface] = store.memory_entries[0]
 
-        assert results["single"] == results["batch"] == results["replay"] == "beta fact, updated."
+        assert results["single"] == results["batch"] == "beta fact, updated."
 
 
     def test_replace_ambiguous_match(self, store):
@@ -966,11 +962,10 @@ class TestBatchRefusesToEmptyNonEmptyStore:
 class TestBackgroundReviewDeleteGate:
     """An unattended background-review fork may append, never delete: the near-limit
     'consolidate now' hint is otherwise an instruction to decide what to forget,
-    executed with no human in the loop. Denied ops are staged as pending proposals
-    (surfaced via /memory pending) instead of silently dropped — the fork's own review
-    summary is never published back."""
+    executed with no human in the loop. Denied destructive ops are refused outright —
+    memory writes are direct, there is no pending-proposal store."""
 
-    def test_remove_staged_not_applied(self, store, tmp_path, monkeypatch):
+    def test_remove_denied_not_applied(self, store, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         store.add("memory", "never create records without permission")
         token = set_current_write_origin("background_review")
@@ -978,19 +973,12 @@ class TestBackgroundReviewDeleteGate:
             result = json.loads(memory_tool(action="remove", old_text="without permission", store=store))
         finally:
             reset_current_write_origin(token)
-        assert result["success"] is True
-        assert result["staged"] is True
-        assert result["proposal_staged"] is True
-        assert result["pending_id"]
+        assert result["success"] is False
+        assert "may not delete" in result["error"]
         # Fail-closed: the standing rule is still on disk.
         assert "never create records without permission" in store._entries_for("memory")
-        # The proposal itself landed in the pending store for the user to approve or discard.
-        from tools.write_approval import MEMORY, get_pending
-        record = get_pending(MEMORY, result["pending_id"])
-        assert record["payload"]["action"] == "remove"
-        assert record["origin"] == "background_review"
 
-    def test_patch_staged_in_background_review(self, store, tmp_path, monkeypatch):
+    def test_patch_denied_in_background_review(self, store, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         store.add("memory", "entry the fork must not rewrite")
         token = set_current_write_origin("background_review")
@@ -999,12 +987,12 @@ class TestBackgroundReviewDeleteGate:
                 action="patch", old_text="entry the fork", content="rewritten by fork", store=store))
         finally:
             reset_current_write_origin(token)
-        assert result["staged"] is True
-        assert result["proposal_staged"] is True
+        assert result["success"] is False
+        assert "may not delete" in result["error"]
         # Fail-closed: the original entry is untouched.
         assert "entry the fork must not rewrite" in store._entries_for("memory")
 
-    def test_batch_containing_remove_staged_whole_batch(self, store, tmp_path, monkeypatch):
+    def test_batch_containing_remove_denied_whole_batch(self, store, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         store.add("memory", "rule one")
         token = set_current_write_origin("background_review")
@@ -1015,9 +1003,10 @@ class TestBackgroundReviewDeleteGate:
             ], store=store))
         finally:
             reset_current_write_origin(token)
-        assert result["staged"] is True
-        # Atomic: the batch is only a proposal — its add must not land either.
+        assert result["success"] is False
+        # Atomic denial: the refused batch must not land its add either.
         assert "fork consolidation" not in store._entries_for("memory")
+        assert "rule one" in store._entries_for("memory")
 
     def test_add_still_allowed_in_background_review(self, store):
         token = set_current_write_origin("background_review")

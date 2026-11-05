@@ -1255,45 +1255,26 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
             print(output)
 
     def _handle_skills_command(self, cmd: str):
-        """Handle /skills slash command — delegates to hermes_cli.skills_hub, after intercepting the
-        write-approval review subcommands (pending/approve/reject/diff/mode)."""
+        """Handle /skills slash command — delegates to hermes_cli.skills_hub."""
         from cli import ChatConsole
-        args = cmd.strip().split()[1:]
-        review_words = {"pending", "approve", "apply", "reject", "deny", "drop", "diff", "approval", "mode"}
-        if args and args[0].lower() in review_words:
-            from hermes_cli.write_approval_commands import handle_pending_subcommand
-            from tools import write_approval as wa
-            out = handle_pending_subcommand(
-                wa.SKILLS, args, set_mode_fn=lambda enabled: self._save_write_approval("skills", enabled),
-            )
-            if out is not None:
-                return print(out)
         from hermes_cli.gateway_tools import handle_skills_slash  # + the gateway's rescan
         handle_skills_slash(cmd, ChatConsole(), cli=self)
 
     def _handle_memory_command(self, cmd: str):
-        """Handle /memory slash command — pending review + approval-gate toggle."""
-        from hermes_cli.write_approval_commands import handle_pending_subcommand
-        from tools import write_approval as wa
-        args = cmd.strip().split()[1:]
+        """Handle /memory slash command — show built-in memory store usage."""
         store = getattr(self.agent, "_memory_store", None) if getattr(self, "agent", None) else None
         if store is None:
-            # No live agent store (e.g. Desktop GUI): use a fresh on-disk store, as the gateway
-            # does — same MEMORY/USER.md, same configured char limits.
-            # Apply against a freshly loaded on-disk store, mirroring the gateway path
-            # (gateway/slash_commands.py): it persists to the same MEMORY/USER.md and creates MEMORY.md on
-            # the first approved write. Without this the shared handler returns "memory store unavailable".
-            # See #46783.
             from tools.memory_tool import load_on_disk_store
             store = load_on_disk_store()
-        out = handle_pending_subcommand(
-            wa.MEMORY, args, memory_store=store,
-            set_mode_fn=lambda enabled: self._save_write_approval("memory", enabled))
-        print(out if out is not None else _t("memory.unknown_subcommand"))
-
-    def _save_write_approval(self, subsystem: str, enabled: bool):
-        """Persist <subsystem>.write_approval to config (for /memory|/skills approval)."""
-        _save(f"{subsystem}.write_approval", bool(enabled))
+        lines = []
+        for target, label in (("memory", "MEMORY.md"), ("user", "USER.md")):
+            try:
+                if not store.target_enabled(target):
+                    continue
+                lines.append(f"{label}: {len(store._entries_for(target))} entries, {store._usage(target)} chars")
+            except Exception:
+                continue
+        print("\n".join(lines) or "Memory stores are disabled in config.")
 
     # ---- prompt-queueing handlers: /learn, /plan, /init -----------------------------------
     def _queue_prompt_turn(self, msg: str, command: str, ack: str = "") -> None:
@@ -1362,6 +1343,8 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
 
         def produce():
             from agent.vault_backends.unlock import set_code_prompt_callback, set_save_login_prompt_callback, set_unlock_prompt_callback
+            from gateway.session_context import declare_stateless_channel
+            declare_stateless_channel()  # nothing drains a bg_* session's completions later: delegations join (#140569)
             set_sudo_password_callback(self._sudo_password_callback)
             set_approval_callback(self._approval_callback)
             set_unlock_prompt_callback(self._vault_unlock_callback)
@@ -1402,10 +1385,8 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
                         response = _gt("model.error_prefix", error=result["error"])
                     return response
                 finally:
-                    # One agent per /bg task in a long-lived CLI process: close()
-                    # is the owner boundary (memory shutdown, tool subprocesses,
-                    # httpx clients); an unclosed side agent leaks all of them
-                    # until the CLI exits (#50197).
+                    # One agent per /bg task in a long-lived CLI: close() is the owner boundary (memory,
+                    # tool subprocesses, httpx clients); unclosed, they leak until the CLI exits (#50197).
                     with suppress(Exception):
                         bg_agent.close()
             finally:

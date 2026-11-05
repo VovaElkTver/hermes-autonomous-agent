@@ -77,13 +77,11 @@ The most common report looks like this: you tell the agent where something lives
 
    If the fact is not there, the model claimed a save it never made. Small local models (roughly under 30B parameters) and models with weak tool-calling do this often — they produce the confirmation without the tool call. Ask explicitly ("use the `memory` tool to save the vault path `/srv/vault`") and confirm the entry landed in the file. If it keeps happening, the fix is a stronger model for setup, not more instructions; once the entries exist, a smaller model reads them fine because they arrive in the system prompt.
 
-2. **Check the write wasn't staged.** With `write_approval: true`, writes outside the interactive CLI are held for review and never reach the file until approved — run `/memory pending` and `/memory approve all`. See [Controlling memory writes](#controlling-memory-writes-write_approval).
+2. **Check you are reading the same memory you wrote.** Memory is per [profile](../profiles.md): `hermes -p work` (or `work chat` / `work gateway start`) reads `~/.hermes/profiles/work/memories/`, not `~/.hermes/memories/`. A CLI session in the default profile and a Telegram bot on another profile do not share notes. `hermes profile list` shows what exists.
 
-3. **Check you are reading the same memory you wrote.** Memory is per [profile](../profiles.md): `hermes -p work` (or `work chat` / `work gateway start`) reads `~/.hermes/profiles/work/memories/`, not `~/.hermes/memories/`. A CLI session in the default profile and a Telegram bot on another profile do not share notes. `hermes profile list` shows what exists.
+3. **Check memory is enabled.** `memory.memory_enabled: false` (or `memory` under `agent.disabled_toolsets`) removes the tool entirely — the model cannot save anything, whatever it says. See [Configuration](#configuration).
 
-4. **Check memory is enabled.** `memory.memory_enabled: false` (or `memory` under `agent.disabled_toolsets`) removes the tool entirely — the model cannot save anything, whatever it says. See [Configuration](#configuration).
-
-5. **Remember the snapshot is frozen at session start.** A fact saved in the current session is visible to the *next* session, not to another session that was already running. Start a new session (`/new`, or a fresh CLI invocation) after the write.
+4. **Remember the snapshot is frozen at session start.** A fact saved in the current session is visible to the *next* session, not to another session that was already running. Start a new session (`/new`, or a fresh CLI invocation) after the write.
 
 Two things that do **not** make the agent remember: variables in `.env` (those are credentials and settings, not memory) and facts mentioned in passing without asking for them to be saved. For a location the agent needs on every run of a recurring task, a [skill](./skills.md) is often the better home than a memory entry — it loads only when relevant and does not compete for the 2,200-character budget.
 
@@ -105,7 +103,7 @@ for the user profile. A batch uses that one target for every operation:
 ```
 
 Missing or null targets, and a target inside an operation that differs from the top-level
-one, return an error before writing or staging approval. Correct the payload and retry; use separate calls to update both stores.
+one, return an error before the write lands. Correct the payload and retry; use separate calls to update both stores.
 
 ### Substring Matching
 
@@ -127,8 +125,7 @@ surrounding text. To drop text from an entry, patch a longer span that contains 
 pass the whole entry as `old_text` (an exact whole-entry match wins over substring matches).
 
 There is no `replace` action. It overwrote the whole matched entry, and models used it as a find-and-swap,
-which wiped the other facts in multi-fact entries. A `replace` call now returns an error pointing at `patch`;
-writes staged for approval before this change still apply as staged.
+which wiped the other facts in multi-fact entries. A `replace` call now returns an error pointing at `patch`.
 
 ## Two Targets Explained
 
@@ -289,7 +286,6 @@ memory:
   user_profile_enabled: true
   memory_char_limit: 2200   # ~800 tokens
   user_char_limit: 1375     # ~500 tokens
-  write_approval: false     # false = write freely (default) | true = require approval
   prefetch_spill_enabled: false  # external recall stays intact unless explicitly enabled
 ```
 
@@ -305,7 +301,7 @@ external provider tools too.
 With only `memory_enabled: false` (user profile still on), the tool stays —
 it backs the profile store — but the system prompt swaps the full memory
 guidance for a narrower profile-only block. The tool schema advertises only the
-`user` target, and direct or staged writes to disabled `MEMORY.md` are rejected.
+`user` target, and direct writes to disabled `MEMORY.md` are rejected.
 The inverse configuration advertises only `memory` and rejects `USER.md` writes.
 
 ### External recall size
@@ -326,48 +322,12 @@ are captured at provider registration: restart Hermes after changing them.
 See [oversized prefetch results](../../developer-guide/memory-provider-plugin.md#oversized-prefetch-results)
 for the configuration details.
 
-## Controlling memory writes (`write_approval`)
-
-By default the agent saves memory freely — including from the background
-self-improvement review that runs after a turn. If you'd rather approve saves
-first, set `memory.write_approval: true`. It's a simple on/off gate applied to
-**both** foreground turns and the background review:
-
-| `write_approval` | Behaviour |
-|------------------|-----------|
-| `false` (default) | Write freely — the gate is off (the pre-gate behaviour). |
-| `true` | Require approval before anything is saved. In the interactive CLI, foreground writes prompt you inline (entries are small enough to read in full). Everywhere else — messaging platforms, scripts, and the background self-improvement review — writes are **staged** for review with `/memory pending`. |
-
-> To turn memory off entirely (not just gate it), set both `memory_enabled: false` and `user_profile_enabled: false`. When both built-in stores are disabled, the built-in `memory` tool is automatically hidden.
-
-Review staged writes from the CLI or any messaging platform:
-
-```
-/memory pending             # list staged memory writes (auto ones tagged [auto])
-/memory approve <id>        # apply one (or 'all')
-/memory reject <id>         # drop one (or 'all')
-/memory approval on         # turn the gate on (or 'off') and persist it
-```
-
-This is the answer to "the agent saved a wrong assumption about me": set
-`write_approval: true`, and every save — especially the unprompted background
-ones — waits for your yes/no before it ever enters your profile.
-
-A staged `patch` or `remove` (the background review stages these even with the
-gate off) records the full entry it targets, and `/memory pending` shows it.
-Approval applies to exactly that entry: if it changed after the write was staged,
-the write is refused and stays pending for you to reject. A `replace`/`patch`/`remove`
-staged before this pinning existed has no verifiable target and is refused too:
-reject it and recreate the change. `/memory approve` lists the full text of
-every entry it overwrote or removed.
-
 ## Background review notifications (`display.memory_notifications`)
 
 After a turn, the background self-improvement review may quietly save a memory
 or update a skill. This is Hermes' consent-aware learning loop: repeated
 corrections and durable workflow lessons become compact memory entries or
-procedural skills, while `write_approval` can stage those writes for review
-before they affect future sessions. By default it surfaces a short
+procedural skills that affect future sessions. By default it surfaces a short
 `💾 Memory updated` line in chat so you know it happened. Control how chatty
 that is:
 
@@ -387,8 +347,8 @@ display:
 > per-platform via `display.platforms.<platform>.memory_notifications`.
 
 Successful skill batches name each applied operation in both `on` and `verbose`
-mode, including supporting-file writes/removals and skill deletion. Staged writes
-awaiting approval and rolled-back batches are not reported as completed changes.
+mode, including supporting-file writes/removals and skill deletion. Rolled-back
+batches are not reported as completed changes.
 Batch summaries use the applied results rather than assuming requested writes ran.
 
 ## Running the review on a cheaper model (`auxiliary.background_review`)
@@ -512,34 +472,6 @@ review that has waited longer than `defer_max_age_s` runs even if the machine
 never goes idle. Explicit `/refine` always runs immediately. The queue is
 in-memory: reviews still pending when the app exits are dropped, same as an
 in-flight fork would have been.
-
-## Controlling skill writes (`skills.write_approval`)
-
-Skills use the same on/off gate, but the review UX differs because a
-`SKILL.md` is far too large to read in a chat bubble:
-
-```yaml
-skills:
-  write_approval: false     # false = write freely (default) | true = require approval
-```
-
-When `write_approval: true`, skill writes (create / edit / patch / write_file /
-delete) always **stage** regardless of origin. You review the one-line gist
-inline, but the full diff stays out-of-band:
-
-```
-/skills pending             # list staged skill writes + a one-line gist each
-/skills diff <id>           # full unified diff (best viewed in CLI or dashboard)
-/skills approve <id>        # apply it (or 'all')
-/skills reject <id>         # drop it (or 'all')
-/skills approval on         # turn the gate on (or 'off') and persist it
-```
-
-On a messaging platform, approve a skill from its gist + metadata, or open
-`/skills diff` on the CLI / dashboard / the staged file under
-`~/.hermes/pending/skills/<id>.json` when you want to read the whole change.
-Full details in [Gating agent skill writes](./skills.md#gating-agent-skill-writes-skillswrite_approval).
-
 
 ## External Memory Providers
 

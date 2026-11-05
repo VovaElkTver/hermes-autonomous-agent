@@ -139,6 +139,16 @@ def _session_search(agent, args: dict, ctx: InlineToolContext) -> Any:
     )
 
 
+def _investigation(agent, args: dict, ctx: InlineToolContext) -> Any:
+    """Investigation self-check tool: inline path so it gets the agent's real
+    session DB (the registry path passes no ``db`` — spec §6 R1, same shape
+    session_fork carries; the store is where the mechanism lives)."""
+    from tools.investigation_tool import investigation
+
+    return investigation(args, db=getattr(agent, "_session_db", None),
+                         current_session_id=str(getattr(agent, "session_id", "") or ""))
+
+
 def _memory(agent, args: dict, ctx: InlineToolContext) -> Any:
     result = _call_tool(
         "tools.memory_tool", "memory_tool", args,
@@ -262,6 +272,7 @@ _RAW_INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
         task_id=lambda agent, ctx: ctx.effective_task_id, agent=lambda agent, ctx: agent,
     ),
     "session_search": _session_search,
+    "investigation": _investigation,
     "memory": _memory,
     "clarify": _tool(
         "tools.clarify_tool", "clarify_tool", ("questions", "questions"),

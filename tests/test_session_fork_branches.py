@@ -193,6 +193,31 @@ class TestAppendMove:
         assert not any("branch" in str(m["content"]) for m in db.get_messages_as_conversation("c"))
         db.close()
 
+    def test_append_moves_rows_after_parent_lives_on(self, tmp_path):
+        """Натурка 02.11: живой родитель дописывает обычные строки после base.
+        Гвард хвоста сверяет флаг значением (0/1), а не ``IS NOT NULL`` — иначе
+        append-слияние запрещено на любом нетривиальном родителе."""
+        from hermes_state import SessionDB
+        db = SessionDB(db_path=tmp_path / "slive.db")
+        db.ensure_session("p", source="t", session_key="kpl")
+        db.append_messages_batch("p", [dict(role="user", content="m1"),
+                                       dict(role="assistant", content="m2")])
+        base = db.get_last_message_uid("p")
+        db.ensure_session("c", source="t", session_key="kl", parent_session_id="p")
+        bid = db.new_branch_id()
+        db.create_branch_row(bid, "p", "c", base)
+        db.append_messages_batch("c", [dict(role="user", content="branch work L")])
+        # родитель продолжает жить между fork и join — обычные строки, без компакции
+        db.append_messages_batch("p", [dict(role="user", content="new parent turn"),
+                                       dict(role="assistant", content="parent reply")])
+        br = db.get_branch(bid)
+        assert br is not None
+        assert db._move_branch_rows_to_parent_sync(br), \
+            "plain post-fork parent rows must not block append-join"
+        contents = [str(m["content"]) for m in db.get_messages_as_conversation("p")]
+        assert contents[-1] == "branch work L" and "new parent turn" in contents
+        db.close()
+
     def test_append_refused_after_compaction(self, tmp_path):
         from hermes_state import SessionDB
         db = SessionDB(db_path=tmp_path / "s2.db")
