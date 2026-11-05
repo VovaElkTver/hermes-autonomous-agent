@@ -487,3 +487,11 @@ VERDICT: [заполняется по завершении параллельн�
 - GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin (ahead 0); skills-write-forbidden 464e76d36f == origin. В hermes-sync-up был 1 не запушенный docs-коммит 095365661a (opencode → optional-skills, чужая сессия, дерево чисто) — запушен FF в origin/upstream-sync-20261103 этим тиком. hermes-sync-base грязный — by design, не чистить.
 - Шлюз 15 мин: 1 строка, 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов в секции приёмки нет.
 - NEXT TICK: шторм-патруль base gateway a2 (оттаивать только frozen-crit, окно ≥20s; CPU≠0 не трогать); при высадке gateway.a2.xml либо NO-CLEAN — проверить .done 21 и переход полосы на e2e.
+
+@05.11 12:1x tick (шлюз-тик):
+- СОБЫТИЕ: base `gateway` a2 rc=3 ACCEPTED 11:51:21 — gateway.a2.xml высадил 13446 testcase (против merged 13509tc; разница покрывается weak-accept правилом — на вердикте сверять executed-count, не только имена). Base-gap по gateway ЗАКРЫТ, chunk в r3-пересписок более не нужен. .done base 21 (прогноз тика 10:1x подтверждён), полоса сама перешла на e2e a1.
+- e2e a1 ЖИВА: 37%, лог пишется в секунду проверки, cgroup chunkbasev6 26610ms/25s; кластеры F/E реальные (зеркало merged e2e 1356tc-weak — на вердикте count-diff). Дедлайн wrapper ~16:10 → a2 storm-watch. После e2e остаётся desktop (NO-CLEAN симметричен исторически → r3).
+- merged ALL-DONE 02:08:20 — не трогать.
+- GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin (ahead/behind 0; origin/fleet/upstream-sync..HEAD = коммиты теневой ветки, ожидание); sync-up dbc3c2ef87 == origin/upstream-sync-20261103.
+- Логи 15 мин: только tool_executor WARNING (чужие сессии), 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов в секции приёмки нет.
+- NEXT TICK: шторм-патруль e2e a1 (frozen-crit окно ≥20s); при NO-CLEAN e2e — остаётся weak/zero-XML, count-diff на вердикте; затем desktop — последний chunk base до base ALL-DONE и VERDICT.
