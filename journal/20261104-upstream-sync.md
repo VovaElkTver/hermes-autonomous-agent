@@ -505,3 +505,10 @@ VERDICT: [заполняется по завершении параллельн�
 - GIT: hermes-agent дерево чисто, more-mem-layer 401f7edea2 == origin; skills-write-forbidden 464e76d36f == origin; sync-up f0ac310421 == origin/upstream-sync-20261103 (до этого коммита). hermes-sync-base грязный — by design.
 - Логи шлюза 15 мин: 1 tool_executor WARNING (чужая сессия), 0 ERROR/Traceback. ToDo 118: «ждёт агента»/~~/самозакрывов нет; контроллер-очередь: task-e29db8067b (ports-fidelity) needs_human — шаг done, ждёт Вл, не агента.
 - NEXT TICK: desktop a1 шторм-патруль (frozen-crit: лог статичен И cgroup <10ms/30s, окно ≥20s); при высадке/NO-CLEAN desktop — base ALL-DONE → тогда VERDICT (r3-список: desktop, security, monitoring, skills, tools, plugins, hermes_cli, hermes_platform, e2e-count-diff, acp_adapter, verify, website + install/manual rc=5 симметрия; executed-counts по чанкам, не только имена).
+
+### Tick 05.11 14:3x
+- THAW: base `desktop` a1 — frozen-crit подтверждён: лог 149B статичен с 12:31:36 (~2ч), pytest-parent (2063757) ticks delta 0/30s, двое defunct-воркеров + `[gw2]/[gw0] node down` в логе. Голый kill parent → rc=143 14:29:01 → a2 авто-поднялась (timeout 2105548/pytest 2105549, живы на проверке +45s). Desktop исторически NO-CLEAN-симметричный → r3 список в силе, вердикт этим не двигается.
+- base .done 22/24 (desktop live, +1 чанк после него). merged ALL-DONE — не трогать.
+- GIT: hermes-agent дерево чисто, more-mem-layer ce2f83975d == origin (включает topic_gate-коммит); main f4520799d2 == origin; elk/topic-gate == origin; skills-write-forbidden 464e76d36f == origin; fleet/upstream-sync a54772c334 == origin. Unpushed ноль (ls-remote сверка по всем веткам).
+- Логи шлюза 15 мин: только tool_executor WARNING чужих сессий (config-write guard, in-gateway restart block) — не падения. ToDo 118: «ждёт агента»/~~/самозакрывов нет.
+- NEXT TICK: desktop a2 шторм-патруль (окно ≥20s; bring-up-висельники лечатся тем же голом kill); после desktop — последний чанк base → ALL-DONE.
