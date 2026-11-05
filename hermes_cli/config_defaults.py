@@ -1331,6 +1331,10 @@ DEFAULT_CONFIG = {
         # One external provider: bundled (retaindb, byterover) or catalog-installed (honcho,
         # hindsight, supermemory, mem0, openviking, holographic). Empty = built-in only.
         "provider": "",
+        # topic_gate (ТЗ v0.1): route registered-topic entries out of MEMORY.md into the
+        # topic's append-file, keeping only an idempotent pointer line globally.
+        "topic_gate": False,
+        "topic_registry": "~/.hermes/memories/topics.yaml",
     },
     # Subagent delegation — override the provider:model used by delegate_task so children run on a
     # cheaper/faster model. Uses the same runtime provider resolution as CLI/gateway startup, so
