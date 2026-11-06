@@ -186,13 +186,94 @@ class MemoryStore:
     _MAX_CONSOLIDATION_FAILURES_PER_TURN = 3
 
     def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375, *,
-                 memory_enabled: bool = True, user_profile_enabled: bool = True):
+                 memory_enabled: bool = True, user_profile_enabled: bool = True,
+                 topic_gate: bool = False, topic_registry: Optional[str] = None):
         self.memory_entries: list[str] = []
         self.user_entries: list[str] = []
         self.memory_char_limit, self.user_char_limit = memory_char_limit, user_char_limit
         self.memory_enabled, self.user_profile_enabled = memory_enabled, user_profile_enabled
+        self.topic_gate = topic_gate
+        self.topic_registry = (topic_registry or None) if topic_gate else None
         self._system_prompt_snapshot: dict[str, str] = {"memory": "", "user": ""}
         self._consolidation_failures = 0  # per turn; reset by reset_consolidation_failures()
+
+    # ── memory.topic_gate (ТЗ v0.1): one branching point for target=memory writes.
+    # Unmatched content / gate off / registry missing → caller falls through to the
+    # legacy branch byte-for-byte; matched → the write lands ONLY in the topic's
+    # append-file plus an idempotent pointer line in MEMORY.md.
+    def _gate_topic(self, text: str):
+        if not (self.topic_registry and text):
+            return None
+        from tools import memory_topic_gate as gate
+        return gate.resolve_topic(self.topic_registry, text)
+
+    def _topic_add(self, rule, content: str) -> dict[str, Any]:
+        from tools import memory_topic_gate as gate
+        if rule.pointer and content == rule.pointer:
+            # The pointer line itself is already canonical MEMORY.md policy — writing it
+            # back as a topic entry would loop it into its own store forever.
+            self._topic_ensure_pointer(rule)
+            return self._success_response(
+                "memory", "Pointer line is canonical policy; nothing duplicated.",
+                topic=rule.name, topic_store=rule.store)
+        if not gate.append_entry(rule.store, content):
+            return _error(f"Topic store {rule.store} is not writable; MEMORY.md "
+                          "was left unchanged.", "other")
+        self._topic_ensure_pointer(rule)
+        return self._success_response(
+            "memory", f"Записано в тему '{rule.name}' → {rule.store}.",
+            topic=rule.name, topic_store=rule.store)
+
+    def _topic_ensure_pointer(self, rule) -> None:
+        """Idempotent single pointer line in MEMORY.md — deliberately exempt from the
+        char-limit/drift guards: pointers are exactly what invariant §2 keeps there."""
+        def _apply(entries, _limit):
+            if rule.pointer in entries:
+                return entries, ""
+            return entries + [rule.pointer], ""
+        self._mutate("memory", _apply, skip_drift=True)
+
+    def _topic_edit(self, rule, old_text: str, new_content: Optional[str],
+                    matched_entry: Optional[str], verb: str) -> dict[str, Any]:
+        """replace/remove/patch inside the topic's append-file. old_text already resolved
+        to *rule* by the gate; a miss there is an honest 'lives in topic X' error."""
+        from tools import memory_topic_gate as gate
+        entries = gate.read_entries(rule.store)
+        idx = self._locate(entries, old_text, verb, matched_entry)
+        if isinstance(idx, dict):
+            reason = idx.get("error") or "lookup failed"
+            return _error(
+                f"The entry belongs to topic '{rule.name}' ({rule.store}) and was NOT found "
+                f"there as requested ({verb}). {reason} Nothing was written.", "topic_routed")
+        before = entries[idx]
+        if new_content is None:
+            after_entries = entries[:idx] + entries[idx + 1:]
+            extra: dict[str, Any] = {"removed_entry": before}
+            message = "Entry removed."
+        else:
+            after_entries = entries[:idx] + [new_content] + entries[idx + 1:]
+            extra = {"replaced_entry": before}
+            message = "Entry replaced."
+        if not gate.write_entries(rule.store, after_entries):
+            return _error(f"Topic store {rule.store} is not writable; nothing changed.",
+                          "other")
+        return self._success_response("memory", message, topic=rule.name,
+                                      topic_store=rule.store, **extra)
+
+    def _topic_batch_probe(self, operations: list[dict[str, Any]]) -> list[tuple[int, str]]:
+        """(op position, topic name) pairs whose op would route into a topic store."""
+        routed: list[tuple[int, str]] = []
+        for i, op in enumerate(operations, 1):
+            act = op.get("action")
+            probe = ""
+            if act == "add":
+                probe = str(op.get("content") or "")
+            elif act in ("replace", "remove", "patch"):
+                probe = str(op.get("old_text") or "")
+            rule = self._gate_topic(probe)
+            if rule:
+                routed.append((i, rule.name))
+        return routed
 
     # Per-turn counter of failed at-capacity consolidation attempts; reset at each turn boundary by
     # reset_consolidation_failures() (#42405).
@@ -253,6 +334,40 @@ class MemoryStore:
                                "further additions are blocked until it is back under the limit.",
                                path.name, count, limit)
             self._system_prompt_snapshot[target] = self._render_block(target, [_sanitize(e, path.name) for e in entries])
+
+        # topic_gate v0.2 («Вердикт по инжекции слепка реестра в промпт»): a POLICY snapshot of
+        # the registry rides in the memory block, frozen at load time like the entries themselves.
+        # Invariant §2б keeps policy in the prompt; drift is covered by the disclaimer line, not by
+        # session restarts. Gate off / registry unreadable → nothing appended (prompt unchanged).
+        if self.topic_gate:
+            block = self._topic_registry_snapshot()
+            if block:
+                snap = self._system_prompt_snapshot.get("memory") or ""
+                self._system_prompt_snapshot["memory"] = f"{snap}\n\n{block}" if snap else block
+
+    def _topic_registry_snapshot(self) -> str:
+        """≤4 lines per topic (name/match/store/pointer) + one disclaimer line."""
+        if not self.topic_registry:
+            return ""
+        from tools import memory_topic_gate as gate
+
+        rules = gate.load_registry(self.topic_registry)
+        if not rules:
+            return ""
+
+        def one(text) -> str:
+            return " ".join(str(text).split())
+
+        lines: list[str] = []
+        for rule in rules:
+            lines.append(f"- {one(rule.name)}")
+            lines.append("  match: " + ", ".join(one(p) for p in rule.match))
+            lines.append(f"  store: {one(rule.store)}")
+            if rule.pointer:
+                lines.append(f"  pointer: {one(rule.pointer)}")
+        lines.append("Registry may have changed since this session started; "
+                     "the memory tool's reply is authoritative over this snapshot.")
+        return "\n".join(lines)
 
     @staticmethod
     @contextmanager
@@ -401,6 +516,8 @@ class MemoryStore:
             return _error("Content cannot be empty.", "missing_content")
         if scan_error := _scan_memory_content(content):
             return _error(scan_error, "scan_blocked")
+        if target == "memory" and (rule := self._gate_topic(content)):
+            return self._topic_add(rule, content)
 
         def _add(entries, limit):
             if content in entries:
@@ -442,6 +559,10 @@ class MemoryStore:
     def _patch(self, target: str, old_text: str, new_text: str,
                matched_entry: Optional[str] = None) -> dict[str, Any]:
         """Locked find-and-splice inside the matched entry (#124582)."""
+        if target == "memory":
+            probe = matched_entry if matched_entry is not None else old_text
+            if (rule := self._gate_topic(probe)):
+                return self._topic_edit(rule, old_text, new_text, matched_entry, "patch")
         def _apply(entries, limit):
             idx = self._locate(entries, old_text, "patch", matched_entry)
             if isinstance(idx, dict):
@@ -495,6 +616,11 @@ class MemoryStore:
     def _edit(self, target: str, old_text: str, new_content: Optional[str],
               matched_entry: Optional[str] = None) -> dict[str, Any]:
         """Locked replace (``new_content`` set) or remove (None) of the entry matching *old_text*."""
+        if target == "memory":
+            probe = matched_entry if matched_entry is not None else old_text
+            if (rule := self._gate_topic(probe)):
+                verb = "replace" if new_content else "remove"
+                return self._topic_edit(rule, old_text, new_content, matched_entry, verb)
         def _apply(entries, limit):
             idx = self._locate(entries, old_text, "replace" if new_content else "remove", matched_entry)
             if isinstance(idx, dict):
@@ -580,6 +706,18 @@ class MemoryStore:
         if not operations:
             return _error("operations list is empty.", "invalid_args")
         ops = [op or {} for op in operations]
+        # topic_gate v0.1: a batch that mixes topic-routed ops with global ones cannot be
+        # atomic across two files, so it is refused BEFORE any write — each themed op goes
+        # as its own single call instead (same «nothing was written» contract as above).
+        if commit and target == "memory":
+            routed = self._topic_batch_probe(ops)
+            if routed:
+                detail = ", ".join(f"op#{i} → '{name}'" for i, name in routed)
+                return _error(
+                    f"memory.topic_gate: operations would route to registered topics ({detail}). "
+                    "Batches stay within one store: send each themed operation as its own "
+                    "single call (the response names its topic store), then retry the "
+                    "remaining global batch. Nothing was written.", "topic_routed")
         # Scan every add/replace content BEFORE touching disk -- one poisoned op rejects the batch.
         for i, op in enumerate(ops):
             scan_error = op.get("action") in {"add", "replace"} and op.get("content") and _scan_memory_content(op["content"])

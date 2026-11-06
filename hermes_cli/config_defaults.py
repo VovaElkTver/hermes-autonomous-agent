@@ -1312,6 +1312,10 @@ DEFAULT_CONFIG = {
         # One external provider: bundled (retaindb, byterover) or catalog-installed (honcho,
         # hindsight, supermemory, mem0, openviking, holographic). Empty = built-in only.
         "provider": "",
+        # topic_gate (ТЗ v0.1): route registered-topic entries out of MEMORY.md into the
+        # topic's append-file, keeping only an idempotent pointer line globally.
+        "topic_gate": False,
+        "topic_registry": "~/.hermes/memories/topics.yaml",
     },
     # Subagent delegation: `backend` = task-routing strategy ("default": keys below), `backends.<name>` = its settings.
     "delegation": {
