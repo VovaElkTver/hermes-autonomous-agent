@@ -110,3 +110,13 @@ active/running на merged main (чекаут 54037d7b3f). Логи с моме�
 от прогонов 23:30/00:30 (ДО pm-репра 08:58), та же подписка
 NoCommittedEnvironment — не триажим, самоочистятся tonight. Деплой-контур
 upstream-sync-20261106 закрыт на нашей стороне; остаётся приёмка Вл.
+
+## Autonomy-тик 13:2x (06.11)
+
+Дерево чисто; `main == origin/main == 8bed355724` (ls-remote), непушнутого нет
+(разрыв `origin/fleet/upstream-sync..HEAD` — стылость ToDo-лейна ветки fleet,
+содержимое целиком в main, догонять нечего). Шлюз active c 12:14:38, за 15 мин
+0 ERROR/Traceback; 4 «Matrix: sync error» за час (13:06 эgress-блипы, сами
+рассосались, sync-токен двигается) — не инцидент. «ждёт агента»/~~самозакрывов
+в ToDo и свежих journal-секциях нет; все ветки == origin.Остаётся только
+приёмка Вл (upstream-sync merge, causal V-O9, skills-write-forbidden).
