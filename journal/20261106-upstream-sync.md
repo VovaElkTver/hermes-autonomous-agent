@@ -422,3 +422,19 @@ chunk*-юнитов нет. ToDo.md (mtime 05.11): «ждёт агента» 0, 
 секции приёмки нет с правки Вл 02.11 — вскрывать нечего.
 Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden, fork_profile).
+
+---
+
+## Тик 20:1x (06.11)
+
+Чисто. Дерево пусто, main==origin/main@1d7e30c26c (ls-remote, ahead 0),
+fleet-тень@a54772c3 без новой ToDo-дельты. Шлюз активен с 12:14:38, без
+рестартов; за 15 мин только WARNING чужих cron-сессий (execute_code
+BLOCKED ×2, grep no-match) — не сбои шлюза. За 60 мин ERROR/Traceback
+строк уровня шлюза нет. chunk*-юнитов нет. Jobs: daily-trace-harvest /
+idle-intake-interesting streak=1 — прогоны 05.11 23:30 / 06.11 00:30, оба
+ДО pm-repair 08:58, самоочистятся tonight, инцидента нет. ToDo.md
+(mtime 05.11): «ждёт агента» 0, самозакрывов 0, секции приёмки нет с
+правки Вл 02.11 — вскрывать нечего.
+Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
+skills-write-forbidden, fork_profile).
