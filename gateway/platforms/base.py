@@ -2481,6 +2481,11 @@ class BasePlatformAdapter(ABC):
         """Buffer a text event (merging into a pending one) and restart the flush timer."""
         if self._drop_unresolved(event):
             return
+        # Durable task-queue bridge: owner text advances a parked walk-list head.
+        # Deterministic, fail-open, no-op without open tasks (gateway/task_bridge.py).
+        if event.text and not event.text.startswith("/"):
+            from gateway.task_bridge import on_owner_message as _task_bridge
+            _task_bridge(getattr(event.source, "chat_id", "") or "")
         key = self._text_batch_key(event)
         existing = self._pending_text_batches.get(key)
         if existing is None:
