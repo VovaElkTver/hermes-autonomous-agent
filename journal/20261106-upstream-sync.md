@@ -222,3 +222,18 @@ Traceback/ERROR. ToDo.md (mtime 05.11 13:42): «ждёт агента» нет, 
 вхождений; секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки Вл 163e12d5c5 — вскрывать
 нечего. Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden).
+
+## Тик 16:4x (06.11)
+- Git: дерево чисто; main 6c3e63411a == origin/main (ls-remote). Тени сверены
+  поls-remote: elk/autonomous-mode, elk/events-cron-removal,
+  elk/skills-write-forbidden (464e76d36f), fleet/rebase-2710,
+  fleet/upstream-sync, more-mem-layer, elk/upstream-sync-20261106 — все MATCH.
+  elk/ticker-audit-fixes отсутствует на origin — предок main (merge-base
+  --is-ancestor), тенить нечего.
+- Шлюз 15 мин: 3 строки, 0 ERROR; Traceback внутри строки — tool_executor
+  WARNING чужой сессии (execute_code), не шлюз. glm-libert api_key WARNING —
+  стоячая конфиг-норма auxiliary-клиента.
+- ToDo.md (118 строк): «ждёт агента» нет, `~~` — 0 вхождений; секции приёмки
+  нет с 163e12d5c5 — вскрывать нечего. Память: убрана устаревшая строка
+  «sync-ветка ждёт перевода чекаута/рестарта» (исполнено 06.11 12:14,
+  зафиксировано второй строкой). Остаётся только приёмка Вл.
