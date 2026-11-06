@@ -19,6 +19,7 @@ _HERMES_CORE_TOOLS = [
     "browser_vault",  # rides with the browser; deferred by default (tools.tool_search.defer)
     "text_to_speech",
     "todo_list", "memory",
+    "task_queue",  # tasks_kernel v0: durable queue, event-driven continuation
     "session_search",
     "clarify",
     "execute_code", "delegate_task",
