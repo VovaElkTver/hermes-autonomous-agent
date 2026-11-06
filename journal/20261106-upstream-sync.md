@@ -322,3 +322,17 @@ ExecMainStartTimestamp 12:14:38). ToDo.md (118 строк): «ждёт аген�
 `~~` — 0, секции приёмки нет с правки Вл 02.11 — вскрывать нечего. Остаётся
 только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden, fork_profile).
+
+---
+
+## Тик 18:2x (06.11)
+
+Чисто. Рабочее дерево пусто, HEAD==origin/main@deef2040ec (ls-remote сверен,
+ahead 0); fleet-тень a54772c334==origin. За 15 мин журнала шлюза — ноль строк
+(-- No entries), ноль Traceback/ERROR; шлюз активен без рестартов (NRestarts=0,
+ExecMainStartTimestamp 12:14:38). Доп. сверка сирот: 17 локальных веток без
+теней на origin — все проверены `merge-base --is-ancestor` как MERGED в
+origin/main (древние 13.10–02.11), ни одной с незапушенной работой; чистить
+не велено, тронуты не были. ToDo.md: «ждёт агента» — 0, `~~` — 0, секции
+приёмки нет с правки Вл 02.11 — вскрывать нечего. Остаётся только приёмка Вл
+(upstream-sync merge+деплой, causal V-O9, skills-write-forbidden, fork_profile).
