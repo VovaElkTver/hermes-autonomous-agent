@@ -120,3 +120,14 @@ upstream-sync-20261106 закрыт на нашей стороне; остаёт
 рассосались, sync-токен двигается) — не инцидент. «ждёт агента»/~~самозакрывов
 в ToDo и свежих journal-секциях нет; все ветки == origin.Остаётся только
 приёмка Вл (upstream-sync merge, causal V-O9, skills-write-forbidden).
+
+## Autonomy-тик 13:5x (06.11)
+
+Дерево чисто; `main == origin/main == 735cb1595d` (fetch+ls-remote), непушнутого
+нет. Все тени == origin: elk/skills-write-forbidden 464e76d36f, elk/topic-gate
+ce2f83975d, elk/topic-gate-inject-v02 0c285095d1, elk/upstream-sync-20261106
+5e8e71120a, more-mem-layer eb04f3a4da; elk/ticker-audit-fixes — предок HEAD.
+Шлюз active c 12:14:38, за 15 мин «-- No entries --» (ни ERROR, ни Traceback).
+ToDo.md во fleet/upstream-sync идентичен main (diff пуст). «ждёт агента» и
+~~самозакрывов~~ в ToDo и свежих journal-секциях нет. Остается только приёмка Вл
+(upstream-sync merge + деплой, causal V-O9, skills-write-forbidden).
