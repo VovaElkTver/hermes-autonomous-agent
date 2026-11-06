@@ -253,3 +253,19 @@ main. Тень обновлена молча (push FF), ls-remote сверен: 
 агента» нет, `~~` — 0 вхождений; секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки Вл
 163e12d5c5 — вскрывать нечего. Остаётся только приёмка Вл (upstream-sync
 merge+деплой, causal V-O9, skills-write-forbidden).
+
+---
+
+## Тик 17:1x (06.11)
+
+Чисто. Полная сверка 68 локальных веток (for-each-ref, точное поsha-сравнение
+с origin ls-remote): все вершины == origin-тени одного имени, ни одного
+расхождения; working tree пуст, main==origin/main@f2a072cce2 (0 непушных).
+f2a072cce2. Fleet-тень upstream-sync@a54772c334 — легаси-ветка реестра ToDo
+(14 её коммитов не в main), содержимое ToDo.md идентично main (git diff пуст),
+трогать нечего. Шлюз active с 12:14:38; за 15 мин — 2 записи: WARNING
+tool_executor 17:06 (чужая cron-сессия, journalctl «No entries» exit 1),
+не сбой шлюза; ноль Traceback/ERROR. ToDo.md: «ждёт агента» нет, `~~` — 0,
+секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки Вл 02.11 — вскрывать нечего. Остаётся
+только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
+skills-write-forbidden, fork_profile).
