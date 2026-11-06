@@ -198,3 +198,14 @@ webhook-cross-host, webhook-smoke. Залиты молча по правилу �
 
 Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden).
+
+## Autonomy-тик 15:3x (06.11)
+
+Дерево чисто; `main == origin/main == 1aee7d052b` (ls-remote сверен). Тени
+elk-arm64-timeout-headroom{,-pr}, fix/pending-review-sigil, fix/stage-dedup,
+fleet/rebase-2710 — local==remote по хешам (весь «ahead» список в for-each-ref
+— артефакт tracking-on-main, не непушнутая работа). Шлюз active с 12:14:38;
+за 15 мин — ни одной записи юнита (0 ERROR/Traceback). ToDo.md (118 строк,
+mtime 05.11 13:42): «ждёт агента» нет, `~~` — 0 вхождений; секции «ЖДЁТ
+ПРИЁМКИ ВЛ» нет с правки Вл 163e12d5c5 — вскрывать нечего. Остается только
+приёмка Вл (upstream-sync merge+деплой, causal V-O9, skills-write-forbidden).
