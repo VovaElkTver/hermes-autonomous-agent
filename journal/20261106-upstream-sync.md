@@ -269,3 +269,17 @@ tool_executor 17:06 (чужая cron-сессия, journalctl «No entries» exi
 секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки Вл 02.11 — вскрывать нечего. Остаётся
 только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden, fork_profile).
+
+---
+
+## Тик 17:3x (06.11)
+
+Чисто. Рабочее дерево пусто, HEAD==origin/main@963ba64fe9 (ls-remote сверен;
+«незапушенные» из `origin/fleet/upstream-sync..HEAD` — ложный сигнал
+restricted fetch refspec, легаси-флит-тень отстаёт by design). За 15 мин
+журнала шлюза 4 строки — все WARNING agent.tool_executor 17:17–17:20
+(чужие cron-сессии: heredoc/execute_code guard-блокировки, DIVERGED-вывод
+сверки 17:1x-тика), ноль Traceback/ERROR, шлюз без рестартов с 12:14:38.
+ToDo.md: «ждёт агента» нет, `~~` — 0, секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки
+Вл 02.11 — вскрывать нечего. Остаётся только приёмка Вл (upstream-sync
+merge+деплой, causal V-O9, skills-write-forbidden, fork_profile).
