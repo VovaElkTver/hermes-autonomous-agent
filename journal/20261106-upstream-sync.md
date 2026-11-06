@@ -165,3 +165,16 @@ daily-trace-harvest (last_run 05.11 23:30) и idle-intake-interesting
 ToDo.md не менялся (163e12d5c5 — секции приёмки нет); «ждёт агента» и
 ~~самозакрывов~~ нет. Остаётся только приёмка Вл (upstream-sync merge+деплой,
 causal V-O9, skills-write-forbidden).
+
+## Autonomy-тик 14:4x (06.11)
+
+Дерево чисто; `main == origin/main == HEAD == cf8087f2de`, `@{u}..HEAD` пуст —
+непушнутого нет (сверено `ls-remote`: main=cf8087f2de, fleet/upstream-sync=
+a54772c334 — отдельные тени, расхождение main/fleet ожидаемо). Шлюз active; за
+15 мин ровно 1 запись — не ошибка. external-workers: свежий .stderr 14:44 =
+безобидный RuntimeWarning runpy, не сбой воркера. jobs.json: enabled nonzero
+только известные stale-строки daily-trace-harvest/idle-intake-interesting
+(запуски 23:30/00:30 — до pm-repair 08:58), следующий прогон tonight,
+самоочистятся, не триажим. ToDo.md без изменений (mtime 05.11 13:42); «ждёт
+агента»/~~самозакрывов~~ нет. Остаётся только приёмка Вл (upstream-sync
+merge+деплой, causal V-O9, skills-write-forbidden).
