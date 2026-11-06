@@ -178,3 +178,23 @@ a54772c334 — отдельные тени, расхождение main/fleet о
 самоочистятся, не триажим. ToDo.md без изменений (mtime 05.11 13:42); «ждёт
 агента»/~~самозакрывов~~ нет. Остаётся только приёмка Вл (upstream-sync
 merge+деплой, causal V-O9, skills-write-forbidden).
+
+## Autonomy-тик 14:5x (06.11)
+
+Дерево чисто; `main == origin/main == 041eee0226` (ls-remote). Шлюз active с
+12:14:38; за 15 мин нет ни Traceback, ни ERROR — только собственные WARNING
+agent.tool_executor cron-сессий (14:45 heredoc-BLOCKED + jq-косяк чужой сессии,
+14:56 execute_code-BLOCKED этого тика) — классифицировано ранее, не ворота.
+ToDo.md (mtime 05.11 13:42): «ждёт агента» и ~~самозакрывов~~ нет.
+
+Находка тика: 8 осиротевших локальных веток без origin-тени с типами не в main
+(тот же класс, что fleet/rebase-2710 в 14:0x): keep/live-snapshot-2410
+(RELEASES.md утверждал «запушена в origin», но на origin её не было — расхождение
+устранено самим фактом пуша), live-snapshot-2610, controller-supervision,
+feat/slash-for, feat/sqlite-checkpoint-v2, docs/fork-slash-commands,
+webhook-cross-host, webhook-smoke. Залиты молча по правилу осиротевших теней
+(создание тени, FF-смысла нет — веток на origin не было); ls-remote сверен по
+восьми хешам (local==remote). Содержание не деплоить — просто сохранено.
+
+Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
+skills-write-forbidden).
