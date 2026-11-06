@@ -78,3 +78,21 @@ fail+teardown-error — один корень). Классификация: **or
 
 Чекаут основного репо возвращён на more-mem-layer (правило «живой шлюз =
 проверенный код»: краш-рестарт поднимет то, что загрузилось в 08:58).
+
+## Приёмка-деплой 06.11 12:08 (наблюдение autonomy-тика)
+
+Параллельный деплой-контур (session/pm-цикл, не этот тик) в 12:08:04–12:08:48
+исполнил перевод прода: checkout more-mem-layer→main, `hermes pm sync`
+(exit 0, venv_rebuild ok, receipt pm_20261106T090812Z), merge
+elk/upstream-sync-261106 → main (`aef4e5acea`, ort), refresh checkout, push.
+Сверено ls-remote: `origin/main == aef4e5acea` (содержит more-mem-layer
+eb04f3a4da + topic-gate v0.2 0c285095d1 + upstream-дельту 1326 + Gate-B
+вердикт 5e8e71120a); `origin/elk/upstream-sync-20261106 == 5e8e71120a`;
+дерево чистое, не запушенного нет. Шлюз на момент тика жил ещё сборкой
+08:58:55 (more-mem-layer@eb04f3a4da) — рестарт деплой-контур за собой не
+оставил. Тик смонтировал самозакрывающийся guarded-рестарт:
+autonomy-gw-restart-261106.timer (~12:14 MSK), скрипт
+gw-restart-sync-261106.sh делает no-op, если шлюз уже перезапускался или
+чекаут сдвинулся; след в journalctl (`gw-restart-sync`). Логи шлюза за
+15 мин тика: 0 ERROR/Traceback (только собственные execute_code-BLOCKED
+WARNING). ToDo.md 118 строк: «ждёт агента»/~~самозакрывов нет.
