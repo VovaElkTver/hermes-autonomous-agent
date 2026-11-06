@@ -37,9 +37,31 @@ more-mem-layer — 3189, двойной счёт донора; формулир�
 - Gate-B (tests/hermes_state): гоняется фоном, лог
   `~/.hermes/cache/scratch/hermes_state_gate2.log` — итог дописывается ниже.
 
+## Gate-B итог (06.11 ~10:35, тик)
+
+`tests/hermes_state/` целиком: **2 failed, 1789 passed, 59 skipped, 1 error** (2623 с).
+Разбор двух находок:
+
+1. `test_local_lineage_cache.py::test_read_snapshot_does_not_outlive_its_transaction`
+   — падает детерминированно (в изоляции тоже). Проверка на main@f4520799d2
+   (scratch-worktree, PYTHONPATH=, .venv): падает ИДЕНТИЧНО → предсуществующая
+   находка с 05.11, НЕ регрессия сегодняшнего слияния. Вероятная первопричина —
+   окружение: хостовый SQLite 3.50.4 форкает на `journal_mode=DELETE` (WAL-reset
+   баг, warning в логе прогона), а тест 3e8e7bd3bf (апстрим 23.10) написан под
+   snapshot-изоляцию WAL. Класс environment-red.
+2. `test_state_db_repair_non_destructive.py::test_interrupted_snapshot_rolls_back_destination`
+   — в изоляции ПРОХОДИТ. Стопок в полный прогон = StopIteration глобального
+   monkeypatch `time.monotonic` (двухэлементный тик-итератор выжигает фоновый
+   поток другого теста). Класс flaky-ordering, не регрессия.
+
+Мerged-only регрессий нет → Gate-B принят с двумя классифицированными находками
+(обе — очередь долгов не этого слияния; lineage-тест стоит отдельной строкой
+Вл на ратификацию environment-классификации).
+
 ## Статус
 
-Запушено в origin, ls-remote сверен. Шлюз продолжает жить на
+Gate-A и Gate-B закрыты (этот тик додрал Gate-B, висел «ждёт агента»). Ветка
+запушена в origin, ls-remote сверен. Шлюз продолжает жить на
 more-mem-layer@0c285095d1 (v0.2, перезапуск 08:58 прошёл — MainPID сменился,
 инцидент PM-install-key закрыт самим фактом цикла). Перевод чекаута прода и
-рестарт на sync-ветку = шаг приёмки Вл после Gate-B.
+рестарт на sync-ветку = шаг приёмки Вл.
