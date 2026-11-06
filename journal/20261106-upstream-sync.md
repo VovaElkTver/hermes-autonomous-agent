@@ -96,3 +96,17 @@ gw-restart-sync-261106.sh делает no-op, если шлюз уже пере�
 чекаут сдвинулся; след в journalctl (`gw-restart-sync`). Логи шлюза за
 15 мин тика: 0 ERROR/Traceback (только собственные execute_code-BLOCKED
 WARNING). ToDo.md 118 строк: «ждёт агента»/~~самозакрывов нет.
+
+## Рестарт подтверждён 06.11 12:22 (autonomy-тик)
+
+Guarded-рестарт сработал штатно: `ExecMainStartTimestamp=12:14:38`, юнит
+`autonomy-gw-restart-261106` — dead/elapsed (самозакрывающийся), шлюз
+active/running на merged main (чекаут 54037d7b3f). Логи с момента старта:
+ни ERROR, ни Traceback (Matrix-коннект рабочий, кросс-сайнинг WARNING —
+штатные). Штук-работы тика: `origin/main == HEAD == 54037d7b3f`, 0 непушнутых;
+`ToDo.md` во fleet/upstream-sync идентичен main (diff пуст — догонять нечего).
+Внешние cron-воркеры: hermes-mcp-listing-watchdog ok/0 (самоочистился, как
+прогнозировалось); daily-trace-harvest и idle-intake-interesting — streak=1
+от прогонов 23:30/00:30 (ДО pm-репра 08:58), та же подписка
+NoCommittedEnvironment — не триажим, самоочистятся tonight. Деплой-контур
+upstream-sync-20261106 закрыт на нашей стороне; остаётся приёмка Вл.
