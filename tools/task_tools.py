@@ -83,16 +83,16 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
-def register() -> None:
-    from tools.registry import registry
+# Module-level registration is REQUIRED: discover_builtin_tools() AST-scans for a
+# top-level ``registry.register(...)`` statement (the receiver NAME must literally
+# be ``registry``) and skips helpers-only modules.
+from tools.registry import registry
 
-    registry.register(
-        name="task_queue",
-        toolset="tasks",
-        schema=QUEUE_SCHEMA,
-        check_fn=lambda args: _check_args(args),
-        handler=lambda args, **kw: task_queue(args or {}, **kw),
-        emoji="🧾")
+registry.register(
+    name="task_queue",
+    toolset="tasks",
+    schema=QUEUE_SCHEMA,
+    check_fn=lambda args: _check_args(args),
+    handler=lambda args, **kw: task_queue(args or {}, **kw),
+    emoji="🧾")
 
-
-register()
