@@ -209,3 +209,16 @@ fleet/rebase-2710 — local==remote по хешам (весь «ahead» спис
 mtime 05.11 13:42): «ждёт агента» нет, `~~` — 0 вхождений; секции «ЖДЁТ
 ПРИЁМКИ ВЛ» нет с правки Вл 163e12d5c5 — вскрывать нечего. Остается только
 приёмка Вл (upstream-sync merge+деплой, causal V-O9, skills-write-forbidden).
+
+## Autonomy-тик 16:0x (06.11)
+
+Дерево чисто; `main == origin/main == 9d51fba9fc` (ls-remote сверен). Тени
+elk-arm64-timeout-headroom{,-pr}, fix/pending-review-sigil, fix/stage-dedup,
+fleet/rebase-2710 — local==remote по хешам («ahead» в for-each-ref — артефакт
+tracking-on-main). Шлюз active с 12:14:38; за 15 мин — ровно 1 запись:
+WARNING tool_executor 15:54:57 «No matches found (not an error)» — собственный
+греп чужой cron-сессии, не воркер-стрейк (классифицировано в 14:2x), ни одного
+Traceback/ERROR. ToDo.md (mtime 05.11 13:42): «ждёт агента» нет, `~~` — 0
+вхождений; секции «ЖДЁТ ПРИЁМКИ ВЛ» нет с правки Вл 163e12d5c5 — вскрывать
+нечего. Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
+skills-write-forbidden).
