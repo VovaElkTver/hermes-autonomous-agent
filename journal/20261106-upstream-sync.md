@@ -350,3 +350,16 @@ ahead 0 / behind 0); fleet-тень a54772c334==origin. За 15 мин журн�
 MERGED). ToDo.md: «ждёт агента» — 0, `~~` — 0, секции приёмки нет с правки Вл
 02.11 — вскрывать нечего. Остаётся только приёмка Вл (upstream-sync
 merge+деплой, causal V-O9, skills-write-forbidden, fork_profile).
+
+---
+
+## Тик 18:5x (06.11)
+
+Чисто. Рабочее дерево пусто, HEAD==origin/main@a419fea167 (ls-remote сверен,
+ahead 0); fleet-тень a54772c334==origin (ToDo.md не менялся — синк не нужен).
+Журнал шлюза за 15 мин — «-- No entries --»; юнит активен без рестартов
+(ExecMainStartTimestamp 12:14:38). Журналы: все вхождения «ждёт агента» —
+исторический нарратив тиков (Gate-B додрян 06.11), живых пунктов нет; ToDo.md
+(mtime 05.11 13:42): «ждёт агента» 0, `~~` 0, секции приёмки нет с правки Вл
+02.11 — вскрывать нечего. Остаётся только приёмка Вл (upstream-sync
+merge+деплой, causal V-O9, skills-write-forbidden, fork_profile).
