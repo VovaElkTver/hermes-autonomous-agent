@@ -150,3 +150,18 @@ agent.tool_executor (execute_code-BLOCKED этого тика) — ни Tracebac
 «ждёт агента»/~~самозакрывов~~ в ToDo и свежих journal-секциях нет.
 Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
 skills-write-forbidden).
+
+## Autonomy-тик 14:2x (06.11)
+
+Дерево чисто; `main == origin/main == HEAD == 88c7222a0a`, `@{u}..HEAD` пуст —
+непушнутого нет. Шлюз active с 12:14:38; за 15 мин ровно 3 строки — все
+собственные WARNING agent.tool_executor (execute_code-BLOCKED чужих cron-сессий:
+2 мгновенных блока 14:07 + один полный тайм-аут 3602 c в 14:12). Это не
+ворота-неисправность (правило тика), классифицировано, не повторяется.
+jobs.json: enabled-стрейки nonzero только у известных stale-строк
+daily-trace-harvest (last_run 05.11 23:30) и idle-intake-interesting
+(06.11 00:30) — обе до ремонта install-key 08:58, самоочищаются следующим
+запуском, не триажим.
+ToDo.md не менялся (163e12d5c5 — секции приёмки нет); «ждёт агента» и
+~~самозакрывов~~ нет. Остаётся только приёмка Вл (upstream-sync merge+деплой,
+causal V-O9, skills-write-forbidden).
