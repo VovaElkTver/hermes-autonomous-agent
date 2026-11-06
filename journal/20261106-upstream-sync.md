@@ -65,3 +65,16 @@ Gate-A и Gate-B закрыты (этот тик додрал Gate-B, висел
 more-mem-layer@0c285095d1 (v0.2, перезапуск 08:58 прошёл — MainPID сменился,
 инцидент PM-install-key закрыт самим фактом цикла). Перевод чекаута прода и
 рестарт на sync-ветку = шаг приёмки Вл.
+
+## Gate-B вердикт (дополнение)
+
+`tests/hermes_state` целиком на merged HEAD: **2 failed + 1 error, 1789 passed,
+59 skipped** за 43m51s. Единственный красный узел —
+`test_state_db_repair_non_destructive.py::test_interrupted_snapshot_rolls_back_destination`
+(StopIteration в исчерпавшемся генераторе ticks у monkeypatched `time.monotonic`,
+fail+teardown-error — один корень). Классификация: **order-flake** — узел зелёный
+в изоляции и на базе (f4520799d2, проверено отдельным worktree), и на merged HEAD.
+Регрессий от слияния нет; передеплой не блокирует.
+
+Чекаут основного репо возвращён на more-mem-layer (правило «живой шлюз =
+проверенный код»: краш-рестарт поднимет то, что загрузилось в 08:58).
