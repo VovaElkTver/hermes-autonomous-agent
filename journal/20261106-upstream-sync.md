@@ -131,3 +131,22 @@ ce2f83975d, elk/topic-gate-inject-v02 0c285095d1, elk/upstream-sync-20261106
 ToDo.md во fleet/upstream-sync идентичен main (diff пуст). «ждёт агента» и
 ~~самозакрывов~~ в ToDo и свежих journal-секциях нет. Остается только приёмка Вл
 (upstream-sync merge + деплой, causal V-O9, skills-write-forbidden).
+
+## Autonomy-тик 14:0x (06.11)
+
+Дерево чисто; `main == origin/main == 64f13539ce` (fetch+ls-remote), непушнутого
+нет. Тени сверены по ls-remote поштучно: elk/skills-write-forbidden 464e76d36f,
+elk/topic-gate ce2f83975d, elk/topic-gate-inject-v02 0c285095d1,
+elk/upstream-sync-20261106 5e8e71120a, more-mem-layer eb04f3a4da — все == origin;
+elk/ticker-audit-fixes — предок HEAD (is-ancestor подтверждён).
+Находка тика: `fleet/rebase-2710` (worktree ~/ha-upstream, дерево чисто) —
+локальная ветка без origin-тени, tip 6bb04ab866 (gateway loop-level heartbeat
+file) не в main (git cherry '+'). Залита молча в origin по правилу осиротевших
+теней (source==dest FF); ls-remote сверен. Содержание — не деплоить, просто
+сохранено.
+Шлюз active с 12:14:38, за 15 мин только собственные WARNING
+agent.tool_executor (execute_code-BLOCKED этого тика) — ни Traceback, ни
+повторных ERROR. Матрикс-блип 13:06 (классифицирован ранее) не повторялся.
+«ждёт агента»/~~самозакрывов~~ в ToDo и свежих journal-секциях нет.
+Остаётся только приёмка Вл (upstream-sync merge+деплой, causal V-O9,
+skills-write-forbidden).
