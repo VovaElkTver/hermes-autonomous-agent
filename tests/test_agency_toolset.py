@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -235,7 +236,9 @@ def test_case1_gate_registers_behind_flag():
 # --- case 2b: loop is the sole owner of agency-state.db -------------------------
 def test_case2b_no_direct_db_access_outside_store():
     # TZ v0.2 §6: loop (store.py) is the ONLY owner of agency-state.db; handlers
-    # and agent code must not open it directly.
+    # and agent code must not open it directly. AST-based: flags real
+    # sqlite3.connect() calls and db-path literals anywhere but store.py.
+    import ast
     plugin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               "plugins", "agency")
     offenders = []
@@ -243,9 +246,94 @@ def test_case2b_no_direct_db_access_outside_store():
         if fname == "store.py" or not fname.endswith(".py"):
             continue
         src = open(os.path.join(plugin_dir, fname)).read()
-        if "sqlite3.connect" in src or "agency-state.db" in src.replace("db_path: <hermes home>", ""):
-            offenders.append(fname)
+        reasons = []
+        if "agency-state.db" in src:
+            reasons.append("db-path literal")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            reasons.append("unparsable")
+            tree = None
+        for node in ast.walk(tree) if tree else ():
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr == "connect" \
+                    and isinstance(node.func.value, ast.Name) \
+                    and node.func.value.id == "sqlite3":
+                reasons.append("sqlite3.connect call")
+                break
+        if reasons:
+            offenders.append(f"{fname}: {','.join(reasons)}")
     assert offenders == [], f"direct DB access outside store.py: {offenders}"
+
+
+# --- case 2c: loop lives between calls — overdue sweep + storage care -----------
+def _ledger_count(db, where="1=1"):
+    return store.connect(db).execute(
+        f"SELECT COUNT(*) FROM ledger WHERE {where}").fetchone()[0]
+
+
+def test_loop_sweep_overdue_marks_once():
+    call("agency_record_commitment", issue_id="i-001", who="admin-1",
+         what="past obligation", due="2026-01-01T00:00:00Z")
+    fut = call("agency_record_commitment", issue_id="i-001", who="admin-1",
+               what="future obligation", due="2099-01-01T00:00:00Z")
+    assert fut["ok"], fut
+    n0 = _ledger_count(DB)
+    marked = store.sweep_overdue(DB, now_iso="2026-11-08T00:00:00Z")
+    assert len(marked) == 1, marked
+    assert _ledger_count(DB) == n0 + 1
+    # second sweep on same clock: nothing new (marker keys are deterministic)
+    assert store.sweep_overdue(DB, now_iso="2026-11-08T00:00:00Z") == []
+    assert _ledger_count(DB) == n0 + 1
+    row = store.connect(DB).execute(
+        "SELECT actor_position_id,type,kind,payload_json FROM ledger WHERE seq=?",
+        (marked[0],)).fetchone()
+    assert row["type"] == "commitment_overdue" and row["kind"] == "observation"
+    assert row["actor_position_id"] == "agency-loop"
+
+
+def test_loop_worker_ticks_between_calls():
+    from plugins.agency.loop import LoopWorker
+    c = call("agency_record_commitment", issue_id="i-001", who="admin-1",
+             what="worker-swept obligation", due="2026-01-01T00:00:00Z")
+    assert c["ok"], c
+    stop = threading.Event()
+    w = LoopWorker(db_path=DB, interval_s=0.05, stop_event=stop)
+    w.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if _ledger_count(DB, "type='commitment_overdue'") >= 1:
+            break
+        time.sleep(0.02)
+    stop.set()
+    w.join(timeout=2)
+    assert not w.is_alive(), "worker must stop cleanly"
+    assert _ledger_count(DB, "type='commitment_overdue'") == 1, \
+        "repeated ticks must not duplicate markers"
+
+
+def test_loop_tick_survives_concurrent_writers():
+    from plugins.agency.loop import LoopWorker
+
+    def writer(i):
+        for k in range(5):
+            call("agency_create_branch", issue_id="i-001", title=f"w{i}-{k}")
+
+    ws = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
+    for t in ws:
+        t.start()
+    stop = threading.Event()
+    w = LoopWorker(db_path=DB, interval_s=0.02, stop_event=stop)
+    w.start()
+    for t in ws:
+        t.join()
+    stop.set()
+    w.join(timeout=2)
+    n = _ledger_count(DB, "type='branch'")
+    assert n == 20, f"all writer events must land exactly once, got {n}"
+    rows = store.connect(DB).execute("SELECT seq FROM ledger ORDER BY seq").fetchall()
+    seqs = [r["seq"] for r in rows]
+    assert len(set(seqs)) == len(seqs), "seq must stay unique under load"
 
 
 # --- signature forgery: model-passed identity fields are ignored -----------------

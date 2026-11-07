@@ -208,5 +208,60 @@ def replay_projection(db_path: str | None, issue_id: str) -> dict:
     return proj
 
 
+def wal_checkpoint(db_path=None) -> None:
+    """Storage maintenance duty of the loop (TZ §6 'optimization'). Best-effort."""
+    try:
+        connect(db_path).execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+    except sqlite3.OperationalError:
+        pass  # busy readers/writers — checkpoint is advisory, retry next tick
+
+
+LOOP_ACTOR = ("agency-loop", 0)   # the core itself; reserved id, not a position
+
+
+def sweep_overdue(db_path: str | None = None, now_iso: str | None = None) -> list[int]:
+    """Loop duty between calls: mark commitments whose `due` has passed.
+
+    One serialized transaction per tick. Each commitment is marked at most once
+    ever: the marker's idem_key is deterministically derived from the original
+    event's key/seq, so replays and competing sweeps cannot duplicate it.
+    Open-ended obligations (no due) are never late. Marker type
+    `commitment_overdue` is deliberately outside the v0.2 projection verbs —
+    replay ignores unknown types while as_of_seq still advances.
+    Returns the seqs of markers written by this sweep.
+    """
+    now_iso = now_iso or _now()
+    conn = _conn(db_path)
+    marked: list[int] = []
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT seq,idem_key,payload_json,issue_id FROM ledger"
+            " WHERE type='commitment' ORDER BY seq").fetchall()
+        for r in rows:
+            payload = json.loads(r["payload_json"])
+            due = payload.get("due") or ""
+            if not due or due >= now_iso:
+                continue                     # open-ended or still in time
+            base = r["idem_key"] or f"seq{r['seq']}"
+            mkey = f"overdue:{base}"
+            dup = conn.execute("SELECT 1 FROM ledger WHERE idem_key=?",
+                               (mkey,)).fetchone()
+            if dup:
+                continue
+            seq = conn.execute("SELECT COALESCE(MAX(seq),0)+1 FROM ledger").fetchone()[0]
+            result = {"ok": True, "event_seq": seq, "ts": now_iso, "idem_key": mkey}
+            conn.execute(
+                "INSERT INTO ledger(ts,actor_position_id,mandate_version,"
+                "policy_version,kind,type,issue_id,payload_json,idem_key,result_json)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (now_iso, LOOP_ACTOR[0], LOOP_ACTOR[1], POLICY_VERSION,
+                 "observation", "commitment_overdue", r["issue_id"],
+                 _canon({"commitment_ref": base, "overdue_as_of": now_iso}),
+                 mkey, _canon(result)))
+            marked.append(seq)
+    return marked
+
+
 def new_idempotency_key() -> str:
     return uuid.uuid4().hex
