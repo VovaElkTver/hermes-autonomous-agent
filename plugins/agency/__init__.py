@@ -30,6 +30,13 @@ def register(ctx):
     global _ctx
     _ctx = ctx
     from . import agent_tools
+    try:
+        agent_tools.load_identity(_ctx.get_config("identity", {}) or {})
+    except Exception:
+        logger.warning("agency: identity load failed, keeping defaults", exc_info=True)
+    logger.info("agency: acting identity %s@v%s",
+                agent_tools._IDENTITY["position_id"],
+                agent_tools._IDENTITY["mandate_version"])
     for name, schema, handler in agent_tools.tool_defs():
         ctx.register_tool(name=name, toolset="agency", schema=schema,
                           handler=handler, emoji=agent_tools.EMOJI,
