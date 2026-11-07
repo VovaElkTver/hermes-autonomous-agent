@@ -19,6 +19,7 @@ _HERMES_CORE_TOOLS = [
     "browser_vault",  # rides with the browser; deferred by default (tools.tool_search.defer)
     "text_to_speech",
     "todo_list", "memory",
+    "task_queue",  # tasks_kernel v0: durable queue, event-driven continuation
     "session_search",
     "clarify",
     "execute_code", "delegate_task",
@@ -123,6 +124,10 @@ TOOLSETS = {
     ),
     "tts": _ts("Text-to-speech: convert text to audio with Edge TTS (free), ElevenLabs, OpenAI, or xAI", ["text_to_speech"]),
     "todo": _ts("Task planning and tracking for multi-step work", ["todo_list"]),
+    "tasks": _ts(
+        "Durable task queue with event-driven continuation "
+        "(create_batch/status/skip/emit/cancel); waits live in state.db",
+        ["task_queue"]),
     "memory": _ts("Persistent memory across sessions (personal notes + user profile)", ["memory"]),
     "context_engine": _ts("Runtime tools exposed by the active context engine"),
     "session_search": _ts("Search and recall past conversations with summarization", ["session_search"]),
