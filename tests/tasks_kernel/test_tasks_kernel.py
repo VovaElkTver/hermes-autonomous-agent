@@ -135,6 +135,6 @@ def test_tool_handler_actions(tmp_path, monkeypatch, sent, db):
                     "items": [{"title": "one"}, {"title": "two"}]})
     assert r["ok"] and r["started"]["title"] == "one"
     r = task_queue({"action": "skip", "chat_id": CHAT})
-    assert r["ok"] and r["advanced"]["title"] == "two"
+    assert r["ok"] and r["delivered"] == "two"      # one postponed to the tail
     r = task_queue({"action": "status", "chat_id": CHAT})
-    assert r["ok"] and r["remaining"] == 1
+    assert r["ok"] and r["remaining"] == 2          # skipped ≠ done: both still open

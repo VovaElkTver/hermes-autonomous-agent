@@ -144,6 +144,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                gateway_only=True, busy_policy="dispatch"),
     CommandDef("next", "Explicit task-queue ack: advance the parked tasks_kernel head (v0.1)", "Session",
                gateway_only=True, busy_policy="dispatch"),
+    CommandDef("skip", "Temporarily postpone the task-queue head: requeue at the tail, next starts now", "Session",
+               gateway_only=True, busy_policy="dispatch"),
     CommandDef("pause", "Pause new work globally (emergency stop); '/pause off' resumes", "Session",
                gateway_only=True, args_hint="[reason | off]", busy_policy="dispatch"),
     CommandDef("approve", "Approve a pending dangerous command", "Session",

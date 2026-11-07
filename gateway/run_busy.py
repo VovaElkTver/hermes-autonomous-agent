@@ -1051,7 +1051,7 @@ class GatewayBusySessionMixin:
         "status", "context", "restart", "approve", "deny", "pause", "discard", "agents", "bg", "btw",
         "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
         "commands", "profile", "login", "update", "version", "autoprune",
-        "reset-safe", "reset", "next",
+        "reset-safe", "reset", "next", "skip",
     )
     # Dispatched only on the idle path (busy dispatch has its own allowlist).
     _IDLE_COMMANDS = (
@@ -1162,6 +1162,20 @@ class GatewayBusySessionMixin:
             return "Очередь задач пуста — продвигать нечего."
         title = delivered.get("title") or ""
         return f"Продвинуто → {title}"
+
+    async def _handle_skip_command(self, event: MessageEvent):
+        """`/skip` — tasks_kernel v0.1: postpone the parked head (back to ready,
+        requeued at the tail) and start the next ready task at once. Owner
+        permission by design, deterministic, no LLM."""
+        from tasks_kernel import skip as _skip
+        result = _skip(getattr(event.source, "chat_id", "") or "")
+        if not result:
+            return "Нечего пропускать: голова очереди не в ожидании."
+        title = result["skipped"].get("title") or ""
+        delivered = result["delivered"]
+        if delivered:
+            return f"Пропущено → {title}; следующее уже доставлено."
+        return f"Пропущено → {title}; очередь пуста — вернётся первой."
 
     async def _handle_pause_command(self, event: MessageEvent):
         """`/pause [reason]` engages the global emergency stop; `/pause off` lifts it (the estop gate

@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 from tasks_kernel import (
-    cancel, create_batch, emit, on_owner_message, status,
+    cancel, create_batch, emit, skip, status,
 )
 
 QUEUE_SCHEMA = {
@@ -68,8 +68,11 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
                 return {"ok": False, "error": "status needs chat_id"}
             return {"ok": True, **status(chat_id)}
         if action == "skip":
-            advanced = on_owner_message(chat_id)
-            return {"ok": True, "advanced": advanced}
+            result = skip(chat_id)
+            if result is None:
+                return {"ok": False, "error": "no wait_human head to skip"}
+            return {"ok": True, "skipped_id": result["skipped"]["task_id"],
+                    "delivered": (result["delivered"] or {}).get("title")}
         if action == "emit":
             ev = args.get("event_id") or ""
             if not ev:

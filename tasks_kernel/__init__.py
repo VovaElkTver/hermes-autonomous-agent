@@ -194,6 +194,41 @@ def on_owner_message(chat_id: str, db_path: str | None = None) -> dict | None:
         return _deliver_and_park(conn, nxt)
 
 
+def skip(chat_id: str, db_path: str | None = None) -> dict | None:
+    """Temporarily postpone the wait_human head: back to ``ready`` and requeued
+    at the tail; the next ready task starts immediately. A lone skipped task
+    therefore comes right back around. Never marks anything done.
+
+    Returns ``{"skipped": <task>, "delivered": <task|None>}``, None when the
+    chat has no wait_human head to skip.
+    """
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        head = conn.execute(
+            "SELECT * FROM tk_task WHERE chat_id=? AND state=? ORDER BY seq LIMIT 1",
+            (chat_id, WAIT_HUMAN)).fetchone()
+        if head is None:
+            return None
+        skipped = _row_to_dict(head)
+        assert skipped is not None
+        tail = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM tk_task"
+                            " WHERE chat_id=?", (chat_id,)).fetchone()[0]
+        conn.execute("UPDATE tk_task SET state=?, seq=?, updated_at=? WHERE task_id=?",
+                     (READY, tail + 1, time.time(), head["task_id"]))
+        conn.commit()
+        nxt = conn.execute(
+            "SELECT * FROM tk_task WHERE chat_id=? AND state=? ORDER BY seq LIMIT 1",
+            (chat_id, READY)).fetchone()
+        delivered = None
+        if nxt is not None:
+            try:
+                delivered = _deliver_and_park(conn, nxt)
+            except ValueError:
+                # stays RUNNING; on_owner_message treats it as head for retry
+                pass
+    return {"skipped": skipped, "delivered": delivered}
+
+
 def emit(event_id: str, db_path: str | None = None) -> int:
     """Fire a named event: resume every wait_event subscriber (cyclic reuse)."""
     resumed = 0
