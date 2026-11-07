@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any
 
 from plugins.agency import store
@@ -50,6 +51,59 @@ def _identity() -> tuple[str, int]:
     return _IDENTITY["position_id"], _IDENTITY["mandate_version"]
 
 
+# Caller-session seam: the runtime knows which session is calling; until that
+# plumbing lands, tests/dev set it explicitly. NEVER taken from model args.
+_caller = threading.local()
+
+
+def set_caller_session(session_id: str | None) -> None:
+    _caller.sid = session_id
+
+
+def get_caller_session() -> str | None:
+    return getattr(_caller, "sid", None)
+
+
+def _resolve_actor(db_path) -> tuple[str, int, str]:
+    """(position_id, mandate_version, role) of the caller.
+
+    Bound session → its position (must be active). Unbound → the single admin
+    identity from plugin settings (Вл 07.11: all current users are admin).
+    """
+    sid = get_caller_session()
+    if not sid:
+        pos, ver = _identity()
+        return pos, ver, store.POSITIONS.get(pos, {}).get("role", "administrator")
+    row = store.position_for_session(db_path, sid)
+    if row is None:
+        raise store.LedgerError("NOT_REGISTERED",
+                                "this session has no agency position; call agency_register")
+    if row["status"] != "active":
+        raise store.LedgerError("REGISTRATION_PENDING",
+                                f"position {row['position_id']!r} awaits admin approval")
+    if not store.mandate_active(row["position_id"], row["mandate_version"]):
+        raise store.LedgerError("MANDATE_REVOKED", "position mandate is revoked")
+    return row["position_id"], row["mandate_version"], row["role"]
+
+
+def _check_mandate(pos: str, ver: int) -> None:
+    if not store.mandate_active(pos, ver):
+        raise store.LedgerError("MANDATE_REVOKED",
+                                f"mandate v{ver} of {pos} is revoked")
+
+
+def _require_admin(db_path) -> tuple[str, int]:
+    pos, ver = _resolve_actor(db_path)[:2]
+    _check_mandate(pos, ver)
+    row = store.get_position(db_path, pos)
+    role = (row["role"] if row
+            else store.POSITIONS.get(pos, {}).get("role", "administrator"))
+    if role != "administrator":
+        raise store.LedgerError(
+            "ROLE_FORBIDDEN", "this verb is administrator-only (coworking roles, TZ §4)")
+    return pos, ver
+
+
 def _out(**payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
@@ -75,13 +129,6 @@ def _guarded(fn):
             logger.warning("agency handler failed", exc_info=True)
             return _err("VALIDATION_FAILED", f"internal failure: {exc}")
     return h
-
-
-def _check_mandate() -> None:
-    pos, ver = _identity()
-    if not store.mandate_active(pos, ver):
-        raise store.LedgerError("MANDATE_REVOKED",
-                                f"mandate v{ver} of {pos} is revoked")
 
 
 def _known_issue(db_path, issue_id: str) -> None:
@@ -120,10 +167,9 @@ def agency_survey(args: dict) -> str:
     if not question:
         raise store.LedgerError("VALIDATION_FAILED", "question must be non-empty")
     _known_issue(db_path, issue_id)
-    if expert_id not in store.POSITIONS:
+    if expert_id not in store.POSITIONS and not store.get_position(db_path, expert_id):
         raise store.LedgerError("NOT_FOUND", f"expert {expert_id!r} not in registry")
-    _check_mandate()
-    pos, ver = _identity()
+    pos, ver = _require_admin(db_path)
     payload = {"expert_id": expert_id, "question": question,
                "survey_kind": "observation"}
     key = args.get("idempotency_key")
@@ -143,8 +189,7 @@ def agency_create_branch(args: dict) -> str:
     if not title:
         raise store.LedgerError("VALIDATION_FAILED", "title must be non-empty")
     _known_issue(db_path, issue_id)
-    _check_mandate()
-    pos, ver = _identity()
+    pos, ver = _require_admin(db_path)
 
     def _finalize(conn, self_key):
         # direction counter INSIDE the serialized transaction (race-free, TZ §4);
@@ -186,20 +231,24 @@ def agency_record_commitment(args: dict) -> str:
     if not due:
         raise store.LedgerError("VALIDATION_FAILED", "due (ISO-8601 UTC) is required")
     _known_issue(db_path, issue_id)
-    if who not in store.POSITIONS:
+    if who not in store.POSITIONS and not store.get_position(db_path, who):
         raise store.LedgerError("NOT_FOUND", f"position {who!r} not in registry")
-    actor, _ver = _identity()
+    actor, ver, actor_role = _resolve_actor(db_path)
+    if actor_role != "administrator" and who != actor:
+        raise store.LedgerError(
+            "ROLE_FORBIDDEN",
+            "an expert position may only commit itself; admin commits on behalf "
+            "of others with refs[] to their recorded consent")
     if who != actor and not refs:
         raise store.LedgerError(
             "CONSENT_REQUIRED",
             "committing on behalf of another position requires refs[] to their "
             "recorded consent (ACK ≠ agree)")
-    _check_mandate()
-    pos, ver = _identity()
+    _check_mandate(actor, ver)
     payload = {"who": who, "what": what, "due": due, "refs": refs}
     key = args.get("idempotency_key")
     res = store.submit(db_path, type_="commitment", kind="observation",
-                       issue_id=issue_id, actor_position_id=pos,
+                       issue_id=issue_id, actor_position_id=actor,
                        mandate_version=ver, payload=payload,
                        idem_key=str(key) if key else store.new_idempotency_key())
     return _out(ok=True, event_seq=res["event_seq"], ts=res["ts"],
@@ -227,8 +276,7 @@ def agency_escalate(args: dict) -> str:
     if not reason or not to:
         raise store.LedgerError("VALIDATION_FAILED", "reason and to are required")
     _known_issue(db_path, issue_id)
-    _check_mandate()
-    pos, ver = _identity()
+    pos, ver = _require_admin(db_path)
     payload = {"reason": reason, "to": to}
     key = args.get("idempotency_key")
     res = store.submit(db_path, type_="escalation", kind="observation",
@@ -250,8 +298,7 @@ def agency_client_reply(args: dict) -> str:
     if not text:
         raise store.LedgerError("VALIDATION_FAILED", "text must be non-empty")
     _known_issue(db_path, issue_id)
-    _check_mandate()
-    pos, ver = _identity()
+    pos, ver = _require_admin(db_path)
     payload = {"text": text, "refs": refs}
     key = args.get("idempotency_key")
     res = store.submit(db_path, type_="client_reply", kind="observation",
@@ -260,6 +307,42 @@ def agency_client_reply(args: dict) -> str:
                        idem_key=str(key) if key else store.new_idempotency_key())
     return _out(ok=True, event_seq=res["event_seq"], event_id=f"ledger:{res['event_seq']}",
                 ts=res["ts"], idempotency_key=res.get("idem_key"))
+
+
+@_guarded
+def agency_register(args: dict) -> str:
+    """Self-service coworking registration (Вл 07.11): expert/admin joins by
+    registering; activation waits for admin approval. Binds the calling session."""
+    db_path = _db(args)
+    role = str(args.get("role") or "").strip()
+    position_id = str(args.get("position_id") or "").strip()
+    competencies = [str(c) for c in (args.get("competencies") or [])]
+    sid = get_caller_session()
+    if not sid:
+        raise store.LedgerError(
+            "VALIDATION_FAILED",
+            "no caller session context: runtime must supply session identity")
+    existing = store.position_for_session(db_path, sid)
+    if existing is not None:
+        raise store.LedgerError(
+            "ALREADY_BOUND",
+            f"session already bound to {existing['position_id']!r} "
+            f"({existing['status']})")
+    res = store.register_position(db_path, position_id, role, competencies, sid)
+    store.bind_session(db_path, sid, position_id.strip().lower())
+    return _out(ok=True, position_id=position_id.strip().lower(), **res)
+
+
+@_guarded
+def agency_approve(args: dict) -> str:
+    db_path = _db(args)
+    position_id = str(args.get("position_id") or "")
+    new_role = args.get("role")
+    pos, ver = _require_admin(db_path)
+    _check_mandate(pos, ver)
+    res = store.approve_position(db_path, position_id, pos,
+                                 new_role=str(new_role) if new_role else None)
+    return _out(ok=True, position_id=position_id.strip().lower(), **res)
 
 
 # ------------------------------------------------------------------ schema ----
@@ -320,6 +403,23 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
          "refs": {"type": "array", "items": {"type": "string"},
                   "description": "Evidence refs backing the statement"}},
         ["issue_id", "text"]),
+    "agency_register": (
+        agency_register,
+        "Coworking self-registration: join the agency as 'expert' or 'administrator'. "
+        "Your session binds to the new position; an admin approval activates it.",
+        {"position_id": _str("Desired position id ([a-z0-9-], >=3 chars)"),
+         "role": {"type": "string", "enum": ["expert", "administrator"]},
+         "competencies": {"type": "array", "items": {"type": "string"},
+                          "description": "Competency tags for the registry"}},
+        ["position_id", "role"]),
+    "agency_approve": (
+        agency_approve,
+        "Admin gate: activate a pending registered position (optionally set its "
+        "final role). Administrator-only.",
+        {"position_id": _str("Registered position id"),
+         "role": {"type": "string", "enum": ["expert", "administrator"],
+                  "description": "Optional final role"}},
+        ["position_id"]),
 }
 
 TOOL_META: dict[str, dict[str, bool]] = {
@@ -327,7 +427,8 @@ TOOL_META: dict[str, dict[str, bool]] = {
     "agency_issue_status": {"readOnlyHint": True, "destructiveHint": False},
 }
 for _n in ("agency_survey", "agency_create_branch", "agency_record_commitment",
-           "agency_escalate", "agency_client_reply"):
+           "agency_escalate", "agency_client_reply", "agency_register",
+           "agency_approve"):
     TOOL_META[_n] = {"readOnlyHint": False, "destructiveHint": False}
 
 

@@ -41,7 +41,7 @@ def seed(db_path: str) -> None:
                  mandate_version INTEGER NOT NULL,
                  policy_version TEXT NOT NULL,
                  kind TEXT NOT NULL,             -- observation|hypothesis|verified (B11; grows, O6)
-                 type TEXT NOT NULL,             -- survey_request|branch|commitment|escalation|client_reply
+                 type TEXT NOT NULL,             -- survey_request|branch|commitment|escalation|client_reply|...
                  issue_id TEXT NOT NULL,
                  payload_json TEXT NOT NULL,
                  idem_key TEXT UNIQUE,
@@ -52,9 +52,31 @@ def seed(db_path: str) -> None:
                  issue_id TEXT PRIMARY KEY,
                  title TEXT NOT NULL,
                  created_ts TEXT NOT NULL)""")
+        # Coworking registry (Вл 07.11): positions self-register into the ledger;
+        # admins approve. Source of truth = ledger replay, POSITIONS below is
+        # only the v0.2 stand-in for role/competency checks until migration.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS positions(
+                 position_id TEXT PRIMARY KEY,
+                 role TEXT NOT NULL,            -- administrator|expert
+                 competencies_json TEXT NOT NULL DEFAULT '[]',
+                 mandate_version INTEGER NOT NULL DEFAULT 1,
+                 status TEXT NOT NULL DEFAULT 'pending',   -- pending|active|revoked
+                 registered_by TEXT NOT NULL,   -- session self-registration marker
+                 approved_by TEXT,
+                 created_ts TEXT NOT NULL)""")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS sessions(
+                 session_id TEXT PRIMARY KEY,
+                 position_id TEXT NOT NULL,
+                 bound_ts TEXT NOT NULL)""")
         for iid in sorted(ISSUES):
             conn.execute("INSERT OR IGNORE INTO issues(issue_id,title,created_ts) VALUES(?,?,?)",
                          (iid, "seeded issue", _now()))
+        # reserved core actor: never a registrable position
+        conn.execute(
+            "INSERT OR IGNORE INTO positions(position_id,role,status,registered_by,created_ts)"
+            " VALUES('agency-loop','core','active','system',?)", (_now(),))
 
 
 def revoke_mandate(position_id: str, version: int) -> None:
@@ -265,3 +287,101 @@ def sweep_overdue(db_path: str | None = None, now_iso: str | None = None) -> lis
 
 def new_idempotency_key() -> str:
     return uuid.uuid4().hex
+
+
+# -------------------------------------------------- coworking registry --------
+# Вл 07.11: агентство работает как коворкинг — эксперт сам регистрируется как
+# эксперт, админ как админ; активация (и повышение до администратора) проходит
+# через одобрение. Источник истины — леджер; таблица positions/sessions служит
+# индексом текущего состояния и восстанавливается реплеем.
+REGISTRY_ISSUE = "registry"          # sentinel issue track for registry events
+_ROLES = ("administrator", "expert")
+
+
+def _registry_event(conn, *, type_: str, kind: str, actor: str, mandate: int,
+                    payload: dict, idem_key: str) -> int:
+    seq_row = conn.execute("SELECT COALESCE(MAX(seq),0)+1 FROM ledger").fetchone()
+    seq = seq_row[0]
+    ts = _now()
+    result = {"ok": True, "event_seq": seq, "ts": ts, "idem_key": idem_key}
+    conn.execute(
+        "INSERT INTO ledger(ts,actor_position_id,mandate_version,policy_version,"
+        "kind,type,issue_id,payload_json,idem_key,result_json)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (ts, actor, mandate, POLICY_VERSION, kind, type_, REGISTRY_ISSUE,
+         _canon(payload), idem_key, _canon(result)))
+    return seq
+
+
+def register_position(db_path, position_id: str, role: str,
+                      competencies: list, registered_by: str) -> dict:
+    """Self-service registration (Вл 07.11). Idempotent per position_id."""
+    if role not in _ROLES:
+        raise LedgerError("VALIDATION_FAILED", f"unknown role {role!r}")
+    pid = position_id.strip().lower()
+    if len(pid) < 3 or any(ch not in "-abcdefghijklmnopqrstuvwxyz0123456789" for ch in pid):
+        raise LedgerError("VALIDATION_FAILED",
+                          "position_id must be [a-z0-9-], length >= 3")
+    conn = _conn(db_path)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT status FROM positions WHERE position_id=?",
+                           (pid,)).fetchone()
+        if row is not None:
+            return {"status": row["status"], "already_registered": True}
+        conn.execute(
+            "INSERT INTO positions(position_id,role,competencies_json,status,"
+            "registered_by,created_ts) VALUES(?,?,?,'pending',?,?)",
+            (pid, role, _canon(sorted(competencies or [])), registered_by, _now()))
+        seq = _registry_event(
+            conn, type_="registration", kind="observation", actor=pid, mandate=1,
+            payload={"role": role, "competencies": sorted(competencies or []),
+                     "registered_by": registered_by},
+            idem_key=f"reg:{pid}")
+    return {"status": "pending", "event_seq": seq, "already_registered": False}
+
+
+def approve_position(db_path, position_id: str, approved_by: str,
+                     new_role: str | None = None) -> dict:
+    """Admin activation gate: pending → active. Returns the resulting status."""
+    pid = position_id.strip().lower()
+    conn = _conn(db_path)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT role,status FROM positions WHERE position_id=?",
+                           (pid,)).fetchone()
+        if row is None:
+            raise LedgerError("NOT_FOUND", f"position {pid!r} is not registered")
+        if row["status"] == "active" and new_role in (None, row["role"]):
+            return {"status": "active", "already_approved": True}
+        role = new_role or row["role"]
+        if new_role is not None and new_role not in _ROLES:
+            raise LedgerError("VALIDATION_FAILED", f"unknown role {new_role!r}")
+        conn.execute(
+            "UPDATE positions SET status='active', approved_by=?, role=?"
+            " WHERE position_id=?", (approved_by, role, pid))
+        seq = _registry_event(
+            conn, type_="approval", kind="verified", actor=approved_by,
+            mandate=1, payload={"position_id": pid, "role": role},
+            idem_key=f"appr:{pid}")
+    return {"status": "active", "event_seq": seq, "role": role,
+            "already_approved": False}
+
+
+def bind_session(db_path, session_id: str, position_id: str) -> None:
+    with _conn(db_path) as c:
+        c.execute("INSERT OR REPLACE INTO sessions(session_id,position_id,bound_ts)"
+                  " VALUES(?,?,?)", (session_id, position_id, _now()))
+
+
+def position_for_session(db_path, session_id: str):
+    row = connect(db_path).execute(
+        "SELECT p.* FROM sessions s JOIN positions p ON p.position_id=s.position_id"
+        " WHERE s.session_id=?", (session_id,)).fetchone()
+    return row
+
+
+def get_position(db_path, position_id: str):
+    return connect(db_path).execute(
+        "SELECT * FROM positions WHERE position_id=?",
+        (position_id.lower(),)).fetchone()
