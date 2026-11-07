@@ -35,3 +35,23 @@ def register(ctx):
                           handler=handler, emoji=agent_tools.EMOJI,
                           check_fn=_enabled)
     logger.info("agency: toolset registered (flag %s)", _enabled())
+    _start_loop(ctx)
+
+
+_loop_worker = None
+
+
+def _start_loop(ctx) -> None:
+    """Loop lives between calls (TZ v0.2 §6): daemon thread owned by the plugin."""
+    global _loop_worker
+    if _loop_worker is not None:
+        return                                   # idempotent across re-registrations
+    from .loop import LoopWorker
+    try:
+        interval = float(_ctx.get_config("loop_interval_s", 60) if _ctx else 60)
+    except Exception:
+        interval = 60.0
+    worker = LoopWorker(interval_s=interval)
+    worker.start()
+    _loop_worker = worker
+    logger.info("agency: loop started (interval %.1fs)", worker.interval_s)
