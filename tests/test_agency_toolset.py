@@ -29,6 +29,7 @@ def setup_function(_):
     store.REVOKED.clear()                    # module fixtures are per-test fresh
     store.seed(DB)
     agent_tools.set_identity("admin-1", 1)
+    agent_tools.set_caller_session(None)
 
 
 def call(tool, **args):
@@ -228,7 +229,7 @@ def test_case1_gate_registers_behind_flag():
 
     c = Ctx(True)
     A.register(c)
-    assert len(c.registered) == 7 and "agency_client_reply" in c.registered
+    assert len(c.registered) == 9 and "agency_client_reply" in c.registered
     c2 = Ctx(False)
     A.register(c2)   # registered with check_fn=False → invisible to the model
 
@@ -338,20 +339,72 @@ def test_loop_tick_survives_concurrent_writers():
 
 # --- identity: single admin actor from plugin settings (Вл 07.11) ----------------
 def test_identity_loaded_from_settings():
-    agent_tools.load_identity({"identity": {"position_id": "expert-a", "mandate_version": 3}})
+    # any position from settings is honored; admin-only verbs stay admin-only,
+    # so use an administrator position with a bumped mandate version
+    agent_tools.load_identity({"identity": {"position_id": "admin-1", "mandate_version": 3}})
     try:
         r = call("agency_survey", expert_id="expert-b", issue_id="i-001", question="q")
         assert r["ok"], r
         row = store.connect(DB).execute(
             "SELECT actor_position_id,mandate_version FROM ledger ORDER BY seq DESC LIMIT 1"
         ).fetchone()
-        assert (row["actor_position_id"], row["mandate_version"]) == ("expert-a", 3)
+        assert (row["actor_position_id"], row["mandate_version"]) == ("admin-1", 3)
     finally:
         agent_tools.load_identity({"identity": {"position_id": "admin-1", "mandate_version": 1}})
     # forge still ignored: model-passed position fields never reach the signature
     r = call("agency_survey", expert_id="expert-b", issue_id="i-001", question="q2",
              position_id="expert-b", mandate_version=77)
     assert r["ok"], r
+
+
+# --- coworking: self-registration, admin approval, role-scoped verbs (Вл 07.11) --
+def test_coworking_register_approve_self_commit():
+    agent_tools.set_caller_session("sess-exp1")
+    r = call("agency_register", position_id="expert-x", role="expert",
+             competencies=["contracts"])
+    assert r["ok"] and r["status"] == "pending" and not r["already_registered"], r
+    # pending position cannot act yet
+    c = call("agency_record_commitment", issue_id="i-001", who="expert-x",
+             what="my part", due="2026-12-01T00:00:00Z")
+    assert not c["ok"] and c["error"]["code"] == "REGISTRATION_PENDING", c
+    # registration landed on the registry track of the ledger
+    reg = store.connect(DB).execute(
+        "SELECT type,kind,issue_id FROM ledger WHERE type='registration'").fetchone()
+    assert reg["issue_id"] == store.REGISTRY_ISSUE and reg["kind"] == "observation"
+    # admin approves; expert becomes active and may commit itself only
+    agent_tools.set_caller_session(None)
+    a = call("agency_approve", position_id="expert-x")
+    assert a["ok"] and a["status"] == "active", a
+    agent_tools.set_caller_session("sess-exp1")
+    mine = call("agency_record_commitment", issue_id="i-001", who="expert-x",
+                what="my part", due="2026-12-01T00:00:00Z")
+    assert mine["ok"], mine
+
+
+def test_coworking_role_gates():
+    agent_tools.set_caller_session("sess-e2")
+    call("agency_register", position_id="expert-y", role="expert")
+    agent_tools.set_caller_session(None)
+    call("agency_approve", position_id="expert-y")
+    agent_tools.set_caller_session("sess-e2")
+    s = call("agency_survey", expert_id="expert-a", issue_id="i-001", question="?")
+    assert not s["ok"] and s["error"]["code"] == "ROLE_FORBIDDEN", s
+    f = call("agency_record_commitment", issue_id="i-001", who="admin-1",
+             what="on behalf", due="2026-12-01T00:00:00Z")
+    assert not f["ok"] and f["error"]["code"] == "ROLE_FORBIDDEN", f
+    b = call("agency_create_branch", issue_id="i-001", title="x")
+    assert not b["ok"] and b["error"]["code"] == "ROLE_FORBIDDEN", b
+
+
+def test_coworking_one_session_one_position():
+    agent_tools.set_caller_session("sess-e3")
+    first = call("agency_register", position_id="expert-z", role="expert")
+    assert first["ok"], first
+    again = call("agency_register", position_id="expert-w", role="expert")
+    assert not again["ok"] and again["error"]["code"] == "ALREADY_BOUND", again
+    # known position re-registering is idempotent at the store level
+    res = store.register_position(DB, "expert-z", "expert", [], "other-session")
+    assert res["already_registered"] and res["status"] == "pending"
 
 
 # --- signature forgery: model-passed identity fields are ignored -----------------
