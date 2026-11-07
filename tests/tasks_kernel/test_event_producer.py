@@ -41,6 +41,34 @@ def sent(monkeypatch):
     return seen
 
 
+def test_ack_does_not_consume_event_parked_head(db, sent):
+    """An event-parked head (wait_event set) is not owner-ackable: /next, reply
+    and skip must leave it; only emit(event_id) wakes it. A ready task behind
+    the parked head stays ready — the cursor is blocked, not lost."""
+    _seed_wait_event_park(db, "watch-digest", "evening-tick")
+    tk.create_batch(CHAT, [{"title": "manual"}], db_path=db)
+    # event-parked row has earlier seq → without the guard ack would eat it
+    assert tk.on_owner_message(CHAT, db_path=db) is None   # nothing ackable
+    st = {t["title"]: t["state"] for t in tk.status(CHAT, db_path=db)["tasks"]}
+    assert st["watch-digest"] == tk.WAIT_HUMAN            # untouched
+    assert st["manual"] == tk.READY                       # cursor blocked, not lost
+    assert tk.skip(CHAT, db_path=db) is None              # skip: nothing ackable left
+    # wake path: emit redelivers the subscriber; the NEXT ack closes it and
+    # finally starts the waiting ready task
+    sent.clear()
+    assert tk.emit("evening-tick", db_path=db) == 1
+    out = tk.on_owner_message(CHAT, db_path=db)
+    assert out is not None and out["title"] == "manual"
+
+
+def _seed_wait_event_park(db, title, event):
+    tk.create_batch(CHAT, [{"title": title}], db_path=db)
+    with tk._connect(db) as conn:
+        conn.execute("UPDATE tk_task SET state=?, wait_event=? WHERE title=?",
+                     (tk.WAIT_HUMAN, event, title))
+        conn.commit()
+
+
 def test_script_exists():
     assert _SCRIPT.exists(), f"missing {_SCRIPT}"
 
