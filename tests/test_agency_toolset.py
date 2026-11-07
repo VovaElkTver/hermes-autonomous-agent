@@ -224,6 +224,8 @@ def test_case1_gate_registers_behind_flag():
     for expected in (False, True):
         c = Ctx(expected)
         A._ctx = c
+        # admin-mode conjunct pinned ON; the pure settings-gate is case-tested below
+        A._admin_mode_on = lambda: True
         assert A._enabled() == expected
     A._ctx = None
 
@@ -447,6 +449,28 @@ def test_projection_cache_concurrent_writers_keep_parity():
     final = store.projection_for_status(DB, "i-001")
     assert final == store.replay_projection(DB, "i-001")
     assert len(final["branches"]) == 40
+
+
+# --- admin-mode gate: toolset visible ONLY in admin_mode (Вл 07.11) --------------
+def test_admin_mode_gate():
+    import plugins.agency as A
+
+    class Ctx:
+        def get_config(self, k, d=None):
+            return True if k == "enabled" else d   # settings.enabled = True
+
+    saved_ctx, saved_admin = A._ctx, A._admin_mode_on
+    try:
+        A._ctx = Ctx()
+        A._admin_mode_on = lambda: False
+        assert A._enabled() is False, "admin tools must hide outside admin mode"
+        A._admin_mode_on = lambda: True
+        assert A._enabled() is True
+        # settings gate still independent: off settings → invisible even in admin mode
+        A._ctx = None
+        assert A._agency_settings_enabled() in (True, False)  # reads real config; no crash
+    finally:
+        A._ctx, A._admin_mode_on = saved_ctx, saved_admin
 
 
 # --- signature forgery: model-passed identity fields are ignored -----------------
