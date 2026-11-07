@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS tk_task (
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS tk_task_chat ON tk_task (chat_id, seq);
+CREATE TABLE IF NOT EXISTS tk_hold (
+    chat_id  TEXT PRIMARY KEY,
+    held_at  REAL NOT NULL
+);
 """
 
 
@@ -227,6 +231,33 @@ def skip(chat_id: str, db_path: str | None = None) -> dict | None:
                 # stays RUNNING; on_owner_message treats it as head for retry
                 pass
     return {"skipped": skipped, "delivered": delivered}
+
+
+def hold(chat_id: str, db_path: str | None = None) -> bool:
+    """Park this chat's queue: bridge acks (/next, reply) are ignored until
+    resume(). Tasks keep their states. True when the pause was set now."""
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        cur = conn.execute("INSERT OR IGNORE INTO tk_hold (chat_id, held_at) VALUES (?,?)",
+                           (chat_id, time.time()))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def resume(chat_id: str, db_path: str | None = None) -> bool:
+    """Lift the hold. The parked head (if any) waits for the next owner ack."""
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        cur = conn.execute("DELETE FROM tk_hold WHERE chat_id=?", (chat_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def is_held(chat_id: str, db_path: str | None = None) -> bool:
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        row = conn.execute("SELECT 1 FROM tk_hold WHERE chat_id=?", (chat_id,)).fetchone()
+        return row is not None
 
 
 def emit(event_id: str, db_path: str | None = None) -> int:

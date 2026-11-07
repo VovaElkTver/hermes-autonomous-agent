@@ -1051,7 +1051,7 @@ class GatewayBusySessionMixin:
         "status", "context", "restart", "approve", "deny", "pause", "discard", "agents", "bg", "btw",
         "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
         "commands", "profile", "login", "update", "version", "autoprune",
-        "reset-safe", "reset", "next", "skip",
+        "reset-safe", "reset", "next", "skip", "qlist", "qhold", "qresume",
     )
     # Dispatched only on the idle path (busy dispatch has its own allowlist).
     _IDLE_COMMANDS = (
@@ -1156,8 +1156,11 @@ class GatewayBusySessionMixin:
         Deterministic, no LLM. Mirrors the bridge's reply-based ack
         (gateway/task_bridge.py): either signal is owner permission.
         """
-        from tasks_kernel import on_owner_message as _advance
-        delivered = _advance(getattr(event.source, "chat_id", "") or "")
+        from tasks_kernel import is_held, on_owner_message as _advance
+        chat_id = getattr(event.source, "chat_id", "") or ""
+        if is_held(chat_id):
+            return "Очередь на паузе — возобновить: /qresume"
+        delivered = _advance(chat_id)
         if not delivered:
             return "Очередь задач пуста — продвигать нечего."
         title = delivered.get("title") or ""
@@ -1167,8 +1170,11 @@ class GatewayBusySessionMixin:
         """`/skip` — tasks_kernel v0.1: postpone the parked head (back to ready,
         requeued at the tail) and start the next ready task at once. Owner
         permission by design, deterministic, no LLM."""
-        from tasks_kernel import skip as _skip
-        result = _skip(getattr(event.source, "chat_id", "") or "")
+        from tasks_kernel import is_held, skip as _skip
+        chat_id = getattr(event.source, "chat_id", "") or ""
+        if is_held(chat_id):
+            return "Очередь на паузе — возобновить: /qresume"
+        result = _skip(chat_id)
         if not result:
             return "Нечего пропускать: голова очереди не в ожидании."
         title = result["skipped"].get("title") or ""
@@ -1176,6 +1182,34 @@ class GatewayBusySessionMixin:
         if delivered:
             return f"Пропущено → {title}; следующее уже доставлено."
         return f"Пропущено → {title}; очередь пуста — вернётся первой."
+
+    async def _handle_qlist_command(self, event: MessageEvent):
+        """`/qlist` — read-only view of this chat's open tasks_kernel tasks."""
+        from tasks_kernel import _OPEN_STATES, is_held, status as _status
+        chat_id = getattr(event.source, "chat_id", "") or ""
+        st = _status(chat_id)
+        held = " (пауза)" if is_held(chat_id) else ""
+        open_tasks = [t for t in st["tasks"] if t["state"] in _OPEN_STATES]
+        if not open_tasks:
+            return f"Открытых задач нет{held}."
+        lines = [f"{t['seq']}. [{t['state']}] {t['title']}" for t in open_tasks]
+        return "\n".join(lines) + held
+
+    async def _handle_qhold_command(self, event: MessageEvent):
+        """`/qhold` — park this chat's queue: acks are ignored until /qresume."""
+        from tasks_kernel import hold as _hold
+        chat_id = getattr(event.source, "chat_id", "") or ""
+        if _hold(chat_id):
+            return "Очередь поставлена на паузу. Возобновить: /qresume"
+        return "Очередь уже на паузе."
+
+    async def _handle_qresume_command(self, event: MessageEvent):
+        """`/qresume` — lift /qhold; the head waits for your next ack again."""
+        from tasks_kernel import resume as _resume
+        chat_id = getattr(event.source, "chat_id", "") or ""
+        if _resume(chat_id):
+            return "Очередь возобновлена — жду твоего ack'а (/next или реплай)."
+        return "Очередь не была на паузе."
 
     async def _handle_pause_command(self, event: MessageEvent):
         """`/pause [reason]` engages the global emergency stop; `/pause off` lifts it (the estop gate
