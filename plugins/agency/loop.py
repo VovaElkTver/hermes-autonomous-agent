@@ -45,8 +45,11 @@ class LoopWorker(threading.Thread):
     def tick(self) -> dict:
         """One pass of between-call duties, all through the store core."""
         marked = store.sweep_overdue(self.db_path)
+        refreshed = store.refresh_projections(self.db_path)
         store.wal_checkpoint(self.db_path)
         if marked:
             logger.info("agency loop: %d commitment(s) marked overdue (%s)",
                         len(marked), ",".join(str(s) for s in marked))
-        return {"overdue_marked": marked}
+        if refreshed:
+            logger.info("agency loop: %d projection(s) refreshed", refreshed)
+        return {"overdue_marked": marked, "projections_refreshed": refreshed}

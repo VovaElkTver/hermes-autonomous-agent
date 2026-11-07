@@ -260,11 +260,9 @@ def agency_issue_status(args: dict) -> str:
     db_path = _db(args)
     issue_id = str(args.get("issue_id") or "")
     _known_issue(db_path, issue_id)
-    proj = store.replay_projection(db_path, issue_id)
-    proj.pop("as_of_seq", None)
-    return _out(ok=True, issue_id=issue_id,
-                as_of_seq=store.replay_projection(db_path, issue_id)["as_of_seq"],
-                **proj)
+    proj = store.projection_for_status(db_path, issue_id)   # cache-at-tip or replay
+    as_of = proj.pop("as_of_seq", 0)
+    return _out(ok=True, issue_id=issue_id, as_of_seq=as_of, **proj)
 
 
 @_guarded
