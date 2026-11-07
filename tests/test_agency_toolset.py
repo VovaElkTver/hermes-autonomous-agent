@@ -232,6 +232,22 @@ def test_case1_gate_registers_behind_flag():
     A.register(c2)   # registered with check_fn=False → invisible to the model
 
 
+# --- case 2b: loop is the sole owner of agency-state.db -------------------------
+def test_case2b_no_direct_db_access_outside_store():
+    # TZ v0.2 §6: loop (store.py) is the ONLY owner of agency-state.db; handlers
+    # and agent code must not open it directly.
+    plugin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "plugins", "agency")
+    offenders = []
+    for fname in os.listdir(plugin_dir):
+        if fname == "store.py" or not fname.endswith(".py"):
+            continue
+        src = open(os.path.join(plugin_dir, fname)).read()
+        if "sqlite3.connect" in src or "agency-state.db" in src.replace("db_path: <hermes home>", ""):
+            offenders.append(fname)
+    assert offenders == [], f"direct DB access outside store.py: {offenders}"
+
+
 # --- signature forgery: model-passed identity fields are ignored -----------------
 def test_signature_forgery_ignored():
     r = call("agency_survey", expert_id="expert-a", issue_id="i-001", question="q",
