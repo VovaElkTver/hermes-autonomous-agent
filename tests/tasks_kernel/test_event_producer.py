@@ -63,13 +63,13 @@ def test_script_wrapper_wiring(db, tmp_path):
     """The out-of-process path: script finds the db, fires, reports honestly."""
     _seed_wait_event(db, "digest", "evening-tick")   # empty deliver_target → no-op delivery
     r = subprocess.run([sys.executable, str(_SCRIPT), "evening-tick", "--db", db],
-                       capture_output=True, text=True, timeout=60,
+                       capture_output=True, text=True, timeout=60, check=False,
                        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     out = r.stdout + r.stderr
     assert r.returncode == 0, out
     assert "event evening-tick" in out
     # second subscriber absent → honest zero, not a fabricated success
     r = subprocess.run([sys.executable, str(_SCRIPT), "ghost-event", "--db", db],
-                       capture_output=True, text=True, timeout=60,
+                       capture_output=True, text=True, timeout=60, check=False,
                        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})
     assert r.returncode == 0 and "resumed 0" in (r.stdout or "")
