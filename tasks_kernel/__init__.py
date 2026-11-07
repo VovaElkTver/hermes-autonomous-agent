@@ -172,14 +172,15 @@ def start(chat_id: str, db_path: str | None = None) -> dict | None:
 def on_owner_message(chat_id: str, db_path: str | None = None) -> dict | None:
     """Owner spoke in this chat: close the wait_human head, start the next ready.
 
-    Returns the task that was just delivered (or the still-active head if the
-    queue is already drained), None when there was nothing to advance.
+    Tasks parked on an event (wait_event set) are NOT owner-ackable — only an
+    emit(event_id) wakes them. Returns the task that was just delivered (or the
+    still-active head if the queue is already drained), None otherwise.
     """
     with _connect(db_path) as conn:
         init_schema(conn)
         head = conn.execute(
-            "SELECT * FROM tk_task WHERE chat_id=? AND state=? ORDER BY seq LIMIT 1",
-            (chat_id, WAIT_HUMAN)).fetchone()
+            "SELECT * FROM tk_task WHERE chat_id=? AND state=? AND wait_event IS NULL"
+            " ORDER BY seq LIMIT 1", (chat_id, WAIT_HUMAN)).fetchone()
         if head is None:
             # maybe only a failed-delivery RUNNING row exists; treat as head too
             head = conn.execute(
@@ -209,8 +210,8 @@ def skip(chat_id: str, db_path: str | None = None) -> dict | None:
     with _connect(db_path) as conn:
         init_schema(conn)
         head = conn.execute(
-            "SELECT * FROM tk_task WHERE chat_id=? AND state=? ORDER BY seq LIMIT 1",
-            (chat_id, WAIT_HUMAN)).fetchone()
+            "SELECT * FROM tk_task WHERE chat_id=? AND state=? AND wait_event IS NULL"
+            " ORDER BY seq LIMIT 1", (chat_id, WAIT_HUMAN)).fetchone()
         if head is None:
             return None
         skipped = _row_to_dict(head)
