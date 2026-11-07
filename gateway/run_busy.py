@@ -1051,7 +1051,7 @@ class GatewayBusySessionMixin:
         "status", "context", "restart", "approve", "deny", "pause", "discard", "agents", "bg", "btw",
         "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
         "commands", "profile", "login", "update", "version", "autoprune",
-        "reset-safe", "reset",
+        "reset-safe", "reset", "next",
     )
     # Dispatched only on the idle path (busy dispatch has its own allowlist).
     _IDLE_COMMANDS = (
@@ -1149,6 +1149,19 @@ class GatewayBusySessionMixin:
     async def _handle_att_command(self, event: MessageEvent):
         """Idle-path /att: nothing is running to freeze — say so instead of falling through to the agent."""
         return EphemeralReply(t("gateway.att.none"))
+
+    async def _handle_next_command(self, event: MessageEvent):
+        """`/next` — tasks_kernel v0.1 explicit ack: advance this chat's parked task head.
+
+        Deterministic, no LLM. Mirrors the bridge's reply-based ack
+        (gateway/task_bridge.py): either signal is owner permission.
+        """
+        from tasks_kernel import on_owner_message as _advance
+        delivered = _advance(getattr(event.source, "chat_id", "") or "")
+        if not delivered:
+            return "Очередь задач пуста — продвигать нечего."
+        title = delivered.get("title") or ""
+        return f"Продвинуто → {title}"
 
     async def _handle_pause_command(self, event: MessageEvent):
         """`/pause [reason]` engages the global emergency stop; `/pause off` lifts it (the estop gate

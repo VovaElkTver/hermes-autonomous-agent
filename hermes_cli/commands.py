@@ -142,6 +142,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                busy_policy="interrupt_then_dispatch", busy_handler="att"),
     CommandDef("discard", "Drop a turn lost when Hermes restarted so this chat's queue runs again", "Session",
                gateway_only=True, busy_policy="dispatch"),
+    CommandDef("next", "Explicit task-queue ack: advance the parked tasks_kernel head (v0.1)", "Session",
+               gateway_only=True, busy_policy="dispatch"),
     CommandDef("pause", "Pause new work globally (emergency stop); '/pause off' resumes", "Session",
                gateway_only=True, args_hint="[reason | off]", busy_policy="dispatch"),
     CommandDef("approve", "Approve a pending dangerous command", "Session",
