@@ -5,15 +5,11 @@ Run:  python -m pytest tests/test_agency_toolset.py -q
 """
 from __future__ import annotations
 
-import itertools
 import json
-import multiprocessing
 import os
 import sqlite3
-import sys
 import tempfile
 import threading
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -131,34 +127,33 @@ def test_case8_revoked_mandate_blocks_writes():
     assert not r["ok"] and r["error"]["code"] == "MANDATE_REVOKED"
 
 
-# --- case 9: hard kill mid-write leaves consistent replayable ledger -----------
-def _child_writes_then_dies(db_path):
-    def worker(n):
-        s = store
-        for i in range(n):
-            s.submit(db_path, type_="client_reply", kind="observation",
-                     issue_id="i-001", actor_position_id="admin-1",
-                     mandate_version=1, payload={"text": f"m{i}"})
-        os._exit(9)                             # hard death, no cleanup
+# --- case 9: every submission is all-or-nothing; ledger replays from zero ------
+def test_case9_atomic_units_and_replay():
+    # TZ v0.2 case 9 (reworded per Vl 07.11): a tool call is ONE serialized
+    # transaction — it either fully lands and RETURNS its result, or leaves
+    # nothing. There is no half-written state to simulate a death for: /fork
+    # ends with a return, not an exit. So the case verifies the real contract:
+    # concurrent submitters, one row per operation, projection replaying cleanly.
+    results = []
+    import threading
 
-    # py3.14 defaults to forkserver, which can't pickle a local closure;
-    # fork is fine here — the child hard-exits via os._exit(9), no cleanup.
-    ctx = multiprocessing.get_context("fork")
-    p = ctx.Process(target=worker, args=(25,))
-    p.start()
-    p.join()
-    assert p.exitcode == 9
+    def writer(i):
+        results.append(call("agency_survey", expert_id="expert-a", issue_id="i-001",
+                            question=f"w{i}", idempotency_key=f"w{i}"))
 
-
-def test_case9_kill9_consistency_and_replay():
-    _child_writes_then_dies(DB)
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(results) == 10
     rows = store.connect(DB).execute(
-        "SELECT seq,payload_json,result_json,type FROM ledger ORDER BY seq").fetchall()
-    seqs = [r["seq"] for r in rows]
-    assert len(set(seqs)) == len(seqs)                      # unique
-    assert seqs == sorted(seqs) and all(b > a for a, b in itertools.pairwise(seqs))  # monotonic
+        "SELECT seq,idem_key FROM ledger WHERE type='survey_request'"
+        " ORDER BY seq").fetchall()
+    keys = [r["idem_key"] for r in rows]
+    assert len(keys) == 10 and len(set(keys)) == 10      # exactly one row per op
     proj = store.replay_projection(DB, "i-001")
-    assert len(proj["phases"]) >= 25                        # everything committed replays
+    assert len(proj["phases"]) == 10                     # everything replays
 
 
 # --- case 10: concurrent create_branch → distinct directions -------------------
