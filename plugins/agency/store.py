@@ -30,9 +30,10 @@ ISSUES: set[str] = {"i-001"}          # seeded issue for tests/demo
 
 def seed(db_path: str) -> None:
     """Create schema + fixture rows if needed. Idempotent."""
-    with _conn(db_path) as c:
-        c.execute("BEGIN IMMEDIATE")
-        c.execute(
+    conn = connect(db_path)
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
             """CREATE TABLE IF NOT EXISTS ledger(
                  seq INTEGER PRIMARY KEY AUTOINCREMENT,
                  ts TEXT NOT NULL,
@@ -45,15 +46,15 @@ def seed(db_path: str) -> None:
                  payload_json TEXT NOT NULL,
                  idem_key TEXT UNIQUE,
                  result_json TEXT)""")
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_issue ON ledger(issue_id, seq)")
-        c.execute(
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_issue ON ledger(issue_id, seq)")
+        conn.execute(
             """CREATE TABLE IF NOT EXISTS issues(
                  issue_id TEXT PRIMARY KEY,
                  title TEXT NOT NULL,
                  created_ts TEXT NOT NULL)""")
         for iid in sorted(ISSUES):
-            c.execute("INSERT OR IGNORE INTO issues(issue_id,title,created_ts) VALUES(?,?,?)",
-                      (iid, "seeded issue", _now()))
+            conn.execute("INSERT OR IGNORE INTO issues(issue_id,title,created_ts) VALUES(?,?,?)",
+                         (iid, "seeded issue", _now()))
 
 
 def revoke_mandate(position_id: str, version: int) -> None:
