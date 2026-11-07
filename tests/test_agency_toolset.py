@@ -407,6 +407,48 @@ def test_coworking_one_session_one_position():
     assert res["already_registered"] and res["status"] == "pending"
 
 
+# --- projection cache: loop-maintained, parity with replay (TZ §6) ---------------
+def test_projection_cache_parity_and_loop_refresh():
+    # events land; cache cold
+    call("agency_record_commitment", issue_id="i-001", who="admin-1",
+         what="c1", due="2099-01-01T00:00:00Z")
+    call("agency_create_branch", issue_id="i-001", title="b1")
+    replayed = store.replay_projection(DB, "i-001")
+    cached = store.projection_for_status(DB, "i-001")   # miss → replay+cache
+    assert cached == replayed
+    row = store.connect(DB).execute(
+        "SELECT as_of_seq FROM projections WHERE issue_id='i-001'").fetchone()
+    assert row["as_of_seq"] == replayed["as_of_seq"]
+    # new event → read path sees tip; stale cache never served
+    call("agency_survey", expert_id="expert-a", issue_id="i-001", question="q3")
+    fresh = store.projection_for_status(DB, "i-001")
+    assert fresh["as_of_seq"] > cached["as_of_seq"]
+    assert fresh == store.replay_projection(DB, "i-001"), "parity at every seq"
+    # a single loop tick converges any backlog and stays at parity
+    from plugins.agency.loop import LoopWorker
+    w = LoopWorker(db_path=DB, interval_s=3600)
+    w.tick()
+    row = store.connect(DB).execute(
+        "SELECT as_of_seq FROM projections WHERE issue_id='i-001'").fetchone()
+    top = store.connect(DB).execute("SELECT MAX(seq) FROM ledger").fetchone()[0]
+    assert row["as_of_seq"] == top
+
+
+def test_projection_cache_concurrent_writers_keep_parity():
+    def writer(i):
+        for k in range(10):
+            call("agency_create_branch", issue_id="i-001", title=f"p{i}-{k}")
+
+    ws = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
+    for t in ws:
+        t.start()
+    for t in ws:
+        t.join()
+    final = store.projection_for_status(DB, "i-001")
+    assert final == store.replay_projection(DB, "i-001")
+    assert len(final["branches"]) == 40
+
+
 # --- signature forgery: model-passed identity fields are ignored -----------------
 def test_signature_forgery_ignored():
     r = call("agency_survey", expert_id="expert-a", issue_id="i-001", question="q",

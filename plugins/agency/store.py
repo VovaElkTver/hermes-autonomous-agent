@@ -70,6 +70,13 @@ def seed(db_path: str) -> None:
                  session_id TEXT PRIMARY KEY,
                  position_id TEXT NOT NULL,
                  bound_ts TEXT NOT NULL)""")
+        # materialized projections (loop-maintained cache over replay, TZ §6);
+        # source of truth stays the ledger — a row is only an accelerated view
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS projections(
+                 issue_id TEXT PRIMARY KEY,
+                 as_of_seq INTEGER NOT NULL,
+                 proj_json TEXT NOT NULL)""")
         for iid in sorted(ISSUES):
             conn.execute("INSERT OR IGNORE INTO issues(issue_id,title,created_ts) VALUES(?,?,?)",
                          (iid, "seeded issue", _now()))
@@ -131,9 +138,12 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
 
 def _conn(db_path):
     conn = connect(db_path)
-    # first-boot bootstrap: create schema lazily if missing (idempotent)
+    # first-boot / legacy-upgrade bootstrap: seed() is idempotent, so run it
+    # whenever ANY core table is missing (ledger alone may predate newer tables)
     try:
         conn.execute("SELECT 1 FROM ledger LIMIT 1").fetchone()
+        conn.execute("SELECT 1 FROM positions LIMIT 1")
+        conn.execute("SELECT 1 FROM projections LIMIT 1")
     except sqlite3.OperationalError:
         seed(db_path)
     return conn
@@ -230,12 +240,75 @@ def replay_projection(db_path: str | None, issue_id: str) -> dict:
     return proj
 
 
+# ------------------------------------------------- projection cache (loop) ----
+
+def _refresh_projections(db_path: str | None, budget: int = 50) -> int:
+    """Loop duty (TZ §6 'обслуживание проекций'): bring the materialized cache
+    up to date for every issue whose ledger tail outgrew its snapshot.
+    Deterministic order, per-issue single UPDATE inside one short transaction;
+    budget caps work per tick so a huge backlog drains over several ticks."""
+    conn = _conn(db_path)
+    done = 0
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        stale = conn.execute(
+            "SELECT i.issue_id,"
+            " COALESCE((SELECT MAX(seq) FROM ledger l WHERE l.issue_id=i.issue_id),0) AS top,"
+            " COALESCE(p.as_of_seq,-1) AS cached"
+            " FROM issues i LEFT JOIN projections p ON p.issue_id=i.issue_id"
+            " WHERE p.as_of_seq IS NULL OR p.as_of_seq < top"
+            " ORDER BY i.issue_id LIMIT ?", (budget,)).fetchall()
+        for r in stale:
+            proj = replay_projection(db_path, r["issue_id"])   # honest rebuild
+            conn.execute(
+                "INSERT INTO projections(issue_id,as_of_seq,proj_json) VALUES(?,?,?)"
+                " ON CONFLICT(issue_id) DO UPDATE SET as_of_seq=excluded.as_of_seq,"
+                " proj_json=excluded.proj_json",
+                (r["issue_id"], proj["as_of_seq"], _canon(proj)))
+            done += 1
+    return done
+
+
+def projection_for_status(db_path: str | None, issue_id: str) -> dict:
+    """Read path: return the projection at the current ledger tip.
+
+    Reads prefer the loop-maintained cache when it is at tip; otherwise falls
+    back to a full replay and (best-effort) leaves the cache fresher. ADOPTED
+    INVARIANT: cached view MUST equal replay_projection at the same seq —
+    acceptance tests assert parity.
+    """
+    c = _conn(db_path)
+    top = c.execute("SELECT COALESCE(MAX(seq),0) FROM ledger WHERE issue_id=?",
+                    (issue_id,)).fetchone()[0]
+    row = c.execute("SELECT as_of_seq,proj_json FROM projections WHERE issue_id=?",
+                    (issue_id,)).fetchone()
+    if row is not None and row["as_of_seq"] == top:
+        return json.loads(row["proj_json"])
+    proj = replay_projection(db_path, issue_id)
+    try:
+        with c:
+            c.execute("BEGIN IMMEDIATE")
+            c.execute(
+                "INSERT INTO projections(issue_id,as_of_seq,proj_json) VALUES(?,?,?)"
+                " ON CONFLICT(issue_id) DO UPDATE SET as_of_seq=excluded.as_of_seq,"
+                " proj_json=excluded.proj_json",
+                (issue_id, proj["as_of_seq"], _canon(proj)))
+    except sqlite3.OperationalError:
+        pass                       # busy tip — next reader/loop refreshes instead
+    return proj
+
+
 def wal_checkpoint(db_path=None) -> None:
     """Storage maintenance duty of the loop (TZ §6 'optimization'). Best-effort."""
     try:
         connect(db_path).execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
     except sqlite3.OperationalError:
         pass  # busy readers/writers — checkpoint is advisory, retry next tick
+
+
+def refresh_projections(db_path: str | None = None, budget: int = 50) -> int:
+    """Public hook for the loop; see _refresh_projections."""
+    return _refresh_projections(db_path, budget)
 
 
 LOOP_ACTOR = ("agency-loop", 0)   # the core itself; reserved id, not a position
