@@ -141,7 +141,10 @@ def _child_writes_then_dies(db_path):
                      mandate_version=1, payload={"text": f"m{i}"})
         os._exit(9)                             # hard death, no cleanup
 
-    p = multiprocessing.Process(target=worker, args=(25,))
+    # py3.14 defaults to forkserver, which can't pickle a local closure;
+    # fork is fine here — the child hard-exits via os._exit(9), no cleanup.
+    ctx = multiprocessing.get_context("fork")
+    p = ctx.Process(target=worker, args=(25,))
     p.start()
     p.join()
     assert p.exitcode == 9
