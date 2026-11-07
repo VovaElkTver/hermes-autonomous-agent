@@ -107,7 +107,13 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
 
 
 def _conn(db_path):
-    return connect(db_path)
+    conn = connect(db_path)
+    # first-boot bootstrap: create schema lazily if missing (idempotent)
+    try:
+        conn.execute("SELECT 1 FROM ledger LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        seed(db_path)
+    return conn
 
 
 def _now() -> str:
