@@ -43,7 +43,6 @@ def _run(mixin_call, db):
     """Invoke a gateway handler with HERMES_STATE_DB pointed at the test db."""
     from gateway.run_busy import GatewayBusySessionMixin as M
     obj = object.__new__(M)
-    M.__dict__  # noqa: B018 — just to prove the class exists before getattr below
     return asyncio.run(getattr(obj, mixin_call)(_ev()))
 
 
