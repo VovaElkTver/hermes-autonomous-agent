@@ -336,6 +336,24 @@ def test_loop_tick_survives_concurrent_writers():
     assert len(set(seqs)) == len(seqs), "seq must stay unique under load"
 
 
+# --- identity: single admin actor from plugin settings (Вл 07.11) ----------------
+def test_identity_loaded_from_settings():
+    agent_tools.load_identity({"identity": {"position_id": "expert-a", "mandate_version": 3}})
+    try:
+        r = call("agency_survey", expert_id="expert-b", issue_id="i-001", question="q")
+        assert r["ok"], r
+        row = store.connect(DB).execute(
+            "SELECT actor_position_id,mandate_version FROM ledger ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
+        assert (row["actor_position_id"], row["mandate_version"]) == ("expert-a", 3)
+    finally:
+        agent_tools.load_identity({"identity": {"position_id": "admin-1", "mandate_version": 1}})
+    # forge still ignored: model-passed position fields never reach the signature
+    r = call("agency_survey", expert_id="expert-b", issue_id="i-001", question="q2",
+             position_id="expert-b", mandate_version=77)
+    assert r["ok"], r
+
+
 # --- signature forgery: model-passed identity fields are ignored -----------------
 def test_signature_forgery_ignored():
     r = call("agency_survey", expert_id="expert-a", issue_id="i-001", question="q",

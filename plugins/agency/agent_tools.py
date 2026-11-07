@@ -24,7 +24,20 @@ DEFAULT_ISSUE_TITLE = "issue"
 
 
 # ------------------------------------------------------------ identity --------
+# All toolset users act as the administrator (Вл, 07.11): ONE identity, taken
+# from plugin settings at register() time (settings.identity), never from
+# model arguments. Per-session binding is deferred until experts get native
+# tool access; set_identity() stays a dev/test seam.
 _IDENTITY = {"position_id": "admin-1", "mandate_version": 1}
+
+
+def load_identity(settings: dict) -> None:
+    """Merge settings.identity from the plugin config into the module state."""
+    ident = settings.get("identity") or {}
+    if ident.get("position_id"):
+        _IDENTITY["position_id"] = str(ident["position_id"])
+    if ident.get("mandate_version") is not None:
+        _IDENTITY["mandate_version"] = int(ident["mandate_version"])
 
 
 def set_identity(position_id: str, mandate_version: int) -> None:
