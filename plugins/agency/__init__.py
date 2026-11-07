@@ -10,20 +10,42 @@ logger = logging.getLogger("agency")
 _ctx = None
 
 
-def _enabled() -> bool:
-    """Feature flag: administrator.enabled in config.yaml. read-only probe."""
+def _agency_settings_enabled() -> bool:
+    """Plugin setting plugins.entries.agency.settings.enabled (+ dev ctx seam)."""
     try:
         if _ctx is not None and _ctx.get_config("enabled", False):
             return True
     except Exception:
         pass
     try:
-        from gateway.run_inbound import _ctl_flag_on  # same pattern controller uses
-        # TODO(dev): replace with _administrator_flag_on() — dedicated top-level
-        # key, owner-enforced naming (forbidden semantics in the name).
-        return _ctl_flag_on()
+        from hermes_cli.config import load_config
+        return bool(load_config().get("plugins", {}).get("entries", {})
+                    .get("agency", {}).get("settings", {}).get("enabled"))
     except Exception:
         return False
+
+
+def _admin_mode_on() -> bool:
+    """Fork flag ``autonomous_mode`` (admin-mode special agent stub, 04.11).
+
+    Agency tools describe the administrator role (TZ administrator-mode §5):
+    they must exist ONLY where an agent runs as administrator. Same read path
+    gateway.run_inbound._ctl_flag_on uses (raw top-level config key), plus an
+    env override for dev.
+    """
+    try:
+        import os
+        if os.environ.get("HERMES_ADMIN_MODE") == "1":
+            return True
+        from hermes_cli.config import load_config
+        return bool(load_config().get("autonomous_mode", False))
+    except Exception:
+        return False
+
+
+def _enabled() -> bool:
+    """Toolset visibility gate: settings-enabled AND running in admin mode."""
+    return _agency_settings_enabled() and _admin_mode_on()
 
 
 def register(ctx):
