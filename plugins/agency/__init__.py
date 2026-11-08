@@ -29,16 +29,30 @@ def _admin_mode_on() -> bool:
     """Fork flag ``autonomous_mode`` (admin-mode special agent stub, 04.11).
 
     Agency tools describe the administrator role (TZ administrator-mode §5):
-    they must exist ONLY where an agent runs as administrator. Same read path
-    gateway.run_inbound._ctl_flag_on uses (raw top-level config key), plus an
-    env override for dev.
+    they must exist ONLY where an agent runs as administrator. Read order:
+    env override → top-level config key → plugin setting
+    (plugins.entries.agency.settings.autonomous_mode). Dev pilot uses the
+    plugin-setting variant; the top-level key stays the production switch.
     """
     try:
         import os
         if os.environ.get("HERMES_ADMIN_MODE") == "1":
             return True
         from hermes_cli.config import load_config
-        return bool(load_config().get("autonomous_mode", False))
+        if bool(load_config().get("autonomous_mode", False)):
+            return True
+    except Exception:
+        pass
+    return _agency_settings_key("autonomous_mode")
+
+
+def _agency_settings_key(key: str) -> bool:
+    try:
+        if _ctx is not None:
+            return bool(_ctx.get_config(key, False))
+        from hermes_cli.config import load_config
+        entry = load_config().get("plugins", {}).get("entries", {}).get("agency", {})
+        return bool(entry.get("settings", {}).get(key, False))
     except Exception:
         return False
 
