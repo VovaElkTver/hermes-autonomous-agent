@@ -224,8 +224,9 @@ def test_case1_gate_registers_behind_flag():
     for expected in (False, True):
         c = Ctx(expected)
         A._ctx = c
-        # admin-mode conjunct pinned ON; the pure settings-gate is case-tested below
+        # pin BOTH conjuncts: gates are independent, no real-config leakage
         A._admin_mode_on = lambda: True
+        A._agency_settings_enabled = lambda: expected
         assert A._enabled() == expected
     A._ctx = None
 
