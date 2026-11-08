@@ -32,6 +32,8 @@ from tools.skill_manager_guards import (
     _validate_delete_target, _is_background_review, _refusal as _err)
 from tools.skill_manager_batch import (
     _PATCH_EITHER_OR, _PATCH_NEEDS_NEW_STRING, _PATCH_NEEDS_OLD_STRING, _op_shape_error, _skill_manage_batch)
+from tools.fork_mode import (
+    MUTATING_SKILL_ACTIONS, administrator_mode_enabled, frozen_skill_result)
 from tools.skills_guard import scan_skill, should_allow_install, format_scan_report
 
 logger = logging.getLogger(__name__)
@@ -742,6 +744,14 @@ def skill_manage(
     session_id: str | None = None, operations=None) -> str:
     """Dispatch to the action handler -> JSON string. ``operations`` (atomic batch shape,
     see _skill_manage_batch) overrides the flat fields."""
+    # administrator_mode freeze (Вл 08.11): code-level write prohibition for the skill
+    # library; the would-be edit is appended to need2write.md instead.
+    if administrator_mode_enabled() and (
+            action in MUTATING_SKILL_ACTIONS or operations is not None):
+        summary = ("operations=" + json.dumps(operations, ensure_ascii=False)
+                   if operations is not None else
+                   f"content={(content or '')[:150]} file_content={(file_content or '')[:150]}")
+        return frozen_skill_result(action, name or "", summary)
     if operations is not None:
         return _skill_manage_batch(
             operations, default_name=name or None, task_id=task_id, session_id=session_id)

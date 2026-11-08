@@ -3,6 +3,7 @@ Entries are joined by ``ENTRY_DELIMITER``; budgets are in chars (model-independe
 Module state that tests monkeypatch (``get_memory_dir``, ``fcntl``/``msvcrt``) stays
 in ``tools.memory_tool`` and is read lazily."""
 
+import functools
 import itertools
 import logging
 import os
@@ -876,3 +877,30 @@ class MemoryStore:
                 continue
             except OSError:
                 return str(bak_path) + _BACKUP_FAILED
+
+def _freeze_memory_mutator(method):
+    """administrator_mode (Вл 08.11): code-level freeze of MEMORY.md/USER.md writes —
+    the intended edit is appended to need2write.md and the store is left untouched.
+    Applied to every mutating MemoryStore entry point below."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        from tools.fork_mode import administrator_mode_enabled, frozen_memory_response
+        if not administrator_mode_enabled():
+            return method(self, *args, **kwargs)
+        import inspect
+        try:
+            bound = inspect.signature(method).bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            parts = [f"{k}={str(v)[:150]}" for k, v in list(bound.arguments.items())[1:]]
+            summary = ", ".join(parts)
+        except Exception:
+            summary = repr(args)[:300]
+        return frozen_memory_response(kwargs.get("target", args[0] if args else "?"),
+                                      method.__name__, summary)
+
+    return wrapper
+
+
+for _mutator in ("add", "replace", "patch", "remove", "apply_batch"):
+    setattr(MemoryStore, _mutator, _freeze_memory_mutator(getattr(MemoryStore, _mutator)))
