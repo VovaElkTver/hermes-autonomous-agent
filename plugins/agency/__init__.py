@@ -26,24 +26,14 @@ def _agency_settings_enabled() -> bool:
 
 
 def _admin_mode_on() -> bool:
-    """Fork flag ``autonomous_mode`` (admin-mode special agent stub, 04.11).
-
-    Agency tools describe the administrator role (TZ administrator-mode §5):
-    they must exist ONLY where an agent runs as administrator. Read order:
-    env override → top-level config key → plugin setting
-    (plugins.entries.agency.settings.autonomous_mode). Dev pilot uses the
-    plugin-setting variant; the top-level key stays the production switch.
+    """Fork flag ``autonomous_mode`` — ТОП-УРОВЕНЬ config.yaml (Вл 08.11: «это в конфиг»,
+    env-прокидывание исключено; в форке включён по умолчанию). Read live, no restart needed.
     """
     try:
-        import os
-        if os.environ.get("HERMES_ADMIN_MODE") == "1":
-            return True
-        from hermes_cli.config import load_config
-        if bool(load_config().get("autonomous_mode", False)):
-            return True
+        from tools.fork_mode import autonomous_mode_enabled
+        return autonomous_mode_enabled()
     except Exception:
-        pass
-    return _agency_settings_key("autonomous_mode")
+        return True  # fail-open: fork default is ON
 
 
 def _agency_settings_key(key: str) -> bool:
