@@ -72,11 +72,160 @@ def transaction(conn: sqlite3.Connection, *, immediate: bool = False) -> Iterato
     """Commit on success, roll back on error, and ALWAYS close ``conn`` (see the module docstring)."""
     try:
         if immediate:
-            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower() and _dblock_trace_budget():
+                    _dump_dblock_stacks("transaction/BEGIN IMMEDIATE", exc)
+                raise
         with conn:
             yield conn
     finally:
         conn.close()
+
+
+_dblock_trace_left = [12]
+
+
+def _dblock_trace_budget() -> bool:
+    """Local probe: cap stack dumps so a lock storm cannot flood the log."""
+    if _dblock_trace_left[0] <= 0:
+        return False
+    _dblock_trace_left[0] -= 1
+    return True
+
+
+_SHM_LOCK_NAMES = {120: "WRITER", 121: "CKPT", 122: "RECOVER", 123: "R0", 124: "R1",
+                   125: "R2", 126: "R3", 127: "R4", 128: "R5"}
+
+
+def _dump_kernel_locks(fh) -> None:
+    """Kernel-truth map of byte locks held on the dev-home store sidecars (local probe)."""
+    import fcntl as _fcntl
+    import os as _os
+    import struct as _struct
+    from pathlib import Path as _P
+    home = _P.home() / ".hermes-dev"
+    _ofd_getlk = getattr(_fcntl, "F_OFD_GETLK", 37)  # Linux: value 37 when the constant is undefined
+    for name in ("state.db-shm", "state.db-wal", "state.db"):
+        path = home / name
+        try:
+            fd = _os.open(path, _os.O_RDWR)
+        except OSError as ex3:
+            fh.write(f"klock {name}: open-failed {ex3}\n")
+            continue
+        try:
+            for offset in range(120, 133):
+                request = _struct.pack("BBLQQ", _fcntl.F_WRLCK, 0, 0, offset, 1)
+                res = _fcntl.fcntl(fd, _fcntl.F_GETLK, request)
+                l_type, _, holder_pid, _start, length = _struct.unpack("BBLQQ", res)
+                if l_type == _fcntl.F_UNLCK:
+                    continue
+                kind = "W" if l_type == _fcntl.F_WRLCK else "R"
+                label = _SHM_LOCK_NAMES.get(offset, str(offset)) if name.endswith("-shm") else "?"
+                fh.write(f"klock {name}: {kind} byte={offset}({label}) pid={holder_pid} len={length}\n")
+        except Exception as ex2:
+            fh.write(f"klock {name}: unavailable {ex2}\n")
+        finally:
+            _os.close(fd)
+
+
+def _dump_dblock_stacks(where: str, exc: Exception) -> None:
+    """Record every thread's stack when the store is locked by a long txn (local probe)."""
+    import sys
+    import traceback
+    import types
+    try:
+        from pathlib import Path as _P
+        log = _P.home() / ".hermes-dev" / "logs" / "dblock-trace.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} {where}: {exc}\n")
+            try:
+                import gc as _gc
+                total = 0
+                for obj in _gc.get_objects():
+                    if not isinstance(obj, sqlite3.Connection):
+                        continue
+                    total += 1
+                    # NOTE: sqlite3.Connection has no fileno(); guard each attribute separately so a
+                    # single bad attribute cannot silently kill whole IN-TXN detection.
+                    try:
+                        itx = bool(obj.in_transaction)
+                    except Exception:
+                        continue
+                    if not itx:
+                        continue
+                    iso = changes = None
+                    try:
+                        iso = obj.isolation_level
+                    except Exception:
+                        pass
+                    try:
+                        changes = obj.total_changes
+                    except Exception:
+                        pass
+                    fh.write(f"!!! IN-TXN conn id={id(obj):#x} isolation={iso!r} changes={changes}\n")
+                    try:
+                        dbs = obj.execute("PRAGMA database_list").fetchall()
+                        fh.write(f"    dbs={dbs}\n")
+                    except Exception as dexc:
+                        fh.write(f"    dbs-unavailable: {dexc}\n")
+                    try:
+                        import gc as _gc2
+                        sigs = []
+                        for ref in _gc2.get_referrers(obj)[:10]:
+                            tn = type(ref).__name__
+                            extra = ""
+                            if isinstance(ref, dict):
+                                extra = ",".join(str(k)[:24] for k in list(ref.keys())[:6])
+                            elif isinstance(ref, types.FrameType):
+                                extra = f"{ref.f_code.co_name}:{ref.f_lineno}"
+                            elif hasattr(ref, "__dict__"):
+                                extra = ",".join(list(getattr(ref, "__dict__", {}).keys())[:8])[:120]
+                            owners = ""
+                            paths = []
+                            if isinstance(ref, dict):
+                                for owner in _gc2.get_referrers(ref)[:4]:
+                                    otn = type(owner).__name__
+                                    if isinstance(owner, types.FrameType) or otn in ("dict", "list", "tuple", "set", "frozenset"):
+                                        continue
+                                    owners += f"<-{otn}"
+                                    def _find(node_, prefix_="", depth_=0):
+                                        found_ = []
+                                        try:
+                                            items_ = list(vars(node_).items())
+                                        except Exception:
+                                            return found_
+                                        for k, v in items_:
+                                            hit = (
+                                                v is obj
+                                                or (isinstance(v, (list, tuple, set, frozenset)) and any(x is obj for x in v))
+                                                or (isinstance(v, dict) and any(x is obj for x in v.values())))
+                                            if hit:
+                                                found_.append(prefix_ + k)
+                                            elif depth_ < 2 and not isinstance(v, (str, bytes, int, float, bool)):
+                                                found_.extend(_find(v, prefix_ + k + ".", depth_ + 1))
+                                        return found_
+                                    names = _find(owner)
+                                    if names:
+                                        paths.append(f"{otn}({','.join(names[:4])})")
+                            sigs.append(f"{tn}[{extra}]{owners}{'##' + ';'.join(paths) if paths else ''}")
+                        fh.write("    refs: " + " | ".join(sigs) + "\n")
+                    except Exception:
+                        pass
+                fh.write(f"conns_total={total}\n")
+            except Exception:
+                pass
+            try:
+                _dump_kernel_locks(fh)
+            except Exception:
+                pass
+            for tid, frame in sys._current_frames().items():
+                fh.write(f"--- thread {tid}\n")
+                fh.write("".join(traceback.format_stack(frame))[-1800:])
+    except Exception:
+        pass
 
 
 def add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> bool:

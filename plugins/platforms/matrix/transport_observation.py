@@ -103,6 +103,13 @@ class TransportObservationMixin:
                 account=self._user_id, device=self._device_id,
                 sync_batch_id=self._current_sync_batch)
         except Exception:  # health: allow BLE001 -- observer boundary: an observation must never affect the receive path
+            # Release any partial implicit transaction on the long-lived shared conn —
+            # a swallowed error that left `in_transaction` open would hold the WAL writer
+            # slot forever and wedge every other state.db writer (dev wedge 2026-11-08).
+            conn = getattr(self, "_transport_conn", None)
+            if conn is not None:
+                with suppress(Exception):
+                    conn.rollback()
             logger.debug("Matrix: transport-observation recording failed", exc_info=True)
 
     async def _maybe_reconcile_transport(self) -> None:
@@ -121,6 +128,12 @@ class TransportObservationMixin:
                 self._transport_db(), fetch_event=self._transport_fetch_event,
                 account=self._user_id or None, limit=50)
         except Exception:  # health: allow BLE001 -- observer boundary: the sync loop must never break on diagnostics
+            # Same invariant as the record path: never leave an implicit txn open on
+            # the shared long-lived conn (it holds the WAL writer slot — dev wedge).
+            conn = getattr(self, "_transport_conn", None)
+            if conn is not None:
+                with suppress(Exception):
+                    conn.rollback()
             logger.debug("Matrix: transport reconciliation failed", exc_info=True)
 
     async def _transport_fetch_event(self, room_id: str, event_id: str) -> dict:

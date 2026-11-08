@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import sqlite3
 import threading
 import time
 from collections import Counter
@@ -36,6 +37,9 @@ from tui_gateway.hosted_room_peer_transport import (
 _HOSTED_ROOM_IDLE_FALLBACK_SECONDS = 5.0
 _HOSTED_ROOM_ACTIVE_POLL_SECONDS = 0.25
 _HOSTED_ROOM_TERMINAL_GRACE_SECONDS = 30.0
+# Janitorial prune must ride out boot-time lock storms instead of killing the supervised
+# hosted-room worker in a crash loop (dev wedge 2026-11-08): retry BUSY up to this budget.
+_PRUNE_RETRY_BUDGET_S = 120.0
 
 _TERMINAL_STATUSES = ("deferred", "settled", "failed", "cancelled")
 _LIVE_STATUSES = ("queued", "running", "stopping")
@@ -126,13 +130,34 @@ def _authority(room: Mapping[str, Any]) -> tuple[str, int]:
 class HostedRoomService:
     """Own the hosted Discussion policy and its transport-free worker."""
 
+    def _prune_with_backoff(self) -> None:
+        """Run the janitorial prune, riding out transient write-lock storms.
+
+        A locked store at boot previously killed the supervised hosted-room worker and with it
+        the whole gateway (crash loop, ~240 restarts/night on 2026-11-08). BUSY is retried with
+        exponential backoff within a bounded budget; a non-lock error or exhausted budget
+        re-raises (the worker watcher then retries creation as before).
+        """
+        deadline = time.monotonic() + _PRUNE_RETRY_BUDGET_S
+        delay = 0.5
+        while True:
+            try:
+                hosted_rooms.prune_disbanded_rooms(self.db_path)
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                    raise
+                logger.warning("hosted-room prune: store busy, retrying in %.1fs (%s)", delay, exc)
+                time.sleep(delay)
+                delay = min(delay * 2, 8.0)
+
     def __init__(
         self, server: ModuleType, *, db_path: Path | str | None = None,
         peer_routes: Mapping[tuple[str, str], PeerMemberRoute] | None = None,
         peer_clients: Mapping[Any, HostedRoomPeerClient] | None = None) -> None:
         self.server, self.db_path = server, Path(db_path or hosted_rooms.default_db_path())
         self.discussion_limits = _discussion_limits(self.root)
-        hosted_rooms.prune_disbanded_rooms(self.db_path)
+        self._prune_with_backoff()
         self._policy_lock = threading.RLock()
         # Orders Stop with an approval's live check and dispatch: an Allow either reaches the member
         # before Stop marks its attempt stopping, or sees the stop and is refused. Taken before
