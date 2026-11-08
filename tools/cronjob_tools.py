@@ -1260,19 +1260,23 @@ def _cronjob_handler(args, **kw):
     )
 
 
-# Fork directive (Вл, 08.11): «cronjob из тулсет вырезается нафиг; по ходу работы
-# ветки cron вырезается напрочь». The agent-facing toolset registration is CUT here;
-# the module stays importable because the cron runtime (webhook/api_server/
-# scheduler_prompt) still calls execute_job_for_event/_scan_cron_prompt until the
-# runtime excision phases land. Phase plan: (1) this cut, (2) startup unwiring of
-# cron/ from gateway, (3) deletion of cron/ + remaining tools/cronjob_*.
-#
-# registry.register(
-#     name="cronjob_manage",
-#     toolset="cronjob",
-#     schema=CRONJOB_SCHEMA,
-#     handler=_cronjob_handler,
-#     check_fn=check_cronjob_requirements,
-#     emoji="⏰",
-#     dynamic_schema_overrides=_cronjob_schema_overrides,
-# )
+# Fork directive (Вл 08/09.11): the agent-facing cron toolset exists only OUTSIDE the
+# agent-first mode — «все наши придумки под отдельным корневым конфиг флагом».
+# Default posture of this fork (autonomous_mode=true): CUT. Flipping
+# autonomous_mode=false restores donor upstream behavior (toolset back on).
+try:
+    from tools.fork_mode import cron_runtime_enabled as _cron_runtime_enabled
+except Exception:
+    def _cron_runtime_enabled() -> bool:
+        return True  # fork_mode unavailable → donor parity
+
+if _cron_runtime_enabled():
+    registry.register(
+        name="cronjob_manage",
+        toolset="cronjob",
+        schema=CRONJOB_SCHEMA,
+        handler=_cronjob_handler,
+        check_fn=check_cronjob_requirements,
+        emoji="⏰",
+        dynamic_schema_overrides=_cronjob_schema_overrides,
+    )

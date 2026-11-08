@@ -893,15 +893,21 @@ def _derive_chat_session_id(system_prompt: Optional[str], first_user_message: st
 
 _CRON_AVAILABLE = False
 try:
-    from cron.jobs import (
-        list_jobs as _cron_list, get_job as _cron_get, update_job as _cron_update,
-        remove_job as _cron_remove, pause_job as _cron_pause, resume_job as _cron_resume,
-        trigger_job as _cron_trigger)
-    from cron.scheduler import (
-        CronSchedulerRegistrationError as _CronSchedulerRegistrationError,
-        create_job_with_scheduler_registration as _cron_create)
-    _CRON_AVAILABLE = True
+    # Fork autonomous posture (root flag Вл 09.11): under autonomous_mode the fork
+    # carries no cron — the REST surface (/api/jobs/*, /api/cron/fire) fails closed.
+    from tools.fork_mode import cron_runtime_enabled as _fork_cron_runtime_enabled
+    if _fork_cron_runtime_enabled():
+        from cron.jobs import (
+            list_jobs as _cron_list, get_job as _cron_get, update_job as _cron_update,
+            remove_job as _cron_remove, pause_job as _cron_pause, resume_job as _cron_resume,
+            trigger_job as _cron_trigger)
+        from cron.scheduler import (
+            CronSchedulerRegistrationError as _CronSchedulerRegistrationError,
+            create_job_with_scheduler_registration as _cron_create)
+        _CRON_AVAILABLE = True
 except ImportError:
+    pass
+if not _CRON_AVAILABLE:
     _cron_list = _cron_get = _cron_create = _cron_update = None
     _cron_remove = _cron_pause = _cron_resume = _cron_trigger = None
 

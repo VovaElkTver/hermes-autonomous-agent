@@ -839,7 +839,15 @@ app.include_router(_messaging_relay_routes.router)
 app.include_router(_oauth_routes.router)
 app.include_router(_sessions_routes.manage_router)
 app.include_router(_status_routes.logs_router)
-app.include_router(_cron_routes.router)
+try:
+    from tools.fork_mode import cron_runtime_enabled as _fork_cron_on
+except Exception:
+    def _fork_cron_on() -> bool:
+        return True
+if _fork_cron_on():
+    # Fork autonomous posture (root flag Вл 09.11): the dashboard's cron REST surface
+    # exists only when the root flag re-enables cron (donor parity mode).
+    app.include_router(_cron_routes.router)
 app.include_router(_mcp_routes.router)
 app.include_router(_ops_routes.router)
 app.include_router(_skills_routes.hub_router)

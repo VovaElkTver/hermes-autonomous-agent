@@ -600,6 +600,16 @@ class WebhookAdapter(BasePlatformAdapter):
         the job's own prompt, skills, model and delivery apply. Same auth/rate-limit/filter/script/idempotency
         pipeline as agent routes; 202 immediately, the run happens on a worker thread."""
         job_ref = str(route_config["cron_job"])
+        # Fork autonomous posture (root flag Вл 09.11): no cron, fail closed.
+        from tools.fork_mode import cron_runtime_enabled
+        if not cron_runtime_enabled():
+            logger.warning("[webhook] cron-trigger route=%s refused: cron is excised under autonomous_mode",
+                           route_name)
+            return web.json_response(
+                {"error": "cron is disabled (fork autonomous_mode)"},
+                status=503,
+                headers={"Retry-After": "3600"},
+            )
         event_context = (f"This run was triggered by webhook event '{event_type}' on route '{route_name}' "
                          f"(not the schedule).\n\n{prompt}")
         logger.info("[webhook] cron-trigger event=%s route=%s job=%s delivery=%s", event_type, route_name, job_ref,
