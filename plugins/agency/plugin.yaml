@@ -1,4 +1,0 @@
-name: agency
-version: "0.2.0"
-description: "Agency toolset — admin-side native tools over the shared agency-state.db ledger. Off unless administrator.enabled is true."
-manifest_version: 2
