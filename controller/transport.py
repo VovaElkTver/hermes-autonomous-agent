@@ -107,35 +107,47 @@ def record_observation(
     if channel not in CHANNELS:
         raise ValueError(f"unknown transport channel: {channel!r}")
     now = time.time() if observed_at is None else observed_at
-    dup = conn.execute(
-        "SELECT 1 FROM transport_observations"
-        " WHERE connector=? AND account=? AND external_event_id=? AND sync_batch_id<>?"
-        " LIMIT 1",
-        (connector, account, event_id, sync_batch_id),
-    ).fetchone()
-    status = SYNTHETIC if dup else UNVERIFIED
-    decryption = "undecryptable" if event_type == "m.room.encrypted" else "plain"
-    obs_id, ev_id = _new_id("tobs"), _new_id("evobs")
-    conn.execute(
-        "INSERT INTO transport_observations"
-        " (observation_id, connector, account, device, channel, room_id,"
-        "  external_event_id, event_type, raw_payload_ref, sync_batch_id, status, observed_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (obs_id, connector, account, device, channel, room_id, event_id,
-         event_type, content_hash, sync_batch_id, status, now),
-    )
-    conn.execute(
-        "INSERT INTO event_observations"
-        " (event_obs_id, observation_id, room_id, event_id, event_type, sender,"
-        "  content_hash, relation, normalized_ref, identity_consistency,"
-        "  server_retrievability, decryption_status, redaction_status,"
-        "  timeline_placement, normalization_consistency, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (ev_id, obs_id, room_id, event_id, event_type, sender, content_hash,
-         json.dumps(relation or {}, ensure_ascii=False, sort_keys=True), "",
-         "pending", "pending", decryption, "pending", "pending", "pending", now),
-    )
-    conn.commit()
+    # BEGIN IMMEDIATE + guaranteed rollback: a BUSY failure mid-write must never leave
+    # an implicit transaction open on the caller's long-lived connection — that leaked
+    # writer slot wedged every other state.db writer until process restart (dev wedge
+    # 2026-11-08: MatrixAdapter._transport_conn stuck with `changes=19` open txn).
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        dup = conn.execute(
+            "SELECT 1 FROM transport_observations"
+            " WHERE connector=? AND account=? AND external_event_id=? AND sync_batch_id<>?"
+            " LIMIT 1",
+            (connector, account, event_id, sync_batch_id),
+        ).fetchone()
+        status = SYNTHETIC if dup else UNVERIFIED
+        decryption = "undecryptable" if event_type == "m.room.encrypted" else "plain"
+        obs_id, ev_id = _new_id("tobs"), _new_id("evobs")
+        conn.execute(
+            "INSERT INTO transport_observations"
+            " (observation_id, connector, account, device, channel, room_id,"
+            "  external_event_id, event_type, raw_payload_ref, sync_batch_id, status, observed_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (obs_id, connector, account, device, channel, room_id, event_id,
+             event_type, content_hash, sync_batch_id, status, now),
+        )
+        conn.execute(
+            "INSERT INTO event_observations"
+            " (event_obs_id, observation_id, room_id, event_id, event_type, sender,"
+            "  content_hash, relation, normalized_ref, identity_consistency,"
+            "  server_retrievability, decryption_status, redaction_status,"
+            "  timeline_placement, normalization_consistency, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (ev_id, obs_id, room_id, event_id, event_type, sender, content_hash,
+             json.dumps(relation or {}, ensure_ascii=False, sort_keys=True), "",
+             "pending", "pending", decryption, "pending", "pending", "pending", now),
+        )
+        conn.commit()
+    except BaseException:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     # V-O9 shadow writer: mirror a reply relation into a causal reply edge when
     # the parent is already observed. Never raises (causal.mirror_*).
     parent_event = relation_parent_event(relation)

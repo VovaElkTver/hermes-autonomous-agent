@@ -20,6 +20,30 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 DbPath = Path | str
 
 
+def _dump_dblock_stacks(where: str, exc: Exception, db_path: DbPath) -> None:
+    """Diagnostics: on a locked-store failure, record every thread's stack so the
+    holder of the sqlite RESERVED lock can be identified post-mortem (local probe)."""
+    import sys
+    import traceback
+    try:
+        log = Path(str(db_path)).parent / "logs" / "dblock-trace.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')} {where}: {exc}\n")
+            for tid, frame in sys._current_frames().items():
+                fh.write(f"--- thread {tid}\n")
+                fh.write("".join(traceback.format_stack(frame))[-1800:])
+            holders = None
+            try:
+                from hermes_state_lockowners import state_db_write_lock_holders
+                holders = state_db_write_lock_holders(Path(str(db_path)))
+            except Exception as hexc:
+                holders = [f"holders-unavailable: {hexc}"]
+            fh.writelines(f"holder: {h[:400]}\n" for h in holders or [])
+    except Exception:
+        pass
+
+
 def identifier(
     value: Any, *, label: str, error: type[Exception], max_chars: int = 128,
     pattern: re.Pattern[str] | None = IDENTIFIER_RE, invalid: str | None = None) -> str:
@@ -94,8 +118,13 @@ def clock(now: float | None) -> float:
     return time.time() if now is None else float(now)
 
 
-def open_sqlite(path: DbPath, *, timeout: float = 10) -> sqlite3.Connection:
-    """Row-factory connection with foreign keys on; no journal or schema work (steady-state readers)."""
+def open_sqlite(path: DbPath, *, timeout: float = 60) -> sqlite3.Connection:
+    """Row-factory connection with foreign keys on; no journal or schema work (steady-state readers).
+
+    Local probe 08.11: post-upgrade boot storms (long legacy-data maintenance writes) exceed
+    the previous 10 s budget and killed supervised room workers in a crash loop; 60 s rides
+    them out. Revert to the upstream default when 015d11a133-era migration pressure settles.
+    """
     from hermes_cli.sqlite_util import open_db
 
     return open_db(path, db_label="shared-state.db", busy_timeout_ms=int(timeout * 1000), wal=False,
@@ -117,13 +146,18 @@ def connect(
                 conn.execute("BEGIN IMMEDIATE")
                 initialize(conn)
                 conn.commit()
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc).lower():
+                    _dump_dblock_stacks("connect._initialize/BEGIN IMMEDIATE", exc, db_path)
+                conn.rollback()
+                raise
             except Exception:
                 conn.rollback()
                 raise
     # Late import: a gateway that outlives an on-disk upgrade has the OLD sqlite_util cached.
     from hermes_cli.sqlite_util import open_db
 
-    return open_db(db_path, db_label=db_label, busy_timeout_ms=10_000, foreign_keys=True,
+    return open_db(db_path, db_label=db_label, busy_timeout_ms=60_000, foreign_keys=True,
                    wal_lock_retries=lock_retries, initialize=_initialize)
 
 
