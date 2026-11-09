@@ -175,7 +175,8 @@ def make_worker(conn, *, timeout_s: float | None = None,
             qf.close()
             exe = hermes_bin or shutil.which("hermes") or "hermes"
             env = {**os.environ, "HERMES_CONTROLLER_TASK_ID": task["task_id"],
-                   "HERMES_CONTROLLER_RUN_ID": run["run_id"], **scope_env(task)}
+                   "HERMES_CONTROLLER_RUN_ID": run["run_id"],
+                   "HERMES_CONTROLLER_STEP_ID": step["step_id"], **scope_env(task)}
             if extra_env:
                 env.update(extra_env)
             argv = [exe, "chat", "--query-file", qf.name, "--oneshot", "-Q",

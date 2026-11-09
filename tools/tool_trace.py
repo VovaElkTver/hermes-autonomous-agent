@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +113,33 @@ def _resolve_position(store, session_id: str | None):
     return pid, int(mandate or 1)
 
 
+def _run_ctx() -> dict | None:
+    """Run context injected by controller workers (workers.py spawn env).
+
+    Present only inside headless autonomous runs; interactive sessions return
+    None and stay agency-ledger-only per the original Inspector-trace TZ.
+    """
+    run_id = os.environ.get("HERMES_CONTROLLER_RUN_ID") or None
+    if not run_id:
+        return None
+    return {"run_id": run_id,
+            "task_id": os.environ.get("HERMES_CONTROLLER_TASK_ID") or None,
+            "step_id": os.environ.get("HERMES_CONTROLLER_STEP_ID") or None}
+
+
+def _write_primary(payload: dict, ctx: dict) -> None:
+    """Primary sink: ctl_event(kind=run_observation) in the agent's own state.db.
+
+    Decision Вл 09.11 («фиксируем и делаем»): state.db is THE primary store of
+    run observations — autonomy never depends on the agency plugin; the
+    agency-ledger write below is a mirror that fail-opens independently.
+    """
+    from controller import model as ctl_model
+    conn = ctl_model.connect()
+    ctl_model.emit(conn, kind="run_observation", origin="tool_trace",
+                   task_id=ctx.get("task_id"), payload=payload)
+
+
 def emit_tool_call(*, session_id: str | None, name: str, toolset: str,
                    args: dict, result: Any = None, ok: bool = True,
                    error_code: str | None = None, db_path: str | None = None) -> None:
@@ -119,16 +147,17 @@ def emit_tool_call(*, session_id: str | None, name: str, toolset: str,
 
     ``db_path`` exists for tests / local wiring; production passes None so the
     toolset resolves its own agency-state.db under HERMES_HOME.
+    Two sinks (Вл 09.11: state.db — первичный сток, agency-ledger — зеркало):
+    - primary: ctl_event(kind=run_observation) in state.db, only when the call
+      happens inside a controller run (env ctx);
+    - mirror: the agency ledger ``trace`` track via store.submit().
     """
     if not tool_trace_enabled():
         return
     try:
-        store = _load_store()
-        if store is None:
-            logger.debug("tool_trace: receiver (plugins.agency.store) unavailable, event dropped")
-            return
+        ctx = _run_ctx()
         args_dig, result_dig = _digest(args), _digest(result if ok else None)
-        position_id, mandate = _resolve_position(store, session_id)
+        position_id, mandate = _resolve_position(_load_store(), session_id)
         key_material = "|".join((
             position_id, session_id or "-", f"{toolset}.{name}",
             args_dig, result_dig, "ok" if ok else f"err:{error_code}"))
@@ -143,6 +172,20 @@ def emit_tool_call(*, session_id: str | None, name: str, toolset: str,
         }
         if error_code:
             payload["error_code"] = error_code
+        if ctx:
+            payload.update({"run_id": ctx["run_id"], "task_id": ctx["task_id"],
+                            "step_id": ctx["step_id"]})
+            try:
+                _write_primary(payload, ctx)
+            except Exception:
+                # sinks fail open INDEPENDENTLY: a wedged state.db must not
+                # cost us the agency mirror, nor vice versa
+                logger.debug("tool_trace: primary run_observation write failed (ignored)",
+                             exc_info=True)
+        store = _load_store()
+        if store is None:
+            logger.debug("tool_trace: receiver (plugins.agency.store) unavailable, mirror dropped")
+            return
         store.submit(db_path, type_="tool_call", kind="observation",
                      issue_id=TRACE_TRACK, actor_position_id=position_id,
                      mandate_version=mandate, payload=payload, idem_key=idem_key)
