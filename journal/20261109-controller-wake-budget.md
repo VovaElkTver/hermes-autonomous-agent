@@ -21,7 +21,7 @@ D. docs/design/maintenance-epoch.md — проект самосогласия ma
    (per-scope грант + бюджет). 4 открытых вопроса к Вл, без них не включается.
 
 ## Проверка
-- tests/plugins/test_controller_wake_budget.py — 7 новых (set_budget оживляет
+- tests/plugins/test_controller_wake_budget.py — 6 новых (set_budget оживляет
   страж; контрактовские бюджеты легли на running; transition/followup звонят;
   wake тянет pump в текущий бит при интервале 3600).
 - tests/plugins/test_controller_loop.py — 2 новых регрессии на starve-баг.
