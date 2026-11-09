@@ -291,3 +291,37 @@ def test_prompt_snapshot_multiline_fields_folded(tmp_path, monkeypatch):
     # name(1) + match(1) + store(1) + pointer(1) + disclaimer(1)
     assert "- multi line" in topic_lines
     assert "  pointer: p1 p2" in topic_lines
+
+
+# ── visible probe answer (Вл 09.11): global add must REPORT the topic miss ──
+
+def test_unmatched_global_add_reports_topic_probe(gate_env):
+    resp = gate_env.ms.add("memory", "случайная заметка не про темы")
+    assert resp["success"]
+    probe = resp["topic_probe"]
+    assert probe["matched"] is None
+    assert "hermes-agency" in probe["topics_checked"]
+    assert "registry" in probe["hint"]
+    # the entry itself landed globally, byte-for-byte штатная ветка
+    assert "случайная заметка не про темы" in _entries(gate_env.mem_path)
+
+
+def test_matched_add_has_no_probe_field(gate_env):
+    resp = gate_env.ms.add("memory", "hermes-agency: новое правило")
+    assert resp["success"] and "topic_probe" not in resp
+    assert resp["topic"] == "hermes-agency"
+
+
+def test_gate_off_add_has_no_probe_field(tmp_path, monkeypatch):
+    monkeypatch.setattr("tools.memory_tool.get_memory_dir",
+                        lambda: tmp_path, raising=False)
+    ms = MemoryStore()
+    ms.load_from_disk()
+    resp = ms.add("memory", "обычная запись")
+    assert resp["success"] and "topic_probe" not in resp
+
+
+def test_user_target_add_has_no_probe_field(gate_env):
+    resp = gate_env.ms.add("user", "пользователь любит короткое")
+    assert resp["success"] and "topic_probe" not in resp
+

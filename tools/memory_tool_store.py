@@ -528,7 +528,21 @@ class MemoryStore:
             return entries + [content], "Entry added."
         # Append-only: skip the drift guard (appending never clobbers foreign
         # content) but still refuse a failed read — add rewrites the WHOLE file.
-        return self._mutate(target, _add, skip_drift=True)
+        resp = self._mutate(target, _add, skip_drift=True)
+        # Gate ON and the topic probe MISSED: say so in the response. A silent
+        # global write hides the only signal that the registry lacks a topic for
+        # the project being worked on (Вл 09.11: the topicality question must be
+        # asked by code, and its answer must be visible to the caller).
+        if target == "memory" and self.topic_registry and isinstance(resp, dict):
+            from tools import memory_topic_gate as gate
+            resp["topic_probe"] = {
+                "matched": None,
+                "topics_checked": [r.name for r in gate.load_registry(self.topic_registry)],
+                "hint": ("Global write: no registered topic matched this text. If the "
+                         "entry is project work, add/extend a topic row in the registry "
+                         "instead of growing MEMORY.md."),
+            }
+        return resp
 
     def replace(self, target: str, old_text: str, new_content: str,
                 matched_entry: Optional[str] = None) -> dict[str, Any]:
