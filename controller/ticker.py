@@ -53,7 +53,7 @@ import sqlite3
 import threading
 import time
 
-from . import alerts, loop, model, pump_lock, queue as Q, transitions
+from . import alerts, loop, model, pump_lock, queue as Q, transitions, wake
 
 logger = logging.getLogger("controller.ticker")
 
@@ -341,7 +341,18 @@ class Ticker:
         beat does zero SQL; only a due counter touches the DB."""
         next_pump = self._mono() + self.intervals["pump"] / 2
         next_followups = self._mono() + self.intervals["followups"]
+        wake_seen = wake.read_seq()
         while not self._stop.is_set():
+            # Wake seam (go Вл 09.11): an external mutation (transition, new
+            # follow-up, answered approval) rang the seq file — pull every due
+            # counter to THIS beat. The 300 s is a policy, not latency. A tiny
+            # file read, so the idle beat stays zero-SQL (doctrine 28.10).
+            seq = wake.read_seq()
+            if seq != wake_seen:
+                wake_seen = seq
+                now = self._mono()
+                next_pump = min(next_pump, now)
+                next_followups = min(next_followups, now)
             if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)

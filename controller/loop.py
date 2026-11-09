@@ -198,12 +198,18 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
         if verdict.get("verdict") == "needs_human":
             transitions.transition(conn, task["task_id"], "needs_human",
                                    basis=f"review: {verdict.get('detail')}")
-            return log
+            # Park-and-continue (go Вл 09.11): needs_human drops the task from
+            # Q.eligible, so re-selecting now IS the doctrine "upknulsya v
+            # ozhidanie razresheniya — podnimay sledushuyu zadachu". The old
+            # `return` starved the whole scope until the next pump due (<=300 s).
+            log.append({"task": task["task_id"], "to": "needs_human"})
+            continue
         # 'revise': give the task one more attempt at the same step (attempt>1 next pick)
         if model.budget_exhausted(conn, task["task_id"], "steps"):
             transitions.transition(conn, task["task_id"], "blocked",
                                    basis="budget: steps exhausted on revise")
-            return log
+            log.append({"task": task["task_id"], "to": "blocked", "reason": "budget"})
+            continue  # same as above: the blocked task leaves eligible; scope moves on
     log.append({"stop": "max_steps"})
     return log
 

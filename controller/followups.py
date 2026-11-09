@@ -92,7 +92,9 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         repeat_beats: int = DEFAULT_REPEAT_BEATS,
         max_repeats: int = DEFAULT_MAX_REPEATS, created_by: str = "agent-proposal",
         provenance: dict | None = None, now: float | None = None) -> str:
-    """Register one follow-up. Reminder needs ``due_at``; review needs ``period_s``."""
+    """Register one follow-up. Reminder needs ``due_at``; review needs ``period_s``.
+    Rings the ticker wake seam (go Вл 09.11): a reminder set for the next beat
+    is counted off on the next beat, not at the next followups deadline."""
     if kind == "reminder" and due_at is None:
         raise ValueError("reminder requires due_at")
     if kind == "review" and not period_s:
@@ -114,6 +116,8 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
             (fid, kind, scope_task, scope_project, text, due_at, period_s,
              "pending", recipient, repeat_beats, max_repeats, created_by, now,
              json.dumps(provenance, ensure_ascii=False) if provenance else None))
+    from . import wake
+    wake.notify()
     return fid
 
 

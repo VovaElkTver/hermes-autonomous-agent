@@ -509,3 +509,50 @@ def test_orphan_in_progress_step_released_before_verifying(env):
     assert len(c.execute("SELECT 1 FROM ctl_run WHERE step_id=?", (sid,)).fetchall()) == 2
     assert c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()[0] \
         == "completed"
+
+
+# ── park-and-continue (go Вл 09.11, разбор критика §2) ──────────────────────
+
+def test_needs_human_does_not_starve_the_scope(env):
+    """Old bug: `return` after transition(needs_human) cut the whole scope
+    until the next pump due (<=300 s). needs_human leaves Q.eligible, so the
+    loop must pick the NEXT ready task in the same call."""
+    c, wd = env
+    model.set_permission(c, wd, enabled=True, granted_via="user-command")
+    a = mk(c, wd, "park-me", priority=1)
+    b = mk(c, wd, "keep-going")
+    model.add_step(c, a, "impl", "do-a", checkpoint=True)
+    model.add_step(c, b, "impl", "do-b", checkpoint=True)
+
+    def review_needs_human(run, step, arts):
+        return {"verdict": "needs_human", "detail": "ask"}
+
+    log = loop.run_cycle(c, scope=wd, worker_fn=ok_worker,
+                         review_fn=review_needs_human, max_steps=10)
+    states = dict(c.execute("SELECT task_id, state FROM ctl_task").fetchall())
+    assert states[a] == "needs_human", log
+    assert states[b] == "needs_human", f"b never started in the same cycle: {log}"
+
+
+def test_budget_blocked_does_not_starve_the_scope(env):
+    """Same cut at the blocked branch: after budget-exhausted the next ready
+    task must run inside the same cycle, not at the next drain."""
+    c, wd = env
+    model.set_permission(c, wd, enabled=True, granted_via="user-command")
+    a = mk(c, wd, "rich", priority=1)
+    b = mk(c, wd, "poor")
+    model.add_step(c, a, "impl", "do-a", checkpoint=True)
+    model.add_step(c, b, "impl", "do-b", checkpoint=True)
+    model.add_budget(c, a, "steps", 0)
+    model.set_budget(c, a, "steps", 1)   # the loop's own +1 will exhaust it
+
+    def review_by_task(run, step, arts):
+        if step["task_id"] == a:
+            return {"verdict": "revise", "detail": "force the revise branch"}
+        return {"verdict": "pass", "detail": "ok"}
+
+    log = loop.run_cycle(c, scope=wd, worker_fn=ok_worker,
+                         review_fn=review_by_task, max_steps=10)
+    states = dict(c.execute("SELECT task_id, state FROM ctl_task").fetchall())
+    assert states[a] == "blocked", log
+    assert states[b] != "ready", f"b starved by the old return: {log}"
