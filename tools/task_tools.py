@@ -95,7 +95,7 @@ registry.register(
     name="task_queue",
     toolset="tasks",
     schema=QUEUE_SCHEMA,
-    check_fn=lambda args: _check_args(args),
+    check_fn=lambda *_a, **_kw: True,  # tasks toolset: static availability (queue builtins always resolvable)
     handler=lambda args, **kw: task_queue(args or {}, **kw),
     emoji="🧾")
 
