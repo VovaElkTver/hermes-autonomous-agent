@@ -114,6 +114,34 @@ _TODO_HANDLERS = {
 }
 
 
+def _budget_cli(argv=None) -> int:
+    """ctl budget set <task> <metric> <limit> | show <task> (go Вл 09.11)."""
+    argv = list(sys.argv[2:] if argv is None else argv)
+    ap = argparse.ArgumentParser(prog="controller.pump_cli budget")
+    ap.add_argument("cmd", choices=["set", "show"])
+    ap.add_argument("task_id")
+    ap.add_argument("metric", nargs="?")
+    ap.add_argument("limit", nargs="?", type=float)
+    a = ap.parse_args(argv)
+    from controller import model
+    conn = model.connect()
+    try:
+        if a.cmd == "set":
+            if not a.metric or a.limit is None:
+                ap.error("set requires <metric> <limit>")
+            print(json.dumps({"status": "ok",
+                              "budget": model.set_budget(conn, a.task_id, a.metric, a.limit)},
+                             ensure_ascii=False))
+        else:
+            rows = conn.execute("SELECT * FROM ctl_budget_counter WHERE task_id=?",
+                                (a.task_id,)).fetchall()
+            print(json.dumps({"status": "ok",
+                              "budgets": [dict(r) for r in rows]}, ensure_ascii=False))
+    finally:
+        conn.close()
+    return 0
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -124,6 +152,11 @@ def main(argv=None) -> int:
     # 'progress': the observability answer to a run's real ticks — never a drain.
     if argv and argv[0] == "progress":
         return _progress_cli(argv[1:])
+
+    # 'budget': the human-set spend cap (go Вл 09.11) — the only CLI path that
+    # WRITES limit_value; contract budgets apply automatically on ready->running.
+    if argv and argv[0] == "budget":
+        return _budget_cli(argv[1:])
 
     ap = argparse.ArgumentParser(prog="controller.pump_cli")
     ap.add_argument("--scope", action="append", default=None)

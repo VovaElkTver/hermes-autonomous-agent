@@ -265,6 +265,36 @@ def add_budget(conn, task_id: str, metric: str, amount: float = 1) -> dict:
                              (task_id, metric)).fetchone())
 
 
+def set_budget(conn, task_id: str, metric: str, limit_value: float) -> dict:
+    """Set/replace the limit only (go Вл 09.11): before this no code path ever
+    WROTE limit_value — the guard read it, found NULL, and budget_exhausted was
+    vacuously False. Upsert keeps consumption (used) intact."""
+    conn.execute("INSERT INTO ctl_budget_counter(task_id, metric, used, limit_value)"
+                 " VALUES(?,?,0,?)"
+                 " ON CONFLICT(task_id, metric) DO UPDATE SET limit_value=excluded.limit_value",
+                 (task_id, metric, float(limit_value)))
+    conn.commit()
+    return dict(conn.execute("SELECT * FROM ctl_budget_counter WHERE task_id=? AND metric=?",
+                             (task_id, metric)).fetchone())
+
+
+def apply_contract_budgets(conn, task_id: str, contract_version: int) -> None:
+    """Make the contract's agreed ``budgets`` real when the task enters running
+    (go Вл 09.11). Idempotent: re-entry re-writes the same agreed limit, never
+    rewinds ``used``. Non-numeric limits are skipped, not fatal."""
+    row = conn.execute("SELECT fields FROM ctl_contract_revision WHERE task_id=? AND version=?",
+                       (task_id, contract_version)).fetchone()
+    if row is None:
+        return
+    import json
+    budgets = json.loads(row["fields"] or "{}").get("budgets") or {}
+    for metric, lim in budgets.items():
+        try:
+            set_budget(conn, task_id, str(metric), float(lim))
+        except (TypeError, ValueError):
+            continue
+
+
 def budget_exhausted(conn, task_id: str, metric: str) -> bool:
     row = conn.execute("SELECT used, limit_value FROM ctl_budget_counter WHERE task_id=? AND metric=?",
                        (task_id, metric)).fetchone()

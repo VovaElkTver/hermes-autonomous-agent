@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from . import mandate, model
+from . import mandate, model, wake
 
 OPEN_TASK_STATES_FOR_RESUME = ("blocked", "failed", "needs_human")
 
@@ -121,6 +121,10 @@ def transition(conn, task_id: str, to_state: str, *, basis: str,
                  " VALUES (?,?,?,?,?)", (time.time(), task_id, frm, to_state, basis))
     model.set_task_state(conn, task_id, to_state)
     if to_state == "running":
+        # Budgets (go Вл 09.11): the contract's agreed limits become real guards
+        # here — nothing in the codebase ever wrote limit_value before, so
+        # budget_exhausted was vacuously False and the guard protected nothing.
+        model.apply_contract_budgets(conn, task_id, task["contract_version"])
         # Mandate (dsh-superagent port): record what this entering-running was
         # authorized by; guards above already passed — never a second opinion.
         mandate.issue(conn, task_id, strength="explicit", basis=basis,
@@ -129,4 +133,8 @@ def transition(conn, task_id: str, to_state: str, *, basis: str,
         # A person's stop withdraws the mandate (donor: stopTicket). Terminal
         # otherwise stays immutable per the state machine rules.
         mandate.withdraw(conn, task_id)
+    # Wake seam (go Вл 09.11): any committed state change is an event — the
+    # ticker counts it off on the next base beat instead of waiting for the
+    # 300 s pump deadline. File bell, never a DB write (idle beat stays zero-SQL).
+    wake.notify()
     return {"task_id": task_id, "from": frm, "to": to_state}
