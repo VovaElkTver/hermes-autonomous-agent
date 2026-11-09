@@ -397,6 +397,10 @@ def _start_gateway_start_cron_and_housekeeping(runner):
     from cron.scheduler_provider import (
         InProcessCronScheduler, resolve_cron_scheduler, scheduler_for_profile_mode)
     from tools.fork_mode import cron_runtime_enabled
+    # Hoisted to function scope: the hermes_events SAFE gate below reads _safe_mode
+    # on the cron-excised path too (autonomous_mode=true skips the whole cron branch;
+    # a branch-local import left it unbound -> UnboundLocalError crash-loop 09.11).
+    from agent import safe_mode as _safe_mode
     cron_stop = threading.Event()
     cron_provider = None
     cron_thread: Any = None
