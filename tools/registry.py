@@ -976,6 +976,7 @@ class ToolRegistry:
         entry = self.get_entry(name, scope=scope)
         if not entry:
             return tool_error(f"Unknown tool: {name}")
+        trace_session = kwargs.get("session_id")  # inspector-trace context (pre-filter)
         try:
             # Plugin contract (plugins/AGENTS.md): optional context kwargs (task_id, session_id, user_task,
             # parent_agent, ...) are signature-inspected like hook payloads, so a narrow ``handle(args)``
@@ -986,8 +987,17 @@ class ToolRegistry:
                 result = _run_async(entry.handler(args, **kwargs))
             else:
                 result = entry.handler(args, **kwargs)
-            return self._normalize_handler_result(name, result)
+            result = self._normalize_handler_result(name, result)
+            from tools.tool_trace import emit_tool_call
+            emit_tool_call(session_id=trace_session, name=name,
+                           toolset=getattr(entry, "toolset", "-"), args=args,
+                           result=result, ok=True)
+            return result
         except Exception as e:
+            from tools.tool_trace import emit_tool_call
+            emit_tool_call(session_id=trace_session, name=name,
+                           toolset=getattr(entry, "toolset", "-"), args=args,
+                           ok=False, error_code=type(e).__name__)
             # exc_info already renders the exception, so keep the message copy bounded.
             logger.exception("Tool %s dispatch error: %s", name, _bound_error_text(str(e)))
             # Sanitize so framing tokens/CDATA/fences in exception text aren't structural noise.
