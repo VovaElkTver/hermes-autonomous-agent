@@ -1,0 +1,5 @@
+name: config-protection
+version: "0.1.0"
+description: Blocks agent edits to EXISTING protected config files (ECC pattern); create-new and reads stay allowed
+manifest_version: 2
+provides_hooks: [pre_tool_call]
