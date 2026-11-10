@@ -1270,29 +1270,9 @@ def _configure_session_tools(rid, params: dict, sid: str, session) -> dict:
 # ─── Cron / learning / skills ────────────────────────────────────────────────
 @_scoped_rpc("cron.manage", 5023)
 def _(rid, params: dict) -> dict:
-    """cronjob() keys off HERMES_HOME, so ``profile`` reaches a per-profile cron store."""
-    cronjob = _tools_mod("tools.cronjob_tools").cronjob
-    action, jid = params.get("action", "list"), params.get("name", "")
-    if action == "list":
-        # Paused jobs are excluded by default (reads as deletion in a toggle UI) — forward the flag.
-        include_disabled = is_truthy_value(params.get("include_disabled", False))
-        result = json.loads(cronjob(action="list", include_disabled=include_disabled))
-        # ``scoped`` proves the profile scope was honored; older gateways omit it and clients
-        # keep the safe [bot:<name>] filter.
-        if profile := _str_arg(params, "profile"):
-            result["scoped"] = profile
-        return _ok(rid, result)
-    if action == "add":
-        # Optional repeat / continuity / deliver ('bot-chat[:name]'): None keeps each cronjob() default.
-        raw = cronjob(
-            action="create", name=jid, schedule=params.get("schedule", ""), prompt=params.get("prompt", ""),
-            repeat=int(params["repeat"]) if str(params.get("repeat", "")).strip().isdigit() else None,
-            continuity=is_truthy_value(params.get("continuity")) if params.get("continuity") is not None else None,
-            deliver=_str_arg(params, "deliver") or None)
-        return _ok(rid, json.loads(raw))
-    if action in {"remove", "pause", "resume"}:
-        return _ok(rid, json.loads(cronjob(action=action, job_id=jid)))
-    return _err(rid, 4016, f"unknown cron action: {action}")
+    """cron.manage RPC: the cronjob tools went with the cron package."""
+    del params
+    return _err(rid, 4016, "cron was excised from this branch")
 
 
 @_rpc("learning.frames", 5000, "learning.frames failed: ")

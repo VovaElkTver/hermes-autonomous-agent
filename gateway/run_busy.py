@@ -1652,33 +1652,6 @@ class GatewayBusySessionMixin:
         requested_at = data.get("requested_at")
         return not (isinstance(requested_at, (int, float)) and time.time() - requested_at > 300)
 
-    async def _handle_suggestions_command(self, event: MessageEvent) -> str:
-        """/suggestions via the shared handler (origin = event source so jobs deliver back here)."""
-        from gateway.run import _command_origin_for_source
-        try:
-            from hermes_cli.suggestions_cmd import handle_suggestions_command
-            return handle_suggestions_command(
-                (event.get_command_args() or "").strip(),
-                origin=_command_origin_for_source(event.source), surface="gateway",
-            )
-        except Exception as e:
-            logger.debug("suggestions command failed: %s", e)
-            return t("gateway.suggestions.failed", error=e)
-
-    async def _handle_blueprint_command(self, event: MessageEvent):
-        """/blueprint via the shared handler (origin = event source so jobs deliver back here)."""
-        from gateway.run import _command_origin_for_source
-        try:
-            from hermes_cli.blueprint_cmd import handle_blueprint_command
-            return handle_blueprint_command(
-                (event.get_command_args() or "").strip(),
-                origin=_command_origin_for_source(event.source), surface="gateway",
-            )
-        except Exception as e:
-            logger.debug("blueprint command failed: %s", e)
-            from hermes_cli.blueprint_cmd import BlueprintCommandResult
-            return BlueprintCommandResult(t("gateway.blueprint.failed", error=e))
-
     async def _maybe_confirm_destructive_slash(
         self, *, event: MessageEvent, command: str, title: str, detail: str, execute
     ) -> str | EphemeralReply | None:

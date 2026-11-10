@@ -36,20 +36,17 @@ def _watch_reviewer(cli, _arg):
 # Reports the owner already lays out (main's own line builders): printed as is.
 _VERBATIM = frozenset({"toolsets"})
 GATEWAY_SETTINGS = {"personality": None, "busy": _mirror_busy, "approvals": None, "footer": None, "fast": None,
-                    "refine": None, "review": _watch_reviewer, "cron": None,
+                    "refine": None, "review": _watch_reviewer,
                     "toolsets": None}
 
 
 def _unbounded(canonical, arg):
-    """True for a form answered only once its work is done, however long: a /cron write (``run`` runs the
-    job). Its reads keep the deadline, and so does an unclosed quote, which the owner refuses at once."""
-    if canonical != "cron":
-        return False
-    from gateway.session_cron_commands import cron_read
-    try:
-        return cron_read(shlex.split(arg)) is None
-    except ValueError:
-        return False
+    """True for a form answered only once its work is done, however long.
+
+    The /cron write forms this existed for were excised with the cron package.
+    """
+    del canonical, arg
+    return False
 
 
 def _call(cli, connection, canonical, arg):

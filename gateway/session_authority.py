@@ -1469,8 +1469,6 @@ async def initialize_session_authority(runner, *, profile_id, instance_id, db=No
     await adopt_local_compressions(authority)
     if register:
         runner.session_authority = authority
-    from gateway.session_cron import bind_owner
-    bind_owner(authority)
     store = runner.session_store
     if register:
         store._local_authority_epoch = epoch

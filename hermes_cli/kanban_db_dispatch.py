@@ -2863,9 +2863,10 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     # The worker is `-m hermes_cli.kanban_worker_client`: Hermes itself, with no console-script
     # bootstrap. The routed-profile scrub above strips Hermes-owned PYTHONPATH entries (user
     # children must not see our tree), so a PYTHONPATH-launched dispatcher spawned a child that
-    # died on `No module named 'hermes_cli'` before it ever reached the owner. Same pin as cron's
-    # external worker (#112729): applied to the sanitized env, after every other decision stands.
-    from cron.scheduler_worker_env import pin_hermes_tree_on_pythonpath
+    # died on `No module named 'hermes_cli'` before it ever reached the owner. Same pin as the
+    # excised cron external worker (#112729): applied to the sanitized env, after every other
+    # decision stands.
+    from hermes_cli.worker_env_pin import pin_hermes_tree_on_pythonpath
     env = pin_hermes_tree_on_pythonpath(env, Path(__file__).resolve().parent.parent)
     # A worker spawned by a managed systemd gateway must leave the gateway's
     # cgroup before startup; otherwise restarting the service kills the worker

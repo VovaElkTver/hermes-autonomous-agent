@@ -48,9 +48,6 @@ _OBSERVABLE_METRIC_NAMES = (
     "hermes.gateway.up", "hermes.gateway.state", "hermes.gateway.active_agents", "hermes.gateway.busy",
     "hermes.gateway.drainable", "hermes.gateway.restart_requested", "hermes.gateway.background_work",
     "hermes.gateway.background_delegations", "hermes.platform.up", "hermes.platform.degraded",
-    "hermes.cron.scheduler.heartbeat_age_seconds", "hermes.cron.scheduler.last_success_age_seconds",
-    "hermes.cron.scheduler.catch_up_occurrences", "hermes.cron.jobs.enabled", "hermes.cron.jobs.running",
-    "hermes.cron.jobs.overdue", "hermes.cron.store.writable", "hermes.cron.store.skipped_runs",
 )
 
 
@@ -140,10 +137,6 @@ def _read_gateway_snapshot(config: dict[str, Any]):
     )
 
 
-def _read_cron_snapshot():
-    from agent.monitoring.cron_health import build_cron_health_snapshot
-    return build_cron_health_snapshot()
-
 
 def _count(failure_msg: str, module: str, read: Callable[[Any], Any]) -> int:
     """Best-effort non-negative count read from a lazily imported module; 0 when it can't be imported/read."""
@@ -184,13 +177,7 @@ def _read_runtime_snapshot(config: dict[str, Any]):
     except Exception as exc:
         logger.warning("background-work snapshot unavailable; metric not exported (error_type=%s)", type(exc).__name__)
         logger.debug("background-work snapshot traceback", exc_info=True)
-    try:
-        gateway_snapshot.metrics.extend(_read_cron_snapshot().metrics)
-    except Exception as exc:
-        # Cron telemetry silently dropping out is a release-relevant regression: WARN with only
-        # the exception *type* (the message could carry paths); exc_info stays on DEBUG.
-        logger.warning("cron health snapshot unavailable; cron telemetry not exported (error_type=%s)", type(exc).__name__)
-        logger.debug("cron health snapshot traceback", exc_info=True)
+    # Cron-health telemetry was excised with the cron package (agent.monitoring.cron_health).
     return gateway_snapshot
 
 

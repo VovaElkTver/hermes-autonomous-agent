@@ -228,8 +228,6 @@ class AuthorityConnection:
                     'bot_relay.roster.sync': self.bot_roster, 'bot_relay.outbox.drain': self.bot_outbox,
                     'bot_relay.reply': self.bot_reply, 'a2a.forward': self.a2a_forward,
                     'kanban.run': self.kanban_run,
-                    'cron.submit': self.cron_submit, 'cron.status': self.cron_status,
-                    'cron.cancel': self.cron_cancel, 'cron.recover': self.cron_recover,
                     'worker.register': self.worker_register, 'worker.adopt': self.worker_adopt,
                     'worker.persist': self.worker_persist,
                     'setup.status': self.setup_status, 'setup.runtime_check': self.setup_runtime_check,
@@ -391,22 +389,6 @@ class AuthorityConnection:
     async def kanban_run(self, ref, params):
         from gateway.session_kanban import run_task
         return await run_task(self, params)
-
-    async def cron_recover(self, ref, params):
-        from gateway.session_cron import rpc
-        return await rpc(self, 'recover', params)
-
-    async def cron_submit(self, ref, params):
-        from gateway.session_cron import rpc
-        return await rpc(self, 'submit', params)
-
-    async def cron_status(self, ref, params):
-        from gateway.session_cron import rpc
-        return await rpc(self, 'status', params)
-
-    async def cron_cancel(self, ref, params):
-        from gateway.session_cron import rpc
-        return await rpc(self, 'cancel', params)
 
     async def bot_roster(self, ref, params):
         from gateway.session_bot import relay_operation

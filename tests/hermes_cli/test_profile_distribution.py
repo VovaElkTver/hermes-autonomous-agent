@@ -60,7 +60,7 @@ def _make_staging_dir(root: Path, name: str = "src", *, manifest: DistributionMa
     contain after .git is removed).
 
     Lays down a minimal but representative tree: SOUL.md, config.yaml,
-    mcp.json, one skill, one cron job, plus the distribution.yaml manifest.
+    mcp.json, one skill, plus the distribution.yaml manifest.
     """
     staged = root / f"staging_{name}"
     staged.mkdir(parents=True, exist_ok=True)
@@ -72,10 +72,6 @@ def _make_staging_dir(root: Path, name: str = "src", *, manifest: DistributionMa
     (staged / "skills" / "demo" / "SKILL.md").write_text(
         "---\nname: demo\ndescription: test\n---\n# Demo skill\n"
     )
-    from cron.jobs import create_job, use_cron_store
-    with use_cron_store(staged):
-        create_job("daily task", "0 9 * * *", name="daily")
-
     mf = manifest or DistributionManifest(name=name, version="0.1.0")
     write_manifest(staged, mf)
     return staged
@@ -277,7 +273,6 @@ class TestInstall:
         staged = _make_staging_dir(profile_env, "restricted", manifest=mf)
         # Confirm extra files exist in staging
         assert (staged / "mcp.json").exists(), "mcp.json should exist in staged for this test"
-        assert (staged / "cron").is_dir(), "cron/ should exist in staged for this test"
 
         plan = install_distribution(str(staged), name="restricted")
         # Owned paths must be present
@@ -287,12 +282,6 @@ class TestInstall:
         # NOT-owned paths must NOT be copied from staging
         assert not (plan.target_dir / "mcp.json").exists(), \
             "mcp.json should NOT be copied (not in distribution_owned)"
-        # cron/ is created by _bootstrap_user_dirs, but the staged cron/ content
-        # must NOT leak through
-        if (plan.target_dir / "cron").exists():
-            cron_content = list((plan.target_dir / "cron").iterdir())
-            assert not cron_content, \
-                f"cron/ should be empty (staged content skipped): {cron_content}"
         # distribution.yaml is always written by write_manifest
         assert (plan.target_dir / "distribution.yaml").exists()
 
@@ -314,11 +303,11 @@ class TestInstall:
             "omitted distribution_owned must keep copying undeclared dirs"
 
     def test_install_allowlist_supports_nested_paths(self, profile_env):
-        """Nested skill paths and the canonical cron store can be allowlisted exactly."""
+        """Nested skill paths and an exact file can be allowlisted exactly."""
         mf = DistributionManifest(
             name="nested",
             version="0.1.0",
-            distribution_owned=["SOUL.md", "skills/research/", "cron/jobs.json"],
+            distribution_owned=["SOUL.md", "skills/research/", "mcp.json"],
         )
         staged = _make_staging_dir(profile_env, "nested", manifest=mf)
         (staged / "skills" / "research").mkdir()
@@ -328,10 +317,9 @@ class TestInstall:
 
         plan = install_distribution(str(staged), name="nested")
         assert (plan.target_dir / "skills" / "research" / "SKILL.md").exists()
-        assert (plan.target_dir / "cron" / "jobs.json").exists()
+        assert (plan.target_dir / "mcp.json").exists()
         assert not (plan.target_dir / "skills" / "demo").exists(), \
             "skills/demo is not allowlisted and must not be copied"
-        assert not (plan.target_dir / "mcp.json").exists()
 
     def test_update_respects_distribution_owned_allowlist(self, profile_env):
         """Update must only copy paths listed in distribution_owned."""
@@ -367,30 +355,14 @@ class TestInstall:
         assert not (plan.target_dir / "new_config.toml").exists(), \
             "new_config.toml should not be copied (not in distribution_owned)"
 
-    def test_install_pauses_shipped_cron_jobs_and_skips_runtime_state(self, profile_env):
-        """Distribution cron definitions are inert until the installer explicitly resumes them."""
-        from cron.jobs import get_due_jobs, is_job_runnable, list_jobs, update_job, use_cron_store
-
-        staged = _make_staging_dir(profile_env, "cron_src")
-        with use_cron_store(staged):
-            shipped = list_jobs(include_disabled=True)[0]
-            update_job(shipped["id"], {
-                "next_run_at": (datetime.now(UTC) - timedelta(days=2)).isoformat()
-            })
-        (staged / "cron" / "future-runtime.bin").write_text("runtime", encoding="utf-8")
+    def test_install_skips_runtime_state_and_keeps_authored_hidden(self, profile_env):
+        """Runtime state shipping inside a distribution is skipped; authored hidden files are kept."""
+        staged = _make_staging_dir(profile_env, "state_src")
         (staged / "skills" / ".future-runtime").write_text("runtime", encoding="utf-8")
         (staged / "skills" / "demo" / ".authored-hidden").write_text("keep", encoding="utf-8")
 
-        plan = install_distribution(str(staged), name="cron_paused")
+        plan = install_distribution(str(staged), name="runtime_state")
 
-        with use_cron_store(plan.target_dir):
-            installed = {job["id"]: job for job in list_jobs(include_disabled=True)}
-            due = get_due_jobs()
-        job = installed[shipped["id"]]
-        assert not is_job_runnable(job)
-        assert job["state"] == "paused"
-        assert due == []
-        assert not (plan.target_dir / "cron" / "future-runtime.bin").exists()
         assert not (plan.target_dir / "skills" / ".future-runtime").exists()
         assert (plan.target_dir / "skills" / "demo" / ".authored-hidden").read_text() == "keep"
 
@@ -523,61 +495,6 @@ class TestUpdate:
         assert not any(outside.iterdir())
         assert soul.read_text(encoding="utf-8") == before  # refused before the first write
 
-    def test_update_merges_cron_jobs_without_losing_local_state(self, profile_env):
-        """Updating one shipped definition cannot replace the profile's whole cron store."""
-        from cron.jobs import create_job, list_jobs, pause_job, resume_job, update_job, use_cron_store
-
-        staged = _make_staging_dir(profile_env, "cron_update")
-        with use_cron_store(staged):
-            shipped = list_jobs(include_disabled=True)[0]
-        plan = install_distribution(str(staged), name="cron_merge")
-
-        with use_cron_store(plan.target_dir):
-            resume_job(shipped["id"])
-            mine = create_job("water the plants", "0 9 * * *", name="mine")
-            pause_job(mine["id"], reason="my choice")
-            old_next_run = {
-                job["id"]: job for job in list_jobs(include_disabled=True)
-            }[shipped["id"]]["next_run_at"]
-
-        with use_cron_store(staged):
-            update_job(shipped["id"], {
-                "prompt": "updated upstream definition",
-                "schedule": "every 7d",
-            })
-
-        update_distribution("cron_merge")
-
-        with use_cron_store(plan.target_dir):
-            jobs = {job["id"]: job for job in list_jobs(include_disabled=True)}
-        assert mine["id"] in jobs
-        assert jobs[mine["id"]]["state"] == "paused"
-        assert jobs[mine["id"]]["paused_reason"] == "my choice"
-        assert jobs[shipped["id"]]["prompt"] == "updated upstream definition"
-        assert jobs[shipped["id"]]["schedule"]["minutes"] == 7 * 24 * 60
-        assert jobs[shipped["id"]]["next_run_at"] != old_next_run
-        assert jobs[shipped["id"]]["enabled"] is True
-
-        # An authored schedule the live job cannot take (past one-shot) is rejected as a
-        # job-labelled DistributionError before any other file is replaced.
-        (staged / "SOUL.md").write_text("upstream v3\n")
-        store = staged / "cron" / "jobs.json"
-        data = json.loads(store.read_text(encoding="utf-8"))
-        data["jobs"][0]["schedule"] = {"kind": "once", "run_at": "2020-01-01T00:00:00+00:00", "display": "once"}
-        store.write_text(json.dumps(data), encoding="utf-8")
-        with pytest.raises(DistributionError, match="cron job 'daily'"):
-            update_distribution("cron_merge")
-        assert (plan.target_dir / "SOUL.md").read_text() != "upstream v3\n"
-        with use_cron_store(plan.target_dir):
-            assert {j["id"]: j for j in list_jobs(include_disabled=True)}[shipped["id"]]["schedule"] == \
-                jobs[shipped["id"]]["schedule"]
-
-        # A corrupt target store surfaces as DistributionError too, not a raw RuntimeError.
-        (plan.target_dir / "cron" / "jobs.json").write_text("42", encoding="utf-8")
-        with pytest.raises(DistributionError, match="Could not merge cron jobs"):
-            update_distribution("cron_merge")
-
-
     def test_update_refuses_symlinked_owned_container(self, profile_env):
         staged = _make_staging_dir(profile_env, "src")
         plan = install_distribution(str(staged), name="link_safe")
@@ -605,7 +522,6 @@ class TestUpdate:
         # first write, or the profile is left half-updated and every retry fails the same way.
         (staged / "SOUL.md").write_text("updated soul\n", encoding="utf-8")
         (staged / "mcp.json").write_text('{"servers": {"new": {}}}\n', encoding="utf-8")
-        (staged / "cron" / "daily.json").write_text('{"schedule": "0 10 * * *"}', encoding="utf-8")
         untouched = {p: p.read_bytes() for p in plan.target_dir.rglob("*") if p.is_file()}
 
         with pytest.raises(DistributionError, match="symlink"):

@@ -71,11 +71,13 @@ def register_automation_blueprint(
     prompt_template: str, category: str = "general", slots: Iterable[Any] = (),
     deliver_default: str = "origin", skills: Iterable[str] = (), tags: Iterable[str] = (),
 ) -> Optional[PluginRegistration]:
-    """Add an Automation Blueprint to this profile's catalog as ``'<plugin_name>:<key>'``
-    (``/blueprint``, the dashboard/Desktop gallery). Fields mirror
-    :class:`cron.blueprint_catalog.AutomationBlueprint`; ``slots`` are ``BlueprintSlot`` field
-    mappings. Malformed input or a duplicate key logs a warning and returns ``None``."""
-    from cron.blueprint_plugins import build_plugin_blueprint
+    """Add an Automation Blueprint to this profile's catalog as ``'<plugin_name>:<key>'``.
+
+    Automation blueprints were cron-job scaffolding; with the cron package excised the
+    catalog no longer exists, so every registration reports "skipped" (None)."""
+    del key, title, description, schedule_template, prompt_template, category
+    del slots, deliver_default, skills, tags
+    return None
     try:
         blueprint = build_plugin_blueprint(
             self.manifest.name, key, title=title, description=description,

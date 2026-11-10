@@ -891,44 +891,27 @@ def _derive_chat_session_id(system_prompt: Optional[str], first_user_message: st
     return f"api-{digest}"
 
 
+# Fork autonomous posture (root flag Вл 09.11): this branch carries no cron at all — the
+# ``cron`` package was excised, so the REST surface (/api/jobs/*) permanently fails closed.
 _CRON_AVAILABLE = False
-try:
-    # Fork autonomous posture (root flag Вл 09.11): under autonomous_mode the fork
-    # carries no cron — the REST surface (/api/jobs/*, /api/cron/fire) fails closed.
-    from tools.fork_mode import cron_runtime_enabled as _fork_cron_runtime_enabled
-    if _fork_cron_runtime_enabled():
-        from cron.jobs import (
-            list_jobs as _cron_list, get_job as _cron_get, update_job as _cron_update,
-            remove_job as _cron_remove, pause_job as _cron_pause, resume_job as _cron_resume,
-            trigger_job as _cron_trigger)
-        from cron.scheduler import (
-            CronSchedulerRegistrationError as _CronSchedulerRegistrationError,
-            create_job_with_scheduler_registration as _cron_create)
-        _CRON_AVAILABLE = True
-except ImportError:
-    pass
-if not _CRON_AVAILABLE:
-    _cron_list = _cron_get = _cron_create = _cron_update = None
-    _cron_remove = _cron_pause = _cron_resume = _cron_trigger = None
+_cron_list = _cron_get = _cron_create = _cron_update = None
+_cron_remove = _cron_pause = _cron_resume = _cron_trigger = None
 
-    class _CronSchedulerRegistrationError(RuntimeError):
-        pass
+
+class _CronSchedulerRegistrationError(RuntimeError):
+    pass
 
 
 def _notify_cron_provider_jobs_changed() -> None:
-    """Best-effort notify of the active cron provider after a REST mutation (built-in: no-op)."""
-    with suppress(Exception):
-        from cron.scheduler import _notify_provider_jobs_changed
-        _notify_provider_jobs_changed()
+    """Best-effort notify of the active cron provider after a REST mutation.
+
+    Cron was excised: there is no provider to notify."""
+    return
 
 
-# Defense-in-depth parity with the cronjob tool's prompt injection scan (the REST
-# endpoints are authenticated, so this is not the trust boundary). Optional import:
-# a missing scanner must not disable the cron REST API.
-try:
-    from tools.cronjob_tools import _scan_cron_prompt
-except Exception:  # pragma: no cover - scanner is optional hardening
-    _scan_cron_prompt = None
+# Defense-in-depth prompt-injection scan shared with the (excised) cronjob tool:
+# the scanner went with that toolset, so the REST endpoints skip the scan today.
+_scan_cron_prompt = None
 
 
 # English labels stay as constants: ``gateway.run._GATEWAY_AUTH_ERROR_RE`` / ``_GATEWAY_RATE_LIMIT_RE``
@@ -1593,9 +1576,7 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             ("POST", "/api/jobs/{job_id}/run", self._handle_run_job)]
         routes.extend(_room_grants._http_routes(self))
         routes.extend(_api_runs._http_routes(self))
-        if _CRON_AVAILABLE:
-            # Chronos fire webhook (NAS -> agent): authenticated by a NAS-minted JWT.
-            routes.append(("POST", "/api/cron/fire", self._handle_cron_fire))
+        # POST /api/cron/fire (Chronos) excised together with the cron package/plugins.
         return routes
 
     # -- Session header helpers -------------------------------------------------------
@@ -3458,206 +3439,6 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
                 extra_prompt = extra_prompt or None
         return self._job_response(
             lambda jid: _cron_trigger(jid, extra_prompt=extra_prompt), job_id, notify=False)
-
-    async def _handle_cron_fire(self, request: web.Request) -> web.Response:
-        """POST /api/cron/fire — Chronos fire webhook (NAS -> agent), authenticated by a
-        NAS-minted JWT via the pluggable verifier, NOT API_SERVER_KEY. 202 + background run so
-        a long turn never trips NAS's timeout; the store CAS claim guards double-fire on retry."""
-        # Startup-wait budget starts here so a slow JWKS fetch cannot outlast the forwarder timeout.
-        received_at = asyncio.get_running_loop().time()
-        from hermes_cli.config import cfg_get, load_config
-        from plugins.cron_providers.chronos.verify import get_fire_verifier
-        auth = request.headers.get("Authorization", "")
-        token = auth[7:].strip() if auth.startswith("Bearer ") else ""
-        cfg = load_config()
-        verifier = get_fire_verifier()
-        verify_kwargs = dict(
-            token=token,
-            expected_audience=cfg_get(cfg, "cron", "chronos", "expected_audience", default=""),
-            jwks_or_key=cfg_get(cfg, "cron", "chronos", "nas_jwks_url", default="") or None,
-            issuer=cfg_get(cfg, "cron", "chronos", "portal_url", default="") or None)
-        try:
-            claims = await _call_verifier(verifier, **verify_kwargs)
-        except Exception:
-            # Fail closed: a crashing verifier must never admit a fire.
-            logger.exception("cron fire: verifier crashed; rejecting token")
-            claims = None
-        if claims is None:
-            logger.warning("cron fire: rejected invalid token: %s", self._request_audit_log_suffix(request))
-            return web.json_response({"error": "invalid fire token"}, status=401)
-        draining = self._draining_response()
-        if draining is not None:
-            return draining
-        with _reserve_pending_api_work(self) as reservation:
-            body = {}
-            with suppress(Exception):
-                body = await request.json()
-            job_id = (body or {}).get("job_id")
-            if not job_id:
-                return web.json_response({"error": "missing job_id"}, status=400)
-            # `hermes pause` ESTOP: refuse the fire and ask NAS to retry later.
-            # Placed after JWT verify (don't leak pause state to unauth callers)
-            # and after the drain check (drain is transient shutdown, ESTOP is
-            # operator override). 503 + Retry-After reschedules the job via NAS
-            # retry or the misfire backstop rather than silently dropping it —
-            # matches _CRON_FIRE_RETRY_AFTER_SECONDS in web_routers/cron.py.
-            with suppress(ImportError):
-                from agent.estop import check_paused as _estop_check_paused
-                if _estop_check_paused("cron-webhook", logger):
-                    return web.json_response(
-                        {"error": "hermes is paused (ESTOP)", "job_id": job_id},
-                        status=503,
-                        headers={"Retry-After": str(60)},
-                    )
-            from cron.scheduler_provider import provider_supports_split_fire, resolve_cron_scheduler
-            provider = resolve_cron_scheduler()
-            loop = asyncio.get_running_loop()
-            from gateway.platforms.api_server_fire_startup import live_adapters_once_started
-            refusal, adapters = await live_adapters_once_started(self, request, job_id, received_at=received_at)
-            if refusal is not None:
-                return refusal
-
-            def _detach_fire(fire_fn, *fire_args) -> web.Response:
-                # The done callback owns the reservation once the task is detached.
-                task = asyncio.create_task(_api_runs.on_turn_executor(fire_fn, *fire_args, adapters=adapters, loop=loop))
-                reservation["detached"] = True
-                task.add_done_callback(lambda _task: _release_pending_api_work(self, reservation))
-                self._track_background_task(task, tolerate_missing=True)
-                return web.json_response({"status": "accepted", "job_id": job_id}, status=202)
-
-            if not provider_supports_split_fire(provider):
-                # A legacy single-phase provider overrides ``fire_due`` but inherits the base
-                # ``claim_fire``; the split path would silently bypass that override.
-                return _detach_fire(provider.fire_due, job_id)
-            # Persist the attempt + exact store owner before acknowledging NAS; a failure here
-            # is retryable and the reservation remains attached.
-            try:
-                claimed_job = await asyncio.to_thread(provider.claim_fire, job_id)
-            except Exception as exc:
-                logger.error("cron fire admission failed for %s: %s", job_id, exc)
-                return web.json_response({"error": "cron fire admission failed", "job_id": job_id}, status=503)
-            if claimed_job is None:
-                return web.json_response({"status": "duplicate", "job_id": job_id}, status=200)
-            return _detach_fire(provider.fire_claimed, claimed_job)
-
-    # -- Agent execution --------------------------------------------------------------
-
-    def _track_background_task(self, task, *, tolerate_missing: bool = False) -> None:
-        """Register a task in ``_background_tasks`` (tolerates test doubles) with auto-discard.
-        ``tolerate_missing`` (cron fire paths) also swallows AttributeError from the whole
-        registration; the run/sweep paths only tolerate an unhashable task."""
-        if tolerate_missing:
-            with suppress(TypeError, AttributeError):
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-            return
-        with suppress(TypeError):
-            self._background_tasks.add(task)
-        if hasattr(task, "add_done_callback"):
-            task.add_done_callback(self._background_tasks.discard)
-
-    def _concurrency_limited_response(self) -> Optional[web.Response]:
-        """429 when the concurrent-run cap is reached (0 disables), else None. Uses the same
-        adapter-owned work count as shutdown draining (admitted requests included)."""
-        limit = self._max_concurrent_runs
-        if limit <= 0:
-            return None
-        inflight = self.active_agent_work_count()
-        # The current request's own reservation must not consume its last available slot.
-        reservation = _api_agent_request_reservation.get()
-        if reservation and reservation["active"]:
-            inflight -= 1
-        if inflight >= limit:
-            return _error_response(
-                f"Too many concurrent runs (max {limit})", 429, err_type="rate_limit_error",
-                code="rate_limit_exceeded", headers={"Retry-After": "1"})
-        return None
-
-    @staticmethod
-    def _bind_api_server_session(
-        *, chat_id: str = "", session_key: str = "", session_id: str = "", profile: str = "",
-        session_history_delivery: str = "") -> list:
-        """Bind an API turn with push disabled and history delivery default-denied.
-
-        Only routes whose continuation reads SessionDB may pass "1". An omitted
-        declaration or fingerprint-derived identity keeps delegation synchronous.
-
-        ``profile`` is the ``/p/<profile>/`` prefix serving the request (``""`` = default). It must
-        reach ``HERMES_SESSION_PROFILE``: the persistent-Docker container key is derived from it, so an
-        unbound profile collapses every profile's turns onto the default sandbox (#96370)."""
-        from gateway.session_context import set_session_vars
-        return set_session_vars(
-            platform="api_server", chat_id=chat_id, session_key=session_key, session_id=session_id,
-            profile=profile, async_delivery=False, cron_session="", session_history_delivery=session_history_delivery)
-
-    def _turn_runtime_metadata(
-        self, agent: Any, *, route: Optional[dict[str, Any]], requested_runtime: Optional[dict[str, Any]],
-        route_source: str, confirmed_runtime_lock: bool) -> dict[str, Any]:
-        """Sanitized actual-vs-requested runtime for a finished turn; raises RuntimeError when a
-        confirmed model lock's provider/model differs from what the agent actually ran with."""
-        runtime = dict(getattr(agent, "_hermes_api_runtime", {}) or {})
-        raw_provider = getattr(agent, "provider", "")
-        raw_model = getattr(agent, "model", "")
-        actual_provider = self._clean_runtime_id(raw_provider, max_len=80) if isinstance(raw_provider, str) else ""
-        actual_model = self._clean_runtime_id(raw_model) if isinstance(raw_model, str) else ""
-        resolved_provider = self._clean_runtime_id(runtime.get("provider"), max_len=80)
-        for key, actual in (("provider", actual_provider), ("model", actual_model)):
-            if actual:
-                runtime[key] = actual
-            else:
-                runtime.setdefault(key, "")
-        route = route or {}
-        requested_runtime = requested_runtime or {}
-        if confirmed_runtime_lock:
-            requested_provider = self._clean_runtime_id(
-                route.get("provider") or requested_runtime.get("provider"), max_len=80)
-            # _create_agent records the provider after resolving the request through the
-            # provider catalog. Compare that identity with the agent's actual runtime so
-            # aliases and named custom providers do not fail a literal-string check.
-            expected_provider = self._clean_runtime_id(
-                resolved_provider or requested_provider, max_len=80)
-            expected_model = self._clean_runtime_id(route.get("model") or requested_runtime.get("model"))
-            if (expected_provider and actual_provider != expected_provider) or (
-                expected_model and actual_model != expected_model):
-                raise RuntimeError(
-                    "confirmed model lock runtime mismatch: "
-                    f"expected provider={requested_provider or expected_provider or '<unspecified>'} "
-                    f"model={expected_model or '<unspecified>'}; "
-                    f"actual provider={actual_provider or '<unknown>'} "
-                    f"model={actual_model or '<unknown>'}")
-        if requested_runtime:
-            model, provider = self._requested_ids(requested_runtime)
-            runtime["requested"] = {"provider": provider, "model": model}
-        runtime["route_source"] = route_source or runtime.get("route_source") or "global"
-        return self._sanitize_runtime_metadata(
-            runtime=runtime, requested_runtime=requested_runtime or None, route_source=route_source or "global",
-            model_lock=("confirmed" if confirmed_runtime_lock else ""))
-
-    def _finish_turn_result(
-        self, agent: Any, result: Any, session_id: Optional[str], *, route, requested_runtime, route_source,
-        confirmed_runtime_lock: bool) -> tuple:
-        """Attach usage, effective session id, ``_compressed`` and runtime metadata to a finished turn."""
-        usage = {"input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,
-                 "output_tokens": getattr(agent, "session_completion_tokens", 0) or 0,
-                 "total_tokens": getattr(agent, "session_total_tokens", 0) or 0}
-        # Effective session id lets callers track compression-triggered rotations.
-        # (#16938)
-        _eff_sid = getattr(agent, "session_id", session_id)
-        if isinstance(_eff_sid, str) and _eff_sid:
-            result["session_id"] = _eff_sid
-        # _compressed tells _build_response_conversation_history to store the compacted
-        # transcript as-is (rotation changes session_id; in-place compaction sets a flag).
-        _session_rotated = isinstance(_eff_sid, str) and isinstance(session_id, str) and _eff_sid != session_id
-        if getattr(agent, "_last_compaction_in_place", False) or _session_rotated:
-            result["_compressed"] = True
-        if requested_runtime or route or confirmed_runtime_lock or (route_source and route_source != "global"):
-            runtime = self._turn_runtime_metadata(
-                agent, route=route, requested_runtime=requested_runtime,
-                route_source=route_source, confirmed_runtime_lock=confirmed_runtime_lock)
-            if isinstance(result, dict):
-                result["runtime"] = runtime
-            usage["runtime"] = runtime
-        return result, usage
 
     async def _run_agent(
         self, user_message: str, conversation_history: list[dict[str, str]],

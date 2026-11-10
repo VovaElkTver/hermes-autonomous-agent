@@ -83,98 +83,13 @@ from hermes_cli.web_server_lifecycle import (
 )
 
 
-def _gateway_owns_cron(name: str, home) -> bool:
-    """A gateway already ticks this profile's store with live adapters: its OWN process, or the
-    live default multiplexer (a served satellite has no gateway.pid of its own). Winning the
-    tick-lock race here would deliver through the standalone path (#52202, #100489, #107485)."""
-    from hermes_cli.profiles import _check_gateway_running, _served_by_running_multiplexer
-
-    return _check_gateway_running(Path(home)) or (
-        name != "default" and _served_by_running_multiplexer(name))
-
-
 def _start_desktop_cron_ticker(stop_event: threading.Event, interval: int = 60) -> None:
-    """Tick the cron scheduler from inside the desktop dashboard backend.
+    """No-op keeper of the desktop-backend ticker seam.
 
-    The desktop spawns a ``hermes dashboard`` backend, not a gateway, so without
-    this a cron created in the app would never fire (no live adapters; delivery
-    falls back to the per-platform send path). The primary backend outlives the
-    per-profile pool (reaped after ~10 idle minutes), so it ticks EVERY local
-    profile's store like a multiplex gateway; external providers keep the
-    single-store behavior (registries are not profile-scoped). Cross-process
-    safe: the built-in tick takes the per-store ``cron/.tick.lock``.
-
-    Every local profile's store is ticked, not just this backend's own (#69377's desktop sibling): the
-    desktop pools per-profile backends and reaps them after ~10 idle minutes, so a secondary profile's
-    ticker dies with its backend and that profile's jobs silently stop firing until the user next opens it
-    ("tasks on the sleeping profile could be idle" — community report, Aug 2026).
-    """
-    from cron.scheduler_provider import InProcessCronScheduler, resolve_cron_scheduler
-    from hermes_constants import get_hermes_home, profile_name_for_home
-
-    provider = resolve_cron_scheduler()
-    own_home = Path(get_hermes_home())
-    own_name = profile_name_for_home(own_home) or "default"
-    # Ownership is re-checked every tick, not once at startup, so Desktop takes over when the
-    # gateway stops (#126822).
-    profile_gate = lambda name, home: not _gateway_owns_cron(name, home)
-
-    start_kwargs: dict = {"interval": interval}
-    if isinstance(provider, InProcessCronScheduler):
-        try:
-            from hermes_cli.profiles import profiles_to_serve
-
-            # Same served set as the multiplexer: default + every live profile under profiles/.
-            # The ticker re-enumerates this callable every cycle. Passing a
-            # startup snapshot leaves deleted profiles in the scheduler until
-            # restart, which both writes their removed stores and keeps stale
-            # profiles alive in Desktop's background work.
-            profile_homes = lambda: list(profiles_to_serve(multiplex=True))
-            initial_profile_homes = profile_homes()
-            if initial_profile_homes:
-                # Even one profile needs the per-tick gateway gate; otherwise
-                # Desktop races its dedicated gateway for the same cron store.
-                start_kwargs["profile_homes"] = profile_homes
-                start_kwargs["profile_gate"] = profile_gate
-                from hermes_logging import enable_profile_log_routing
-
-                enable_profile_log_routing(initial_profile_homes)
-                _log.info(
-                    "Desktop cron scheduler will tick %d profile(s): %s",
-                    len(initial_profile_homes),
-                    [name for name, _home in initial_profile_homes],
-                )
-        except Exception:
-            # Fail open to the single-store ticker so the active profile keeps firing.
-            _log.exception("Desktop cron: profile enumeration failed; ticking active profile only")
-        if "profile_homes" not in start_kwargs:
-            # Fail open to this backend's own store behind the same gate. A gated-out profile is
-            # neither ticked nor heartbeated, so Desktop never marks the gateway's store healthy.
-            start_kwargs["profile_homes"] = lambda: [(own_name, own_home)]
-            start_kwargs["profile_gate"] = profile_gate
-    else:
-        # External providers take no per-tick gate: defer their start until the gateway is gone.
-        def _owned() -> bool:
-            try:
-                return _gateway_owns_cron(own_name, own_home)
-            except Exception:
-                # Start the ticker rather than silently stand down.
-                _log.warning("Desktop cron: gateway-ownership probe failed; starting the ticker", exc_info=True)
-                return False
-
-        if _owned():
-            _log.info(
-                "Desktop cron scheduler waiting: live gateway owns cron on this HERMES_HOME; "
-                "the gateway ticks with live adapters (re-probing every %ds)", interval,
-            )
-            while True:
-                if stop_event.wait(interval):
-                    return
-                if not _owned():
-                    break
-
-    _log.info("Desktop cron scheduler started (provider=%s, interval=%ds)", provider.name, interval)
-    provider.start(stop_event, **start_kwargs)
+    The cron scheduler it used to drive was excised with the ``cron`` package;
+    the desktop backend still calls this on boot so donor-parity forks that
+    re-add a scheduler have one hook to restore."""
+    del stop_event, interval
 
 
 # Desktop `serve` only (start_server(start_mcp_discovery_after_bind=True)):
@@ -795,7 +710,6 @@ from hermes_cli.web_routers import (
     messaging as _messaging_routes,
     messaging_relay as _messaging_relay_routes,
     oauth as _oauth_routes,
-    cron as _cron_routes,
     mcp as _mcp_routes,
     ops as _ops_routes,
     skills as _skills_routes,
@@ -844,10 +758,8 @@ try:
 except Exception:
     def _fork_cron_on() -> bool:
         return True
-if _fork_cron_on():
-    # Fork autonomous posture (root flag Вл 09.11): the dashboard's cron REST surface
-    # exists only when the root flag re-enables cron (donor parity mode).
-    app.include_router(_cron_routes.router)
+# The dashboard's cron REST surface (/api/jobs, /api/cron/fire) was excised together with
+# the cron package; even in donor-parity mode there is no scheduler to serve.
 app.include_router(_mcp_routes.router)
 app.include_router(_ops_routes.router)
 app.include_router(_skills_routes.hub_router)

@@ -1534,10 +1534,9 @@ def _collect_history_media_paths(agent_history: list[dict[str, Any]]) -> set:
     return paths
 
 def _home_target_env_var(platform_name: str) -> str:
-    """Home-target env var: the plugin's ``cron_deliver_env_var``, then
-    ``<PLATFORM>_HOME_CHANNEL``."""
-    from cron.scheduler_delivery import _resolve_home_env_var
-    return _resolve_home_env_var(platform_name) or f"{platform_name.upper()}_HOME_CHANNEL"
+    """Home-target env var: ``<PLATFORM>_HOME_CHANNEL`` (the cron-delivery override
+    spelling from ``cron.scheduler_delivery`` was excised with the cron package)."""
+    return f"{platform_name.upper()}_HOME_CHANNEL"
 
 
 def _home_thread_env_var(platform_name: str) -> str:
@@ -4319,15 +4318,6 @@ def _housekeeping_paste_sweep() -> None:
         logger.info("Paste sweep: deleted %d expired paste(s), %d pending", deleted, remaining)
 
 
-def _housekeeping_misfire_catch_up(cron_provider, adapters, loop) -> None:
-    """External cron providers only: fire jobs whose time passed with no external fire delivered (dead
-    loopback hop). No-op for the built-in ticker; enforces misfire_grace_minutes; CAS claim de-dupes."""
-    from cron.scheduler_provider import fire_overdue_jobs
-    caught_up = fire_overdue_jobs(cron_provider, adapters=adapters, loop=loop)
-    if caught_up:
-        logger.info("Misfire catch-up: fired %d overdue job(s)", caught_up)
-
-
 def _housekeeping_curator() -> None:
     """maybe_run_curator() is gated by config.interval_hours (7 days default); this is the poll."""
     from agent.curator import maybe_run_curator
@@ -4433,39 +4423,13 @@ def _housekeeping_checkpoint_prune() -> None:
     auto_prune_from_config()
 
 
-def _drain_restart_safe_cron_deliveries(adapters, loop, runner=None) -> None:
-    """Drain each profile's worker queue through its matching live adapters. A credential-less satellite
-    profile (no bot of its own) drains through the primary's adapters routed by its own profile routes."""
-    from cron import scheduler as cron_scheduler
-    from cron import scheduler_preflight as sched_preflight
-
-    if runner is None:
-        if adapters is not None:
-            cron_scheduler.drain_delivery_queue(adapters, loop)
-        return
-    for profile_name, profile_home in _handoff_watch_scopes(runner):
-        profile_adapters = (adapters if profile_name is None
-                            else getattr(runner, "_profile_adapters", {}).get(profile_name))
-        if profile_adapters is None:
-            continue
-        with _profile_runtime_scope(profile_home or get_hermes_home()):
-            owned = (getattr(runner, "_profile_bot_platforms", None) or {}).get(profile_name)
-            if (profile_name is not None and adapters
-                    and not sched_preflight.has_credential_platform(profile_adapters, owned)):
-                routes = sched_preflight._primary_profile_routes_for_current_home()
-                if routes:
-                    profile_adapters = sched_preflight.SharedRouteAdapters(adapters, routes)
-            cron_scheduler.drain_delivery_queue(profile_adapters, loop)
-
-
 def _start_gateway_housekeeping(
     stop_event: threading.Event, adapters=None, loop=None, interval: int = 60, cron_provider=None, runner=None,
     cron_thread=None,
 ):
-    """Background thread for gateway-only periodic chores (NOT cron). Separate from the cron trigger
-    so chores run under any ``CronScheduler`` provider (external scale-to-zero has no 60s loop).
-    Cadences are ticks of ``interval``; inner gates own the real cadence."""
-    from gateway.run_delivery_queue_watch import DRAIN_LABEL, DeliveryQueueWatch, wait_for_next_tick
+    """Background thread for gateway-only periodic chores. Cron was excised from this
+    branch, so ``cron_provider``/``cron_thread`` stay ``None`` and the excised cron
+    chores stand down; cadences are ticks of ``interval``, inner gates own the real cadence."""
     from gateway.run_profile_reconcile import _mcp_config_reconciler, profile_scoped_chore
     from gateway.run_housekeeping_disk import housekeeping_media_caches, maybe_post_auto_prune_prompt
     chores: list[tuple[int, str, Any]] = [
@@ -4474,18 +4438,13 @@ def _start_gateway_housekeeping(
         # PID alive — the thread (or a chore blocked on the loop) wedged (#113372). Runs first so a
         # wedged chore stops the NEXT stamp instead of a slow one delaying this tick's.
         (1, "Runtime heartbeat", _write_runtime_status_quiet)]
-    if adapters is not None or runner is not None:
-        # Restart-safe cron workers run outside the gateway cgroup and queue their final send for
-        # whichever gateway is live; drained here (not the scheduler tick) so external providers get it too.
-        chores.append((1, DRAIN_LABEL, lambda: _drain_restart_safe_cron_deliveries(adapters, loop, runner)))
     chores += [
         (5, "Channel directory refresh", lambda: adapters and _housekeeping_channel_directory(adapters, loop)),
         (60, "Media cache cleanup", housekeeping_media_caches),
         (60, "Paste sweep", _housekeeping_paste_sweep)]
     # Low disk + auto-prune undecided: ask on the home channel (two syscalls; snoozed per post).
     chores.append((1, "Auto-prune low-disk prompt", lambda: maybe_post_auto_prune_prompt(runner, loop)))
-    if cron_provider is not None:
-        chores.append((5, "Misfire catch-up sweep", lambda: _housekeeping_misfire_catch_up(cron_provider, adapters, loop)))
+    # Cron was excised: no misfire-catch-up chore, no ticker to supervise.
     if cron_thread is not None:
         # The ticker's own guards keep its loop alive; this is the outer layer for a thread that has
         # already ended (#111010). Runs every tick so the outage is bounded by one housekeeping interval.
@@ -4509,16 +4468,6 @@ def _start_gateway_housekeeping(
         # Last: a real prune can hold this thread for a while; every other chore of the tick runs first.
         (1, "Checkpoint prune tick", _housekeeping_checkpoint_prune)]
 
-    # Between ticks the queue file is watched so a worker's send goes out when it is queued,
-    # not up to ``interval`` later (#117307); the tick's drain above remains the fallback.
-    queue_watch = None
-    if adapters is not None or runner is not None:
-        def served_homes() -> list:
-            return [home for _name, home in _handoff_watch_scopes(runner)] if runner is not None else [None]
-
-        queue_watch = DeliveryQueueWatch(
-            served_homes, lambda: _drain_restart_safe_cron_deliveries(adapters, loop, runner))
-
     logger.info("Gateway housekeeping started (interval=%ds)", interval)
     tick_count = 0
     while not stop_event.is_set():
@@ -4526,30 +4475,11 @@ def _start_gateway_housekeeping(
         for every, label, fn in chores:
             if tick_count % every == 0:
                 _housekeeping_chore(label, fn)
-        wait_for_next_tick(stop_event, interval, queue_watch, _housekeeping_chore)
+        # The excised cron delivery-queue watch (#117307) went with the cron package;
+        # plain inter-tick sleep since nothing else can move a wake-up deadline.
+        stop_event.wait(timeout=interval)
     logger.info("Gateway housekeeping stopped")
 
-
-def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, interval: int = 60):
-    """DEPRECATED shim — runs ONLY the built-in in-process cron tick loop; the trigger now lives behind
-    the ``CronScheduler`` provider and housekeeping in ``_start_gateway_housekeeping``."""
-    from cron.scheduler_provider import InProcessCronScheduler
-    InProcessCronScheduler().start(stop_event, adapters=adapters, loop=loop, interval=interval)
-
-
-def _stop_cron_provider(provider) -> None:
-    """Stop a cron provider without letting it choose the gateway exit code."""
-    try:
-        provider.stop()
-    except SystemExit as exc:
-        logger.warning(
-            "Cron provider stop() attempted to exit the gateway with code %s; ignoring", exc.code)
-    except Exception as exc:
-        logger.debug("Cron provider stop() error: %s", exc)
-
-
-# Cron thread blocks on future.result(timeout=60) (cron/scheduler.py::_deliver_result) + margin.
-_CRON_SHUTDOWN_DRAIN_TIMEOUT = 65.0
 
 # Housekeeping's channel-directory refresh blocks on fut.result(timeout=30); cover that + margin.
 _HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT = 35.0

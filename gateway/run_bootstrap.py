@@ -390,81 +390,22 @@ async def _start_gateway_start_control_socket(runner):
 
 
 def _start_gateway_start_cron_and_housekeeping(runner):
-    """Start the cron scheduler thread + gateway housekeeping thread; returns
-    ``(cron_stop, cron_provider, cron_thread, housekeeping_thread)``."""
-    from gateway.run import (Dict, Platform, _cron_profile_gate, _cron_tick_profile_homes, _start_gateway_housekeeping, asyncio, get_hermes_home, logger, threading)
-    # The event loop is passed so cron delivery can use live adapters (E2EE support).
-    from cron.scheduler_provider import (
-        InProcessCronScheduler, resolve_cron_scheduler, scheduler_for_profile_mode)
-    from tools.fork_mode import cron_runtime_enabled
+    """Start the gateway housekeeping thread; returns ``(cron_stop, cron_provider,
+    cron_thread, housekeeping_thread)``. Cron is excised on this branch: the middle
+    two are always ``None``/``None`` kept for call-site stability."""
+    from gateway.run import (_start_gateway_housekeeping, asyncio, get_hermes_home, logger, threading)
     # Hoisted to function scope: the hermes_events SAFE gate below reads _safe_mode
-    # on the cron-excised path too (autonomous_mode=true skips the whole cron branch;
-    # a branch-local import left it unbound -> UnboundLocalError crash-loop 09.11).
+    # on the cron-excised path too (a branch-local import left it unbound ->
+    # UnboundLocalError crash-loop 09.11).
     from agent import safe_mode as _safe_mode
+    # Cron was excised from this branch (no ``cron`` package): no scheduler provider,
+    # ticker or store. Housekeeping receives cron_provider=None/cron_thread=None so the
+    # excised cron chores stand down; shutdown stays None-safe.
     cron_stop = threading.Event()
     cron_provider = None
     cron_thread: Any = None
     from gateway.runtime_ownership import process_ownership
-    if cron_runtime_enabled():
-        # ONE gateway process per host multiplexes every profile, so its cron ticker owns EVERY
-        # profile's store — `gateway.multiplex_profiles` gates adapters, not cron. Gating the tick set
-        # on that flag left every non-launch profile's jobs in a store no ticker visited: they
-        # silently never fired.
-        try:
-            cron_profile_homes = _cron_tick_profile_homes(runner.config)
-        except Exception as exc:
-            logger.warning("Could not resolve profile homes for cron: %s", exc)
-            cron_profile_homes = []
-        # External providers own one unscoped remote registry, so they can only serve a single home.
-        cron_provider = scheduler_for_profile_mode(
-            resolve_cron_scheduler(), multiplex_profiles=len(cron_profile_homes) > 1)
-        cron_start_kwargs: Dict[str, Any] = {"adapters": runner.adapters, "loop": asyncio.get_running_loop()}
-
-        if isinstance(cron_provider, InProcessCronScheduler) and cron_profile_homes:
-            # Live enumerator: the ticker re-reads profiles/ every cycle so a profile created while
-            # the gateway runs gets its jobs fired without a restart (hot-serve).
-            cron_start_kwargs["profile_homes"] = lambda: _cron_tick_profile_homes(runner.config)
-            # Stand down, per tick, for a profile whose OWN gateway process ticks it.
-            cron_start_kwargs["profile_gate"] = _cron_profile_gate
-            # Per-profile adapters so each profile's cron output goes via its own bot, not the
-            # default's. Absent (no multiplexed adapters), delivery for a secondary profile falls
-            # back to the primary's routed adapters or fails closed — the job still FIRES.
-            cron_start_kwargs["profile_adapters"] = getattr(runner, "_profile_adapters", None)
-            # A secondary bot that dropped is still that profile's own: never borrow meanwhile.
-            cron_start_kwargs["profile_bot_platforms"] = getattr(runner, "_profile_bot_platforms", None)
-            # runner.adapters belongs to the LAUNCH profile (``default``, or the ``--profile``
-            # name); naming it keeps the ticker from routing a secondary's cron through that bot
-            # and lets a named multiplexer's own jobs reuse its live adapters.
-            cron_start_kwargs["default_profile"] = runner._primary_profile_name
-            logger.info(
-                "Cron scheduler will tick %d profile(s): %s", len(cron_profile_homes),
-                [p[0] if isinstance(p, tuple) else p for p in cron_profile_homes])
-
-        # Only the in-process ticker polls local due jobs, so only it gets the external-drain dispatch gate.
-        if isinstance(cron_provider, InProcessCronScheduler):
-            cron_start_kwargs["can_dispatch"] = lambda: not (
-                runner._draining or runner._external_drain_active)
-        # Supervised: a ticker that dies without a stop request is respawned by housekeeping (#111010).
-        from cron.scheduler_thread import SupervisedTickerThread
-        from agent import safe_mode as _safe_mode
-        cron_thread: Any = None
-        if _safe_mode.is_safe():
-            logger.warning("SAFE MODE: cron ticker not started")
-        else:
-            cron_thread = SupervisedTickerThread(
-                cron_provider.start, args=(cron_stop,), kwargs=cron_start_kwargs, stop_event=cron_stop)
-            # NOT started here: start_writer below registers-then-starts atomically. A second
-            # start() on the wrapper raises "threads can only be started once" and killed the
-            # 15:32 boot (fleet 27.10); start is owned exclusively by process_ownership.
-        from gateway.runtime_ownership import process_ownership
-        if cron_thread is not None:
-                    process_ownership.start_writer(cron_thread)
-    else:
-        # Fork autonomous posture (root flag Вл 09.11): NO cron at all — no provider,
-        # no ticker, and housekeeping receives cron_provider=None so even the misfire
-        # chore stands down. Shutdown path is None-safe (_await_thread_exit(None);
-        # _stop_cron_provider swallows any error).
-        logger.info("Fork autonomous_mode: cron excised — scheduler not started")
+    logger.info("Fork autonomous_mode: cron excised — scheduler not started")
 
     # hermes_events: the kernel's own event processor (fleet fork, 26.10 contract — the
     # replacement for cron-thinking, not another cron). Same SAFE gate, fail-open:
@@ -503,23 +444,7 @@ def _start_gateway_start_cron_and_housekeeping(runner):
         except Exception:
             logger.exception("hermes_events failed to start; continuing without it")
 
-    # External providers fire over loopback HTTP to THIS process's api_server; if it never came up (usually
-    # API_SERVER_KEY missing) every fire fails while manual runs work — misread as a job bug. Say it ONCE.
-    if not isinstance(cron_provider, InProcessCronScheduler):
-        try:
-            _has_api_server = Platform.API_SERVER in (runner.adapters or {})
-        except Exception:
-            _has_api_server = True  # never let the tell break startup
-        if not _has_api_server:
-            logger.warning(
-                "Cron provider '%s' is active but the api_server adapter is "
-                "NOT running in this gateway — scheduled fires arrive over "
-                "loopback HTTP and will all fail (jobs only run when "
-                "triggered manually). Most common cause: API_SERVER_KEY is "
-                "missing from this gateway process's environment. Restart "
-                "the gateway through its supervisor (`hermes gateway "
-                "restart`) so the profile env loads.",
-                getattr(cron_provider, "name", "external"))
+    # (External cron-provider api-server warning excised with the cron package.)
 
     # Gateway-only housekeeping runs independently of the cron provider; shares cron_stop for shutdown.
     housekeeping_thread = threading.Thread(
@@ -537,7 +462,7 @@ async def _start_gateway_shutdown_tail(
     _planned_stop_watcher_stop: threading.Event, _planned_stop_watcher_thread: threading.Thread,
     _signal_initiated_shutdown: list) -> bool:
     """Post-``wait_for_shutdown`` teardown; returns the process exit verdict (True = exit 0)."""
-    from gateway.run import (_CRON_SHUTDOWN_DRAIN_TIMEOUT, _HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT, _await_thread_exit, _best_effort, _resolve_gateway_exit_verdict, _shutdown_mcp_servers_nonblocking, _stop_cron_provider)
+    from gateway.run import (_HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT, _await_thread_exit, _best_effort, _resolve_gateway_exit_verdict, _shutdown_mcp_servers_nonblocking)
     # Control socket first: once shutdown begins we are no longer a truthful "serving here" answer and a
     # successor must be able to bind. Early-exit paths rely on the atexit cleanup_files hook instead.
     if _control_server is not None:
@@ -552,18 +477,9 @@ async def _start_gateway_shutdown_tail(
 
     _best_effort(_stop_keepalive)
 
-    # Never join(): an in-flight cron delivery is a coroutine on THIS loop; a sync join would drop it.
-    # Stop cron scheduler + housekeeping cleanly. These MUST be awaited cooperatively, not join()ed. A cron
-    # delivery in flight when the gateway restarts is a coroutine scheduled onto THIS event loop
-    # (safe_schedule_threadsafe); the ticker thread is blocked on its future.result(). A synchronous
-    # cron_thread.join() would block the loop, so that delivery could never run — it timed out and the
-    # message was silently dropped (#58818). Awaiting keeps the loop alive so the in-flight delivery
-    # finishes before we tear down.
+    # Cron was excised, so there is no scheduler/provider/thread to drain here (the historical
+    # cooperative-await rationale lives in git history, #58818/#12175).
     cron_stop.set()
-    _stop_cron_provider(cron_provider)
-    if not await _await_thread_exit(cron_thread, timeout=_CRON_SHUTDOWN_DRAIN_TIMEOUT):
-        logger.warning("Cron ticker did not exit within %.0fs of shutdown — an in-flight "
-                       "delivery may have been dropped.", _CRON_SHUTDOWN_DRAIN_TIMEOUT)
     await _await_thread_exit(housekeeping_thread, timeout=_HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT)
 
     # Stop the planned-stop watcher (daemon=True so this is belt-and-suspenders).

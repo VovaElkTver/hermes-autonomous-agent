@@ -840,24 +840,9 @@ def _cron_bound_to_tree(worktree_path: str, chats: set) -> bool:
     """An enabled, non-terminal cron job whose ``workdir`` is inside the tree, or whose origin is
     the local chat of a session there. Reads ``jobs.json`` directly (``load_jobs`` may repair-write);
     an unreadable store fails SAFE."""
-    try:
-        from cron.jobs import _current_cron_store, _parse_jobs_file, is_job_runnable, is_terminal_job
-        jobs_file = _current_cron_store().jobs_file
-        if not jobs_file.exists():
-            return False
-        data, _ = _parse_jobs_file(jobs_file)
-    except Exception as exc:  # health: allow BLE001 -- an unreadable cron store keeps the tree (fail safe)
-        logger.debug("cron store unreadable (%s); keeping tree", exc)
-        return True
-    jobs = data.get("jobs") if isinstance(data, dict) else data
-    inside = _inside_tree(worktree_path)
-    for job in jobs if isinstance(jobs, list) else ():
-        if not isinstance(job, dict) or not is_job_runnable(job) or is_terminal_job(job):
-            continue
-        origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
-        if inside(job.get("workdir")) or (
-                str(origin.get("platform") or "").lower() == "local" and str(origin.get("chat_id") or "") in chats):
-            return True
+    # Cron was excised from this branch: no job can pin a worktree, whatever a
+    # legacy ``jobs.json`` on disk claims.
+    del worktree_path, chats
     return False
 
 

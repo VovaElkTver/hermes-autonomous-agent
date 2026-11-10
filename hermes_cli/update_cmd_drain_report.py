@@ -27,21 +27,9 @@ def _fmt_elapsed(seconds: object) -> str:
 
 
 def _cron_job_name(job_id: str, home: Optional[Path]) -> Optional[str]:
-    """``name`` from the profile's ``jobs.json`` (None when unreadable — the id alone still identifies it)."""
-    try:
-        from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-        from cron.jobs import load_jobs
-
-        token = set_hermes_home_override(home) if home else None
-        try:
-            for job in load_jobs():
-                if str(job.get("id")) == job_id:
-                    return str(job.get("name") or "") or None
-        finally:
-            if token is not None:
-                reset_hermes_home_override(token)
-    except Exception:
-        return None
+    """Legacy-name lookup for historical ``cron`` work units; jobs.json reading went
+    with the cron package, so only the raw id is available."""
+    del job_id, home
     return None
 
 

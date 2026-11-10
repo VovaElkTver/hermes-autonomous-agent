@@ -171,12 +171,6 @@ def _toggle_target(arg: str, current: bool):
     return None
 
 
-def _cron_api(**kwargs) -> dict:
-    """Call the cronjob model tool and decode its JSON reply."""
-    from tools.cronjob_tools import cronjob as cronjob_tool
-    return json.loads(cronjob_tool(**kwargs))
-
-
 # Session-switch plumbing (end, repoint) lives in ``hermes_cli/cli_session_switch.py``.
 
 
@@ -1191,42 +1185,8 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         _set_active(result.slug)
         print(_t("hatch.hatched", name=result.display_name))
 
-    # ---- /cron ----------------------------------------------------------------------------
-    def _handle_cron_command(self, cmd: str):
-        """Handle the /cron command to manage scheduled tasks. Only without a gateway session: on the shared
-        gateway every /cron form runs there (hermes_cli/gateway_setting_commands.py)."""
-        from hermes_cli.cli_cron_lines import cron_command_lines
-        _pr(*cron_command_lines(_command_arg(cmd)))
-
     # ---- delegating handlers: /suggestions, /blueprint, /curator, /kanban, /skills, /memory --
-    def _handle_suggestions_command(self, cmd: str):
-        """Handle /suggestions — review/accept/dismiss suggested automations via the shared handler.
-        CLI origin is the local platform so an accepted job's "origin" delivery resolves to a home channel."""
-        args = " ".join(_shlex_args(cmd))
-        try:
-            from hermes_cli.suggestions_cmd import handle_suggestions_command
-            output = handle_suggestions_command(args)
-        except Exception as e:
-            output = _t("suggestions.failed", error=e)
-        self._console_print(output)
-
-    def _handle_blueprint_command(self, cmd: str):
-        """Handle /blueprint — set up an automation from a blueprint template (shared handler).
-        Bare lists the catalog; ``<name>`` seeds the agent to ask for each value conversationally
-        (``agent_seed``, run as the next turn); ``<name> slot=val …`` creates the job directly."""
-        args = " ".join(shlex.quote(part) for part in _shlex_args(cmd))
-        try:
-            from hermes_cli.blueprint_cmd import handle_blueprint_command
-            result = handle_blueprint_command(args)
-        except Exception as e:
-            self._console_print(_t("blueprint.failed", error=e))
-            return
-        self._console_print(result.text)
-        seed = getattr(result, "agent_seed", None)
-        if seed:
-            # One-shot: the interactive loop picks this up right after the slash command
-            # returns and runs it as a normal agent turn.
-            self._pending_agent_seed = seed
+    # /suggestions went with the cron package; the handler slot is gone with it.
 
     def _handle_curator_command(self, cmd: str):
         """Handle /curator — delegates to hermes_cli.curator so the CLI and the `hermes curator`
