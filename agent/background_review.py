@@ -1198,6 +1198,10 @@ def _run_review_fork(
     _track_review_fork(agent, st.review_agent, register=True)
     from hermes_cli.plugins import set_thread_tool_whitelist, clear_thread_tool_whitelist
     review_whitelist, configured_extra_tools = _review_tool_whitelist(st.review_agent, task_cfg, review_memory)
+    managed_readonly = getattr(agent, "_managed_readonly_whitelist", None)
+    if managed_readonly is not None:
+        # managed_refine: форк предлагает, но не пишет — read-only набор вместо стандартного.
+        review_whitelist, configured_extra_tools = set(managed_readonly), []
     extra_list = ", ".join(sorted(configured_extra_tools))
     deny_extra = f" Configured extra tools also allowed: {extra_list}." if configured_extra_tools else ""
     prompt_extra = f" Exception — these configured tools are also allowed: {extra_list}." if configured_extra_tools else ""
@@ -1242,6 +1246,9 @@ def _run_review_fork(
         _track_review_fork(agent, st.review_agent, register=False)
         finish_background_review_run(agent, review_run)
     st.review_messages = list(getattr(st.review_agent, "_session_messages", []))
+    managed_sink = getattr(agent, "_managed_response_sink", None)
+    if managed_sink is not None:
+        managed_sink.append(_last_assistant_text(st.review_messages))
     _release_fork_clients(st.review_agent)
     st.review_agent = None
 
@@ -1339,6 +1346,20 @@ def _run_review_in_thread(
         _set_thread_approval_callback(None)
 
 
+def _last_assistant_text(messages: list) -> str:
+    """Final assistant prose of a review fork (managed_refine response_raw capture)."""
+    for msg in reversed(messages or []):
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        if role != "assistant":
+            continue
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+        if isinstance(content, list):
+            content = " ".join(str(p.get("text") or "") for p in content if isinstance(p, dict))
+        if isinstance(content, str) and content.strip():
+            return content
+    return ""
+
+
 # (review_memory, review_skills) -> prompt attribute name; skills-only is also the default.
 _PROMPT_NAME_BY_SCOPE = {
     (True, True): "_COMBINED_REVIEW_PROMPT", (True, False): "_MEMORY_REVIEW_PROMPT",
@@ -1350,19 +1371,20 @@ def spawn_background_review_thread(
     agent: Any, messages_snapshot: list[dict], review_memory: bool = False,
     review_skills: bool = False, focus: Optional[str] = None,
     task_cfg: Optional[dict[str, Any]] = None, review_run: Optional[_BackgroundReviewRun] = None,
-    explicit: bool = False,
+    explicit: bool = False, prompt_override: Optional[str] = None,
 ):
     """Return ``(target, prompt)``; the caller builds the ``threading.Thread`` so test patches of
     ``run_agent.threading.Thread`` keep working. ``focus`` (``/refine [instructions]``) is appended
     to the chosen prompt; automatic reviews pass ``None``. ``task_cfg`` is the pre-loaded
     ``auxiliary.background_review`` block; when omitted it is read once here. ``explicit``
     (/refine) propagates to the fork's write origin so user-requested reviews keep the full
-    memory operation set."""
+    memory operation set. ``prompt_override`` (managed_refine) replaces the template selection
+    entirely; per-agent attribute overrides still apply beneath it."""
     if task_cfg is None:
         task_cfg = _background_review_task_config()
     # Per-agent overrides (agent._MEMORY_REVIEW_PROMPT etc.) keep working.
     name = _PROMPT_NAME_BY_SCOPE[(review_memory, review_skills)]
-    prompt = getattr(agent, name, globals()[name])
+    prompt = prompt_override or getattr(agent, name, globals()[name])
     if focus := (focus or "").strip():
         prompt = (
             f"{prompt}\n\nThe user explicitly requested this review with the following "

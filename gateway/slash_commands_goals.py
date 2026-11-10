@@ -177,6 +177,26 @@ class GatewayGoalCommandsMixin:
         """Handle /refine — run the memory/skill review fork on demand, in a daemon thread against a
         snapshot of the cached AIAgent's conversation (live session and prompt cache untouched)."""
         args = (event.get_command_args() or "").strip()
+        from gateway.refine_managed import (
+            REFINE_GATE_TIMEOUT_S, handle_command as _managed_refine_cmd, managed_refine_enabled,
+        )
+        if managed_refine_enabled():
+            _plat = getattr(getattr(event.source, "platform", None), "name", "local").lower()
+            _ckey = f"{_plat}:{getattr(event.source, 'chat_id', '')}"
+            _first, _, _rest = args.partition(" ")
+            _first = _first.strip().lower()
+            if _first in {"go", "иди", "stop", "стоп", "postpone", "отложи",
+                          "approve", "reject", "status", "resume"}:
+                reply = _managed_refine_cmd(_ckey, _first, _rest.strip())
+                if reply is not None:
+                    return reply
+                return "managed_refine: вердикт принят."
+            if args:
+                from gateway.refine_managed import _GATES
+                gate = _GATES.get(_ckey)
+                if gate is not None and gate.verdict is None and not _first.startswith("/"):
+                    _managed_refine_cmd(_ckey, args, "", agent=None)  # свободный текст = поправка промпта (§2.1)
+                    return f"[managed_refine] поправка промпта принята; жду вердикта или {REFINE_GATE_TIMEOUT_S}s тишины."
         quick_key, agent, error = self._idle_cached_agent_or_error(event, "refine")
         snapshot = list(getattr(agent, "_session_messages", None) or [])
         session_id = None
@@ -203,9 +223,18 @@ class GatewayGoalCommandsMixin:
             return t("gateway.refine.empty")
         try:
             if agent is None:
+                from gateway.refine_managed import managed_refine_enabled as _mr_on
+                if _mr_on():
+                    return "[managed_refine] cold-путь (эвиicted агент / сохранённая транскрипт) во managed-режиме пока не поддержан — снимите /moa-арест агента или повторите после следующего хода."
                 from gateway.session_cold_review import start_cold_refine
                 await start_cold_refine(self, event.source, quick_key, session_id, snapshot, args)
             else:
+                from gateway.refine_managed import managed_refine_enabled as _mr_on
+                if _mr_on():
+                    # Единый ключ гейтов с диспетчером: вердикты (/refine go|...) ищут прогон по нему.
+                    agent.session_chat_id = (
+                        f"{getattr(getattr(event.source, 'platform', None), 'name', 'local').lower()}:"
+                        f"{getattr(event.source, 'chat_id', '')}")
                 agent._spawn_background_review(
                     messages_snapshot=snapshot, review_memory=True,
                     review_skills="skill_manage" in getattr(agent, "valid_tool_names", set()), focus=args or None,

@@ -799,6 +799,15 @@ class AIAgent(
         )
         from tools.thread_context import propagate_context_to_thread
 
+        from gateway.refine_managed import intercept_spawn as _refine_intercept
+        try:
+            if _refine_intercept(self, messages_snapshot=messages_snapshot, review_memory=review_memory,
+                                 review_skills=review_skills, focus=focus, task_cfg=task_cfg,
+                                 explicit=explicit):
+                return
+        except Exception:
+            logger.warning("managed_refine intercept failed; falling back to atomic review", exc_info=True)
+
         review_run = prepare_background_review_run(self)
         if review_run is None:
             return
