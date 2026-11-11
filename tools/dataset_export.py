@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import json
 import pathlib
 import sqlite3
@@ -25,6 +26,8 @@ import sys
 
 MAX_VALUE_CHARS = 100_000
 TOOL_ROLES = ("function", "tool")
+DEDUP_THRESHOLD = 0.65        # steal-plan №8: donor default similarity cut-off
+DEDUP_COMPARE_CHARS = 4000    # similarity prefix budget (O(n²) guard)
 
 
 def _connect(db_path: pathlib.Path) -> sqlite3.Connection:
@@ -159,17 +162,43 @@ def validate(conv: dict) -> bool:
     return True
 
 
+def deduplicate(items: list[dict], threshold: float = DEDUP_THRESHOLD) -> tuple[list[dict], int]:
+    """Near-duplicate removal (clean-room contract of camel deduplicate_internally).
+
+    Similarity = difflib ratio over the first DEDUP_COMPARE_CHARS of the
+    concatenated message values; the FIRST occurrence is kept. Default off —
+    enabled by --dedup, mirroring the donor's opt-in semantics.
+    """
+    def _text(it: dict) -> str:
+        return "\n".join(c["value"] for c in it["conversations"])[:DEDUP_COMPARE_CHARS]
+
+    kept: list[dict] = []
+    dropped = 0
+    for it in items:
+        t = _text(it)
+        if any(difflib.SequenceMatcher(None, t, _text(k)).ratio() > threshold for k in kept):
+            dropped += 1
+            continue
+        kept.append(it)
+    return kept, dropped
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--db", default=str(pathlib.Path.home() / ".hermes/state.db"))
     ap.add_argument("--since", help="ISO date, e.g. 2026-11-01")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--dedup", action="store_true",
+                    help=f"drop near-duplicate trajectories (ratio > {DEDUP_THRESHOLD})")
     a = ap.parse_args(argv)
     since_iso = None
     if a.since:
         since_iso = dt.datetime.fromisoformat(a.since).timestamp()
     convs = export_sharegpt(pathlib.Path(a.db), since_iso, a.limit)
+    if a.dedup:
+        convs, dropped = deduplicate(convs)
+        print(f"dedup: dropped {dropped} near-duplicates")
     bad = [c["id"] for c in convs if not validate(c)]
     if bad:
         print(f"invariant violations: {bad[:5]}", file=sys.stderr)

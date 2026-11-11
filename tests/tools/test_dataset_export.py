@@ -12,6 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
 
 from dataset_export import (
     export_sharegpt,
+    deduplicate,
     session_to_conversation,
     validate,
 )
@@ -125,3 +126,39 @@ def test_export_sharegpt_end_to_end(tmp_path):
     conv = out[0]
     assert validate(conv)
     assert conv["conversations"][0]["value"] == "sys prompt here"
+
+
+# --- steal-plan №8: near-duplicate removal ------------------------------------
+
+def _conv(*values):
+    return {"conversations": [
+        {"from": "human", "value": values[0]},
+        {"from": "gpt", "value": values[1]},
+    ]}
+
+
+def test_dedup_drops_later_near_duplicate():
+    a = _conv("how to restart the gateway service safely today?", "run systemctl --user restart")
+    b = _conv("how to restart the gateway service safely today?", "run systemctl --user restart")
+    c = _conv("translate the quarterly report figures", "translation pipeline offline")
+    kept, dropped = deduplicate([a, b, c])
+    assert dropped == 1
+    assert len(kept) == 2
+    assert kept[0] is a  # first occurrence wins
+
+
+def test_dedup_keeps_distinct_trajectories():
+    a = _conv("alpha question about caching layers", "answer alpha")
+    b = _conv("beta question about matrix room sync", "answer beta")
+    kept, dropped = deduplicate([a, b])
+    assert (kept, dropped) == ([a, b], 0)
+
+
+def test_dedup_threshold_semantics():
+    a = _conv("x" * 300, "y" * 300)
+    # identical twin survives only below the threshold
+    b = _conv("x" * 300, "y" * 300)
+    _kept, dropped = deduplicate([a, b], threshold=0.99)
+    assert dropped == 1
+    kept2, dropped2 = deduplicate([a, b], threshold=1.01)
+    assert dropped2 == 0 and len(kept2) == 2
