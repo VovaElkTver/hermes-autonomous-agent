@@ -79,6 +79,69 @@ def _connect(db_path: str | None = None) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    # v0.2 additive migration (idempotent): fan-out parentage + open-question
+    # register. Constant defaults only — SQLite forbids non-constant ADD COLUMN.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(tk_task)")}
+    if "parent_id" not in cols:
+        conn.execute("ALTER TABLE tk_task ADD COLUMN parent_id TEXT")
+    if "open_q" not in cols:
+        conn.execute("ALTER TABLE tk_task ADD COLUMN open_q TEXT NOT NULL DEFAULT '[]'")
+
+
+def _meta(task: dict) -> dict:
+    """Note column as a dict; pre-note plain strings yield {} (never raise)."""
+    raw = task.get("note") or ""
+    if not raw:
+        return {}
+    try:
+        m = json.loads(raw)
+    except ValueError:
+        return {}
+    return m if isinstance(m, dict) else {}
+
+
+def _jaccard(a: str, b: str) -> float:
+    import re
+    ta = set(re.findall(r"[\w\-]+", a.lower()))
+    tb = set(re.findall(r"[\w\-]+", b.lower()))
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+#: proximity seam (mechanism 3): default lexical Jaccard; swap for an
+#: embedding-based function when a vector layer is wired in (>=8-bit vectors).
+similarity_fn = _jaccard
+
+
+def _task_line(conn: sqlite3.Connection, task: dict) -> str:
+    """Render the delivery line: plain task / branch proposal / join digest."""
+    meta = _meta(task)
+    if meta.get("join"):
+        j = meta["join"]
+        rows = conn.execute(
+            "SELECT seq, title, body, state, note, open_q FROM tk_task"
+            " WHERE parent_id=? ORDER BY seq", (task["task_id"],)).fetchall()
+        lines = [f"[задача] СЛИЯНИЕ «{j.get('goal', '')}» — {len(rows)} ветки:"]
+        for r in rows:
+            m = _meta(dict(r))
+            fin = f" | вывод: {m['final']}" if m.get("final") else ""
+            try:
+                oq = json.loads(r["open_q"] or "[]")
+            except ValueError:
+                oq = []
+            oqs = f" | открытых вопросов: {len(oq)}" if oq else ""
+            lines.append(f"  [{r['seq']}] {r['title']}: {r['body'][:200]}{fin}"
+                         f"{oqs} (состояние: {r['state']})")
+        if j.get("criteria"):
+            lines.append(f"критерии выбора: {j['criteria']}")
+        lines.append("ack = решение: названная ветка или третье решение.")
+        return "\n".join(lines)
+    if meta.get("branch_of"):
+        return (f"[задача] [ветка {meta.get('branch_no', '?')}"
+                f"/{meta.get('branch_total', '?')}] "
+                f"{task['title']}: {task['body']}").strip(": ")
+    return f"[задача] {task['title']}: {task['body']}".strip(": ")
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
@@ -115,15 +178,10 @@ def create_batch(chat_id: str, items: list[dict], deliver_target: str = "",
 
 def deliver_default(task: dict) -> bool:
     """Deterministic delivery through ``hermes send`` (no LLM, no agent loop)."""
-    note = task.get("note") or ""
-    try:
-        meta = json.loads(note) if note else {}
-    except ValueError:
-        meta = {}
-    target = meta.get("deliver_target", "")
+    target = _meta(task).get("deliver_target", "")
     if not target:
         return False
-    line = f"[задача] {task['title']}: {task['body']}".strip(": ")
+    line = task.get("_line") or f"[задача] {task['title']}: {task['body']}".strip(": ")
     try:
         p = subprocess.run(["hermes", "send", "-t", target, "-q", line],
                            capture_output=True, text=True, timeout=60, check=False)
@@ -143,6 +201,7 @@ def _deliver_and_park(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     conn.execute("UPDATE tk_task SET state=?, updated_at=? WHERE task_id=?",
                  (RUNNING, time.time(), task["task_id"]))
     conn.commit()
+    task["_line"] = _task_line(conn, task)
     ok = deliver_fn(task)
     if not ok:
         raise ValueError(f"delivery failed for task {task['task_id']}")
@@ -189,6 +248,22 @@ def on_owner_message(chat_id: str, db_path: str | None = None) -> dict | None:
             if head is None:
                 return None
             return _row_to_dict(head)
+        # completion gate (mechanism 2): while the head carries open questions,
+        # an owner ack does NOT close it — the head is re-delivered with the
+        # register instead. Postponing is /skip's job, closing is not.
+        try:
+            open_q = json.loads(head["open_q"] or "[]")
+        except (ValueError, IndexError):
+            open_q = []
+        if open_q:
+            task = _row_to_dict(head)
+            assert task is not None
+            task["_line"] = (f"[задача] {task['title']}: {len(open_q)} открытых "
+                             f"вопросов — закрой или назначь работу (/skip чтобы "
+                             f"отложить):\n  - " + "\n  - ".join(open_q))
+            deliver_fn(task)
+            return {"task_id": task["task_id"], "title": task["title"],
+                    "refused_open_questions": len(open_q)}
         conn.execute("UPDATE tk_task SET state='done', note=COALESCE(note,''),"
                      " updated_at=? WHERE task_id=?", (time.time(), head["task_id"]))
         nxt = conn.execute(
@@ -285,6 +360,143 @@ def emit(event_id: str, db_path: str | None = None) -> int:
     return resumed
 
 
+def fanout(chat_id: str, goal: str, branches: list[dict], criteria: str = "",
+           deliver_target: str = "", duplicate_threshold: float = 0.85,
+           db_path: str | None = None) -> dict:
+    """Mechanisms 1+3: spawn N competing branch tasks and a JOIN row that
+    arrives LAST with the digest of every branch. Branches walk the ordinary
+    ack-driven queue; the join ack is the owner's decision (a named branch or
+    a third option the agent composes). Near-duplicate branches are refused up
+    front (proximity check via :data:`similarity_fn`)."""
+    if len(branches) < 2:
+        raise ValueError("fanout needs >=2 competing branches")
+    texts = []
+    for i, b in enumerate(branches, start=1):
+        title = (b.get("title") or "").strip()
+        if not title:
+            raise ValueError(f"branch {i} has no title")
+        texts.append(f"{title} {b.get('body', '')}")
+    for i in range(len(texts)):
+        for j in range(i + 1, len(texts)):
+            sim = similarity_fn(texts[i], texts[j])
+            if sim >= duplicate_threshold:
+                raise ValueError(
+                    f"branch {i + 1} and {j + 1} are near-duplicates "
+                    f"(similarity {sim:.2f}) — dedupe first")
+    now = time.time()
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        base = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM tk_task "
+                            "WHERE chat_id=?", (chat_id,)).fetchone()[0]
+        join_id = uuid.uuid4().hex[:12]
+        jmeta: dict = {"join": {"goal": goal, "criteria": criteria}}
+        if deliver_target:
+            jmeta["deliver_target"] = deliver_target
+        conn.execute(
+            "INSERT INTO tk_task (task_id, chat_id, seq, title, body, state,"
+            " note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (join_id, chat_id, base + len(branches) + 1, f"СЛИЯНИЕ: {goal}",
+             criteria, READY, json.dumps(jmeta, ensure_ascii=False), now, now))
+        ids = []
+        for off, b in enumerate(branches, start=1):
+            bid = uuid.uuid4().hex[:12]
+            bm = {"branch_of": join_id, "branch_no": off,
+                  "branch_total": len(branches)}
+            if deliver_target:
+                bm["deliver_target"] = deliver_target
+            conn.execute(
+                "INSERT INTO tk_task (task_id, chat_id, seq, title, body,"
+                " state, note, parent_id, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (bid, chat_id, base + off, (b.get("title") or "").strip(),
+                 b.get("body", ""), READY,
+                 json.dumps(bm, ensure_ascii=False), join_id, now, now))
+            ids.append(bid)
+        conn.commit()
+    return {"join_id": join_id, "branch_ids": ids}
+
+
+def _merge_note(task_id: str, updates: dict, db_path: str | None) -> dict:
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        row = conn.execute("SELECT * FROM tk_task WHERE task_id=?",
+                           (task_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"no such task: {task_id}")
+        task = _row_to_dict(row)
+        assert task is not None
+        if task["state"] in (DONE, CANCELLED):
+            raise ValueError(f"task {task_id} is {task['state']}, not open")
+        meta = _meta(task)
+        meta.update(updates)
+        conn.execute("UPDATE tk_task SET note=?, updated_at=? WHERE task_id=?",
+                     (json.dumps(meta, ensure_ascii=False), time.time(), task_id))
+        conn.commit()
+        return meta
+
+
+def annotate(task_id: str, text: str, db_path: str | None = None) -> bool:
+    """Attach the branch's verdict/conclusion to its note (``final``); the join
+    digest surfaces it, so the decision is made on stated grounds."""
+    _merge_note(task_id, {"final": text}, db_path)
+    return True
+
+
+def add_question(task_id: str, q: str, db_path: str | None = None) -> int:
+    """Register an open question / unverified assumption on a task. Returns
+    the new open count; while it is >0 the task cannot be ack-closed."""
+    _merge_note(task_id, {}, db_path)  # validates existence + state
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT open_q FROM tk_task WHERE task_id=?",
+                           (task_id,)).fetchone()
+        try:
+            qs = json.loads(row["open_q"] or "[]")
+        except ValueError:
+            qs = []
+        if not isinstance(qs, list):
+            qs = []
+        qs.append(q)
+        conn.execute("UPDATE tk_task SET open_q=?, updated_at=? WHERE task_id=?",
+                     (json.dumps(qs, ensure_ascii=False), time.time(), task_id))
+        conn.commit()
+        return len(qs)
+
+
+def drop_question(task_id: str, q, db_path: str | None = None) -> int:
+    """Close one registered question: by 1-based position (int) or by exact /
+    substring match. Returns the remaining open count."""
+    with _connect(db_path) as conn:
+        init_schema(conn)
+        row = conn.execute("SELECT open_q FROM tk_task WHERE task_id=?",
+                           (task_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"no such task: {task_id}")
+        try:
+            qs = json.loads(row["open_q"] or "[]")
+        except ValueError:
+            qs = []
+        idx = None
+        if isinstance(q, int):
+            if 1 <= q <= len(qs):
+                idx = q - 1
+        else:
+            needle = str(q)
+            if needle in qs:
+                idx = qs.index(needle)
+            else:
+                for k, item in enumerate(qs):
+                    if needle in item:
+                        idx = k
+                        break
+        if idx is None:
+            raise ValueError(f"no open question matching {q!r} on {task_id}")
+        qs.pop(idx)
+        conn.execute("UPDATE tk_task SET open_q=?, updated_at=? WHERE task_id=?",
+                     (json.dumps(qs, ensure_ascii=False), time.time(), task_id))
+        conn.commit()
+        return len(qs)
+
+
 def cancel(task_id: str, db_path: str | None = None) -> bool:
     with _connect(db_path) as conn:
         init_schema(conn)
@@ -299,7 +511,7 @@ def status(chat_id: str, db_path: str | None = None) -> dict:
     with _connect(db_path) as conn:
         init_schema(conn)
         rows = conn.execute(
-            "SELECT task_id, seq, title, state, note FROM tk_task"
+            "SELECT task_id, seq, title, state, note, open_q FROM tk_task"
             " WHERE chat_id=? ORDER BY seq", (chat_id,)).fetchall()
     out = [dict(r) for r in rows]
     remaining = sum(1 for t in out if t["state"] in _OPEN_STATES)
