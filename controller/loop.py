@@ -31,6 +31,13 @@ def _park_task_paused(conn, task_id: str, *, basis: str) -> None:
         pass  # already paused/closed under another writer — the step state is the truth
 
 
+def _count_failed_transitions(conn, task_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) FROM ctl_state_transition WHERE task_id=? AND to_state='failed'",
+        (task_id,)).fetchone()
+    return int(row[0]) if row else 0
+
+
 def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: dict):
     """Classify a finished worker against the DB, right after the turn ended.
 
@@ -61,8 +68,22 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
         model.unstick_step(conn, sid)  # release the claim: a ready->running retry must find it dispatchable
         transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
         from . import live_ports
+        err_tail = str(res.get("error") or status)
+        reason_txt = err_tail
+        try:
+            from . import failure_analysis as FA
+            fa = FA.apply(conn, task_id=tid, run_id=run_id,
+                          attempt=_count_failed_transitions(conn, tid) + 1,
+                          task_goal=str(task.get("goal") or ""),
+                          step_summary=f"step {sid}",
+                          error_tail=err_tail)
+            if fa:
+                reason_txt += (f"; анализ ({fa.get('strategy')}): "
+                               f"{str(fa.get('reasoning'))[:300]}")
+        except Exception:  # analyzer must never block the durable failed path
+            pass
         live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
-                                      goal=task["goal"], reason=str(res.get("error") or status))
+                                      goal=task["goal"], reason=reason_txt)
         return {"entry": {"task": tid, "run": run_id, "to": "failed"}, "stop": False}
     return None
 
