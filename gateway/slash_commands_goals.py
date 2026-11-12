@@ -7,7 +7,6 @@ import asyncio
 import datetime as dt
 import json
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +25,24 @@ def _spawn_dream_process(cmd: list[str], log_path, cwd) -> int:
                                 cwd=str(cwd), start_new_session=True)
     return proc.pid
 
+
+def _dream_pid_alive(pid: int) -> bool:
+    """Cross-platform liveness probe.
+
+    POSIX: os.kill(pid, 0) raises only if the process is gone (or access fails).
+    Windows: os.kill() with any signal TERMINATES the process (TerminateProcess),
+    so it must never be used as a probe — psutil.pid_exists is non-destructive.
+    """
+    if pid <= 0:
+        return False
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return True  # cannot probe safely — assume alive, fail closed on the guard
+    try:
+        return bool(psutil.pid_exists(pid))
+    except Exception:
+        return True
 
 def _emit_dream_notice(rec: dict) -> None:
     """Append a scheduled marker so the outer contour stays the single ledger writer."""
@@ -228,10 +245,10 @@ class GatewayGoalCommandsMixin:
             if pid_file.exists():
                 try:
                     old = json.loads(pid_file.read_text(encoding="utf-8"))
-                    os.kill(int(old["pid"]), 0)
-                    return f"[dream] прогон уже идёт (PID {old['pid']}, от {old.get('started','?')}); /dream status."
+                    if _dream_pid_alive(int(old["pid"])):
+                        return f"[dream] прогон уже идёт (PID {old['pid']}, от {old.get('started','?')}); /dream status."
                 except (OSError, ValueError, KeyError):
-                    pass  # stale record — process is gone, allow a new run
+                    pass  # unreadable record — treat as stale, allow a new run
             span = int(rest) if rest.isdigit() and int(rest) > 0 else 0
             log_path = Path.home() / ".hermes" / "logs" / f"dream-run-{dt.datetime.now():%Y%m%d-%H%M%S}.log"
             cmd = [sys.executable, str(script), "--stage", "all", "--span", str(span)]
@@ -259,8 +276,10 @@ class GatewayGoalCommandsMixin:
         if pid_file.exists():
             try:
                 old = json.loads(pid_file.read_text(encoding="utf-8"))
-                os.kill(int(old["pid"]), 0)
-                running = f"\nПрогон: PID {old['pid']} от {old.get('started','?')} (окно {old.get('span')})."
+                if _dream_pid_alive(int(old["pid"])):
+                    running = f"\nПрогон: PID {old['pid']} от {old.get('started','?')} (окно {old.get('span')})."
+                else:
+                    running = "\nАктивного прогона нет."
             except (OSError, ValueError, KeyError):
                 running = "\nАктивного прогона нет."
         tail = "\n".join(f"{e.get('ts','?')} {e.get('kind','?')} {e.get('day','')}" for e in entries)

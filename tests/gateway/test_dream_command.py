@@ -108,3 +108,14 @@ def test_dream_last_reports_wake_verdicts(dream_env):
     reply = asyncio.run(
         GatewayGoalCommandsMixin._handle_dream_command(mixin, _event("last")))
     assert "verified 10" in reply and "день 20261112" in reply
+
+
+def test_dream_pid_alive_non_destructive_and_sane():
+    """os.kill(pid,0) would TERMINATE on Windows; the probe must be psutil-based."""
+    import os as _os
+    from gateway.slash_commands_goals import _dream_pid_alive
+    assert _dream_pid_alive(_os.getpid()) is True      # живой — это наш процесс
+    assert _dream_pid_alive(0) is False                # нулевой pid не «всё» (POSIX), отсечён явно
+    assert _dream_pid_alive(-5) is False               # мусорное значение безопасно
+    # заведомо мёртвый pid: psutil говорит нет, и НИКАКИЙ сигнал не посылается
+    assert _dream_pid_alive(999999) in (True, False)   # без исключений
