@@ -388,11 +388,36 @@ _MEMORY_ROUTING_BLOCK = (
     "out — a wrong fact misleads every future session.\n\n"
 )
 
+# The refine contract (fork-wide): persistence is the exception that must be earned. Without
+# it the reviewer treats "save something" as the success signal and pads both stores (#80932).
+_REFINE_CONTRACT_BLOCK = (
+    "REFINE CONTRACT — responsible consolidation, not chronicle:\n"
+    "Default outcome is NO_CHANGE. 'Nothing to save' after an honest review is a correct "
+    "verdict, not a miss — never pad a review with findings.\n"
+    "A candidate must clear ALL gates before it earns a write:\n"
+    "  1. EVIDENCE — user_stated / observed_tool_result / verified_by_action. An agent's own "
+    "assertion does not confirm itself; a proposed command is not an executed one; one successful "
+    "step does not validate a whole procedure; silence is not agreement; retelling is not "
+    "independent confirmation.\n"
+    "  2. FUTURE-USE — name the concrete future decision this entry changes; 'might be useful' "
+    "is not an answer.\n"
+    "  3. NOVELTY — checked by reading existing memory/skills, not assumed; different wording "
+    "alone is not novelty.\n"
+    "  4. GENERALIZATION — extract the portable rule, not the episode: mechanism + conditions + "
+    "action + verification. Dates, versions, hashes, paths enter the rule body ONLY when they "
+    "change how the rule applies; otherwise replace with functional roles ('the config source "
+    "the process actually loaded') or drop.\n"
+    "  5. SCOPE — the narrowest scope the evidence supports; unknown scope is deferred, never "
+    "defaulted to global.\n\n"
+)
+
 _MEMORY_REVIEW_PROMPT = (
-    "Review the conversation above and consider saving to memory if appropriate.\n\n"
+    "Review the conversation above as REFINE: decide what EARNED a place in memory.\n\n"
     "Memory has " + _MEMORY_ROUTING_BLOCK +
-    "If something stands out, save it once, in the right store, using the memory tool with the "
-    "matching target. If nothing is worth saving, just say 'Nothing to save.' and stop."
+    _REFINE_CONTRACT_BLOCK +
+    "Write at most via the memory tool, one fact per entry, correct store; formulate durable "
+    "rules/conditions, not incident narration. If nothing passes the gates, say 'Nothing to "
+    "save.' and stop — that is a valid verdict."
 )
 
 # Shared shape contract for anything written into a skill. The failure mode this prevents is the
@@ -454,9 +479,9 @@ _DO_NOT_CAPTURE_BLOCK = (
 )
 
 _SKILL_REVIEW_PROMPT = (
-    "Review the conversation above and update the skill library. Be ACTIVE — most sessions produce "
-    "at least one skill update, even if small. A pass that does nothing is a missed learning "
-    "opportunity, not a neutral outcome.\n\n"
+    "Review the conversation above as REFINE against the skill library: decide what EARNED "
+    "persistence — do not fill quotas.\n\n" +
+    _REFINE_CONTRACT_BLOCK +
     "Target shape of the library: CLASS-LEVEL skills, each with a SKILL.md of always-on rules and a "
     "small `references/` set of topical depth. Not a flat list of narrow one-session skills, and "
     "not an umbrella hoarding a references/ file per session. This shapes HOW you update, not "
@@ -527,11 +552,10 @@ _SKILL_REVIEW_PROMPT = (
 )
 
 _COMBINED_REVIEW_PROMPT = (
-    "Review the conversation above and update two things:\n\n"
+    "Review the conversation above as REFINE and update two things:\n\n" +
+    _REFINE_CONTRACT_BLOCK +
     "**Memory**: " + _MEMORY_ROUTING_BLOCK +
-    "**Skills**: how to do this class of task. Be ACTIVE — most sessions produce at least one "
-    "skill update. A pass that does nothing is a missed learning opportunity, not a neutral "
-    "outcome.\n\n"
+    "**Skills**: how to do this class of task.\n\n"
     "Target shape of the skill library: CLASS-LEVEL skills with a SKILL.md of always-on rules and a "
     "small `references/` set of topical depth — not narrow one-session skills, and not an umbrella "
     "hoarding a references/ file per session.\n\n" + _LESSON_LAYER_BLOCK +
