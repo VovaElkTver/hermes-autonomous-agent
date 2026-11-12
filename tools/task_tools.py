@@ -10,7 +10,7 @@ from typing import Any
 
 from tasks_kernel import (
     cancel, create_batch, emit, skip, status,
-    fanout, annotate, add_question, drop_question,
+    fanout, annotate, add_question, drop_question, set_wake_check,
 )
 
 QUEUE_SCHEMA = {
@@ -22,15 +22,19 @@ QUEUE_SCHEMA = {
         "(complete current head, start next), emit (fire a named event that "
         "waiting tasks subscribed to via wait_event), cancel, fanout (N "
         "competing branch proposals + a final JOIN digest row; near-duplicate "
-        "branches are refused), annotate (attach a branch's verdict for the "
+        "annotate (attach a branch's verdict for the "
         "join), add_question / drop_question (open-question register: a task "
-        "with open questions cannot be ack-closed)."),
+        "with open questions cannot be ack-closed), set_check (bind a "
+        "machine validity command: at every delivery the kernel runs it and "
+        "a non-zero exit converts the wake-up into a rework order instead "
+        "of a reportable result)."),
     "input_schema": {
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": [
                 "create_batch", "status", "skip", "emit", "cancel",
-                "fanout", "annotate", "add_question", "drop_question"]},
+                "fanout", "annotate", "add_question", "drop_question",
+                "set_check"]},
             "chat_id": {"type": "string",
                         "description": "Messaging chat bound to the queue."},
             "items": {"type": "array", "items": {
@@ -134,6 +138,12 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
                 return {"ok": False, "error": "drop_question needs task_id and question"}
             qv = int(q) if q.isdigit() else q
             return {"ok": True, "open": drop_question(tid, qv)}
+        if action == "set_check":
+            tid = args.get("task_id") or ""
+            cmd = args.get("text") or ""
+            if not tid or not cmd:
+                return {"ok": False, "error": "set_check needs task_id and text (shell cmd)"}
+            return {"ok": set_wake_check(tid, cmd)}
         return {"ok": False, "error": f"unknown action {action!r}"}
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}

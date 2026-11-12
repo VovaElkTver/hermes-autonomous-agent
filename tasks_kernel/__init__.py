@@ -136,12 +136,27 @@ def _task_line(conn: sqlite3.Connection, task: dict) -> str:
         if j.get("criteria"):
             lines.append(f"критерии выбора: {j['criteria']}")
         lines.append("ack = решение: названная ветка или третье решение.")
-        return "\n".join(lines)
-    if meta.get("branch_of"):
-        return (f"[задача] [ветка {meta.get('branch_no', '?')}"
+        base = "\n".join(lines)
+    elif meta.get("branch_of"):
+        base = (f"[задача] [ветка {meta.get('branch_no', '?')}"
                 f"/{meta.get('branch_total', '?')}] "
                 f"{task['title']}: {task['body']}").strip(": ")
-    return f"[задача] {task['title']}: {task['body']}".strip(": ")
+    else:
+        base = f"[задача] {task['title']}: {task['body']}".strip(": ")
+    # wake-time validity gate (Вл 12.11): the machine, not the agent's mood,
+    # decides whether the data behind the task is fit for its criteria.
+    # INVALID is a rework instruction, never an excuse to ask the owner.
+    rc = _wake_check_rc(meta)
+    if rc is None:
+        return base
+    task["wake_check_ok"] = rc == 0
+    if rc == 0:
+        return f"[данные: OK]\n{base}"
+    return (f"[данные: НЕВАЛИДНЫ (rc={rc})]\n{base}\n"
+            "[гейт] отчёт не прошёл машинную проверку достаточности; критерии "
+            "задачи над ним не исполняются и владельцу не докладываются. "
+            "Следующий шаг: перегенерировать данные (другим способом, если "
+            "тот же даёт ту же пустоту) и перепроверить.")
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
@@ -191,6 +206,18 @@ def deliver_default(task: dict) -> bool:
 
 
 deliver_fn = deliver_default  # overridable seam for tests / in-process adapters
+
+
+def _wake_check_rc(meta: dict) -> int | None:
+    """Run the bound validity command; None when no check is bound."""
+    cmd = meta.get("wake_check")
+    if not cmd:
+        return None
+    try:
+        return subprocess.run(cmd, shell=True, capture_output=True,
+                              timeout=120, check=False).returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return -1
 
 
 def _deliver_and_park(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
@@ -264,6 +291,17 @@ def on_owner_message(chat_id: str, db_path: str | None = None) -> dict | None:
             deliver_fn(task)
             return {"task_id": task["task_id"], "title": task["title"],
                     "refused_open_questions": len(open_q)}
+        # validity gate (Вл 12.11): a bound wake_check that fails blocks the
+        # close exactly like an open question — invalid data yields rework,
+        # never a reportable verdict. One subprocess run: _task_line renders
+        # the verdict into the line and sets wake_check_ok.
+        task = _row_to_dict(head)
+        assert task is not None
+        task["_line"] = _task_line(conn, task)
+        if task.get("wake_check_ok") is False:
+            deliver_fn(task)
+            return {"task_id": task["task_id"], "title": task["title"],
+                    "refused_wake_check": True}
         conn.execute("UPDATE tk_task SET state='done', note=COALESCE(note,''),"
                      " updated_at=? WHERE task_id=?", (time.time(), head["task_id"]))
         nxt = conn.execute(
@@ -495,6 +533,14 @@ def drop_question(task_id: str, q, db_path: str | None = None) -> int:
                      (json.dumps(qs, ensure_ascii=False), time.time(), task_id))
         conn.commit()
         return len(qs)
+
+
+def set_wake_check(task_id: str, cmd: str, db_path: str | None = None) -> bool:
+    """Bind a machine validity check (shell; rc==0 means the data behind the
+    task is sufficient for its criteria) to a task. Runs at EVERY delivery,
+    including event-resume: INVALID turns the wake-up into a rework order."""
+    _merge_note(task_id, {"wake_check": cmd}, db_path)
+    return True
 
 
 def cancel(task_id: str, db_path: str | None = None) -> bool:

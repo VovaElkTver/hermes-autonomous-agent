@@ -164,6 +164,28 @@ INSERT INTO tk_task VALUES ('old1','!room:host',1,'legacy','x','wait_human',
     assert st["tasks"][0]["state"] == tk.DONE
 
 
+# ---------------------------------------------------------------- wake validity
+
+def test_wake_check_valid_stamps_ok(db, lines):
+    ids = tk.create_batch(CHAT, [{"title": "вердикт", "body": "коммитить при 0"}], db_path=db)
+    tk.set_wake_check(ids[0], "true", db_path=db)
+    tk.start(CHAT, db_path=db)
+    assert lines[0].startswith("[данные: OK]")
+
+
+def test_wake_check_invalid_becomes_rework_order(db, lines):
+    ids = tk.create_batch(CHAT, [{"title": "вердикт", "body": "тело"}], db_path=db)
+    tk.set_wake_check(ids[0], "test -f /nonexistent-zz-1112", db_path=db)
+    tk.start(CHAT, db_path=db)
+    assert "НЕВАЛИДНЫ" in lines[0] and "перегенерировать" in lines[0]
+    # the owner ack cannot close an invalid-data task into a verdict: it is
+    # re-delivered after re-checking (here: still invalid → still not done)
+    r = tk.on_owner_message(CHAT, db_path=db)
+    assert r["title"] == "вердикт"
+    st = tk.status(CHAT, db_path=db)
+    assert st["tasks"][0]["state"] == tk.WAIT_HUMAN   # stays parked on rework
+
+
 # ------------------------------------------------------------------ tool layer
 
 def test_tool_actions_fanout_and_questions(tmp_path, monkeypatch, lines, db):
