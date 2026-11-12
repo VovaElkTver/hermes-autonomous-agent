@@ -3,13 +3,39 @@ Bound onto ``GatewayRunner`` through ``GatewaySlashCommandsMixin``."""
 
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
+import json
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from agent.i18n import t
 from gateway.platforms.event import MessageEvent, MessageType
 
 # Log-record parity with gateway/run.py and the origin module.
 logger = logging.getLogger("gateway.run")
+
+
+def _spawn_dream_process(cmd: list[str], log_path, cwd) -> int:
+    """Blocking spawn of the detached dream0 run; executed via asyncio.to_thread."""
+    with open(log_path, "ab") as log_f:
+        proc = subprocess.Popen(cmd, stdout=log_f, stderr=log_f,
+                                cwd=str(cwd), start_new_session=True)
+    return proc.pid
+
+
+def _emit_dream_notice(rec: dict) -> None:
+    """Append a scheduled marker so the outer contour stays the single ledger writer."""
+    try:
+        ledger = Path.home() / "projects" / "outer-contour" / "dream0" / "data" / "dream-ledger.jsonl"
+        with open(ledger, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": rec["started"], "kind": "scheduled_by_command",
+                                 "pid": rec["pid"], "span": rec["span"]}) + "\n")
+    except OSError:
+        logger.debug("dream: ledger notice failed", exc_info=True)
 
 
 def _quiet_bool(fn) -> bool:
@@ -172,6 +198,73 @@ class GatewayGoalCommandsMixin:
         if agent is None:
             return quick_key, None, t(f"gateway.{verb}.nothing_yet")
         return quick_key, agent, None
+
+    async def _handle_dream_command(self, event: MessageEvent) -> str:
+        """Handle /dream — thin gateway adapter to the outer dream0 contour.
+
+        The contour lives OUTSIDE the agent repo (outer-contour, DESIGN caveat #0); this
+        command only spawns its CLI and reads its artifacts: ledger + need2write.md.
+        """
+        args = (event.get_command_args() or "").strip()
+        verb, _, rest = args.partition(" ")
+        verb = verb.strip().lower() or "status"
+        rest = rest.strip()
+
+        ledger = Path.home() / "projects" / "outer-contour" / "dream0" / "data" / "dream-ledger.jsonl"
+        script = Path.home() / "projects" / "outer-contour" / "dream0" / "dream0.py"
+        pid_file = Path.home() / ".hermes" / "cache" / "scratch" / "dream_run.json"
+
+        def _tail_ledger(n=6):
+            try:
+                lines = ledger.read_text(encoding="utf-8").strip().splitlines()
+                return [json.loads(l) for l in lines[-n:] if l.strip()]
+            except (OSError, ValueError):
+                return []
+
+        if verb in ("go", "иди"):
+            if not script.exists():
+                return "dream0: скрипт контура не найден — /dream недоступен."
+            # one live run at a time; a stale pid (no such process) does not block a rerun
+            if pid_file.exists():
+                try:
+                    old = json.loads(pid_file.read_text(encoding="utf-8"))
+                    os.kill(int(old["pid"]), 0)
+                    return f"[dream] прогон уже идёт (PID {old['pid']}, от {old.get('started','?')}); /dream status."
+                except (OSError, ValueError, KeyError):
+                    pass  # stale record — process is gone, allow a new run
+            span = int(rest) if rest.isdigit() and int(rest) > 0 else 0
+            log_path = Path.home() / ".hermes" / "logs" / f"dream-run-{dt.datetime.now():%Y%m%d-%H%M%S}.log"
+            cmd = [sys.executable, str(script), "--stage", "all", "--span", str(span)]
+            proc_pid = await asyncio.to_thread(_spawn_dream_process, cmd, log_path, script.parent)
+            run_rec = {"pid": proc_pid, "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "span": span or "rand1-5", "log": str(log_path)}
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(json.dumps(run_rec), encoding="utf-8")
+            await asyncio.to_thread(_emit_dream_notice, run_rec)
+            span_txt = run_rec["span"]
+            return (f"[dream] сон запущен (PID {proc_pid}, окно {span_txt} сут., "
+                    f"log: {log_path.name}); вердикты появятся в need2write после wake.")
+        if verb == "last":
+            woken = [e for e in _tail_ledger(20) if e.get("kind") == "woke"]
+            if not woken:
+                return "[dream] завершённых проб пока нет в леджере."
+            e = woken[-1]
+            return (f"[dream] wake {e.get('ts', '?')} день {e.get('day')}: "
+                    f"verified {e.get('verified', '?')} / refuted {e.get('refuted', '?')} / "
+                    f"probe_error {e.get('probe_error', '?')}, доставлено карточек: {e.get('cards', '?')} "
+                    f"(всего {e.get('cards_total', '?')}).")
+        # default: status
+        entries = _tail_ledger(8)
+        running = ""
+        if pid_file.exists():
+            try:
+                old = json.loads(pid_file.read_text(encoding="utf-8"))
+                os.kill(int(old["pid"]), 0)
+                running = f"\nПрогон: PID {old['pid']} от {old.get('started','?')} (окно {old.get('span')})."
+            except (OSError, ValueError, KeyError):
+                running = "\nАктивного прогона нет."
+        tail = "\n".join(f"{e.get('ts','?')} {e.get('kind','?')} {e.get('day','')}" for e in entries)
+        return f"[dream] леджер (последние события):{running}\n{tail}"
 
     async def _handle_refine_command(self, event: MessageEvent) -> str:
         """Handle /refine — run the memory/skill review fork on demand, in a daemon thread against a

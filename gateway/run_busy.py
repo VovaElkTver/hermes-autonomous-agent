@@ -1059,7 +1059,7 @@ class GatewayBusySessionMixin:
         "approvals", "model", "codex-runtime", "personality", "save", "retry",
         "sethome", "compress", "usage", "topup", "insights", "reload-mcp", "reload-skills",
         "bundles", "debug", "title", "resume", "sessions", "branch", "fork", "forkb", "join", "return", "return0", "leave", "rollback", "diff", "goal",
-        "loop", "refine", "review", "voice", "curator",
+        "loop", "refine", "review", "voice", "curator", "dream",
     )
 
     def _command_handler_table(self, names) -> dict[str, Any]:
