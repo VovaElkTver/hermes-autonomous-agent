@@ -7,7 +7,7 @@ so a plain channel reply continues the job via the shared-channel session
 ``(slack, channel_id, None)``. See specs/cron-inchannel-continuable decisions
 D1/D4/D5/D6.
 
-- ``_cron_continuable_surface`` resolves the key: default ``"thread"``, coerces
+- ``_continuable_surface_mode`` resolves the key: default ``"thread"``, coerces
   any unrecognised value to ``"thread"`` (fail safe), only ``"in_channel"``
   opts in.
 - ``supports_inchannel_continuable`` is True on Slack (it has both a flat-reply
@@ -71,6 +71,6 @@ def _make_adapter(extra):
 def test_surface_unrecognised_value_coerces_to_thread():
     """Fail safe: any value that isn't 'in_channel' resolves to 'thread'."""
     adapter = _make_adapter({"cron_continuable_surface": "bogus"})
-    assert adapter._cron_continuable_surface() == "thread"
+    assert adapter._continuable_surface_mode() == "thread"
 
 # --- pairing warning (D5: warn, not hard-require) --------------------------

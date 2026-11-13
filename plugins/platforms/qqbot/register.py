@@ -27,7 +27,7 @@ def is_connected(pconfig) -> bool:
 
 async def standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None,
                           force_document=False, caption=None):
-    """Late-import the REST sender so cron delivery works without a live gateway process."""
+    """Late-import the REST sender so scheduled delivery works without a live gateway process."""
     from .send import send_qqbot
     return await send_qqbot(
         pconfig, chat_id, message, media_files=media_files, caption=caption,
@@ -114,7 +114,7 @@ def setup_qqbot() -> None:
     if user_openid:
         offer_home_channel("QQBOT_HOME_CHANNEL", user_openid, "your QQ user ID")
     else:
-        home_channel = prompt("  Home channel OpenID (for cron/notifications, or empty)", password=False)
+        home_channel = prompt("  Home channel OpenID (for scheduled deliveries/notifications, or empty)", password=False)
         if home_channel:
             save_env_value("QQBOT_HOME_CHANNEL", home_channel.strip())
             print_success(f"  Home channel set to {home_channel.strip()}")

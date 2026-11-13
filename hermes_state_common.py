@@ -36,7 +36,7 @@ def routed_sessions_setting(key: str, env_var: str) -> Any:
     """``sessions.<key>`` for the profile whose state.db this process is touching.
 
     ``gateway/run.py`` bridges the LAUNCH profile's ``sessions.*`` into ``env_var`` (the cross-process
-    carrier CLI/cron children read). Under a multiplexer a routed turn runs with a HERMES_HOME override
+    carrier CLI/scheduled-task children read). Under a multiplexer a routed turn runs with a HERMES_HOME override
     and that env slot holds the default profile's value, so a served profile with different
     ``sessions.*`` settings must read its own config.yaml. Unscoped: the env bridge, as before.
     Returns ``None`` when neither source sets the key.
@@ -402,7 +402,7 @@ def _source_match_clause(sources, local_created_sources=None) -> tuple[str, list
 
 
 # Ids per ``IN (?,...)`` list: SQLite caps bound parameters at SQLITE_MAX_VARIABLE_NUMBER (999 on builds
-# < 3.32, 32766 after); a bulk prune of a cron-heavy store bound tens of thousands of ids into one list and
+# < 3.32, 32766 after); a bulk prune of a schedule-heavy store bound tens of thousands of ids into one list and
 # died with "too many SQL variables". Every IN-list over session ids goes through ``_id_chunks``.
 _SQL_IN_CHUNK = 900
 
@@ -613,12 +613,12 @@ CREATE TABLE IF NOT EXISTS session_admissions (
 );
 CREATE INDEX IF NOT EXISTS session_admissions_pending
     ON session_admissions(target_session_id, status, seq);
--- Cron run history finds a job's unified-runtime runs by the scheduler principal's request ids
+-- Scheduled-run history matches a job's unified-runtime runs by the scheduler principal's request ids
 -- (``cron:<job>:<execution>``); without this a lookup walked
--- every cron admission of every job. Partial: interactive turns, the bulk of admissions, pay
+-- every scheduled admission of every job. Partial: interactive turns, the bulk of admissions, pay
 -- nothing for it. The constant leading column gives the planner equality + range over a covering
 -- index, so it beats the UNIQUE autoindex's bare principal_id prefix even without ANALYZE stats.
--- The WHERE is built from CRON_PRINCIPAL_ID, the literal the run queries inline, so they cannot drift.
+-- The WHERE is built from the scheduler-principal constant, the literal the run queries inline, so they cannot drift.
 CREATE INDEX IF NOT EXISTS idx_session_admissions_cron_request
     ON session_admissions(principal_id, request_id, target_session_id) WHERE principal_id = '""" + CRON_PRINCIPAL_ID + """';
 CREATE TABLE IF NOT EXISTS worker_executions (
@@ -1480,11 +1480,11 @@ END;
 #
 # The trigram index is the most expensive index in state.db (~2.6x the size
 # of the text it covers). Tool output (~90% of message bytes, machine noise)
-# and cron transcripts are excluded: the index reads through
+# and scheduled-task transcripts are excluded: the index reads through
 # ``messages_fts_trigram_src``, a view that skips both classes. They stay
 # fully stored in ``messages`` and searchable via the standard
 # ``messages_fts`` index; they just don't get trigram (CJK substring)
-# treatment. ``search_messages`` routes explicit tool/cron CJK searches to
+# treatment. ``search_messages`` routes explicit tool/scheduled-source CJK searches to
 # LIKE for the same reason. Structured ``tool_calls`` JSON likewise stays
 # searchable through ``messages_fts``; excluding it here avoids indexing
 # repetitive JSON syntax as trigrams (FTS_STORAGE_VERSION 2).

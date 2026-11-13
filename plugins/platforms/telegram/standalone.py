@@ -1,4 +1,4 @@
-"""Out-of-process Telegram send (``hermes send``, the ``send_message`` tool, standalone cron delivery):
+"""Out-of-process Telegram send (``hermes send``, the ``send_message`` tool, standalone scheduled delivery):
 a one-shot Bot API client built like the gateway adapter's, with the adapter's formatting, chunking,
 notification mode, rich-message fast-path, albums and fallbacks. Wired as the plugin's
 ``standalone_sender_fn``; core reaches it only through the platform registry.
@@ -307,11 +307,11 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
     ``rich_messages``), under the adapter's push-notification mode (``notify`` rings regardless);
     parse failures fall back to plain text."""
     if str(thread_id or "").strip() and not str(thread_id).strip().lstrip("-").isdigit():
-        # ``<chat>:<topic name>`` parses for every caller, but only the live gateway's cron router
+        # ``<chat>:<topic name>`` parses for every caller, but only the live gateway's scheduled-router
         # resolves a name (ensure_dm_topic): the Bot API has no topic lookup by name (#80483).
         return _error(f"Telegram topic '{thread_id}' is a name, not a thread id: a direct send cannot "
                       "resolve named topics. Use telegram:<chat_id>:<numeric thread id>, or deliver "
-                      "through a cron job while the gateway is running.")
+                      "through a scheduled job while the gateway is running.")
     try:
         from plugins.platforms.telegram.telegram_outbound import (
             is_visually_empty, notification_kwargs, resolve_notifications_mode, send_album_standalone,

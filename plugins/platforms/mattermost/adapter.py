@@ -4,7 +4,7 @@ Environment variables:
     MATTERMOST_URL              Server URL (e.g. https://mm.example.com)
     MATTERMOST_TOKEN            Bot token or personal-access token
     MATTERMOST_ALLOWED_USERS    Comma-separated user IDs
-    MATTERMOST_HOME_CHANNEL     Channel ID for cron/notification delivery
+    MATTERMOST_HOME_CHANNEL     Channel ID for scheduled/notification delivery
 """
 
 from __future__ import annotations
@@ -604,11 +604,11 @@ class MattermostAdapter(BasePlatformAdapter):
             channel_prompt=resolve_channel_prompt(self.config.extra, channel_id, None)))
 
 
-# --- Plugin standalone-send (out-of-process cron delivery via Mattermost REST) ---
+# --- Plugin standalone-send (out-of-process scheduled delivery via Mattermost REST) ---
 
 async def _standalone_send(pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
                            media_files: Optional[list] = None, force_document: bool = False) -> dict[str, Any]:
-    """Send via the Mattermost v4 REST API without a live gateway adapter (out-of-process cron).
+    """Send via the Mattermost v4 REST API without a live gateway adapter (out-of-process scheduled send).
 
     Token/URL: ``pconfig`` with env fallback. ``media_files`` upload via ``POST /files`` and attach by
     file_id; ``thread_id`` becomes ``root_id``. ``force_document`` is signature parity only (unused).
@@ -703,7 +703,7 @@ def interactive_setup() -> None:
     else:
         print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
     print()
-    info("📬 Home Channel: where Hermes delivers cron job results and notifications.",
+    info("📬 Home Channel: where Hermes delivers scheduled job results and notifications.",
          "   To get a channel ID: click channel name → View Info → copy the ID",
          "   You can also set this later by typing /set-home in a Mattermost channel.")
     home_channel = prompt("Home channel ID (leave empty to set later with /set-home)").strip()
@@ -755,7 +755,7 @@ def register(ctx) -> None:
         install_hint="pip install aiohttp", setup_fn=interactive_setup,
         apply_yaml_config_fn=_apply_yaml_config,  # YAML→env bridge (see _YAML_BRIDGE)
         cron_deliver_env_var="MATTERMOST_HOME_CHANNEL",
-        standalone_sender_fn=_standalone_send,  # out-of-process cron; without it `deliver=mattermost` fails
+        standalone_sender_fn=_standalone_send,  # out-of-process scheduled send; without it `deliver=mattermost` fails
         max_message_length=MAX_POST_LENGTH, emoji="💬", allow_update_command=True,
         platform_hint=_PLATFORM_HINT,
         display_tier="medium",

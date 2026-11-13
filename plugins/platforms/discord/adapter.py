@@ -5317,7 +5317,7 @@ class DiscordAdapter(DiscordAuthorizationMixin, DiscordMediaMixin, DiscordThread
     async def _resolve_channel(self, channel_id: Any) -> Any:
         """Cached ``get_channel`` first, REST ``fetch_channel`` on miss (raises on API error).
 
-        Every outbound target funnels through here (home channel, cron ``discord:<target>``,
+        Every outbound target funnels through here (home channel, scheduled ``discord:<target>`` deliveries,
         thread metadata), so a pasted channel link is accepted at this one boundary instead of
         dying in ``int()`` as a generic send failure."""
         if isinstance(channel_id, str):
@@ -6872,7 +6872,7 @@ if DISCORD_AVAILABLE:
 
 # ── Standalone (out-of-process) sender ────────────────────────────────────────
 # Used by ``tools/send_message_tool._send_via_adapter`` when no live DiscordAdapter is in this
-# process (e.g. standalone ``hermes cron``); same forum/thread/multipart logic via Discord REST.
+# process (e.g. detached one-shot sends); same forum/thread/multipart logic via Discord REST.
 
 # Process-local channel-type probe cache: avoids re-probing every send when the directory cache misses.
 _DISCORD_CHANNEL_TYPE_PROBE_CACHE: dict[str, bool] = {}
@@ -7300,7 +7300,7 @@ def register(ctx) -> None:
         # block that used to live in ``gateway/config.py``. Hook contract: #24836.
         apply_yaml_config_fn=_apply_yaml_config,
         cron_deliver_env_var="DISCORD_HOME_CHANNEL",
-        # Out-of-process cron delivery via REST, else ``deliver=discord`` jobs fail with "No live adapter".
+        # Out-of-process scheduled delivery via REST, else ``deliver=discord`` jobs fail with "No live adapter".
         standalone_sender_fn=_standalone_send,
         max_message_length=2000,
         emoji="🎮",

@@ -1,4 +1,4 @@
-"""Out-of-process Signal send (cron / ``hermes send`` / send_message without a live gateway): raw
+"""Out-of-process Signal send (scheduled sends / ``hermes send`` / send_message without a live gateway): raw
 signal-cli JSON-RPC with Signal formatting, attachment batching and the process-wide rate-limit
 scheduler shared with the gateway adapter. Wired as the plugin's ``standalone_sender_fn``."""
 

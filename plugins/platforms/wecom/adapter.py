@@ -809,7 +809,7 @@ def interactive_setup() -> None:
             save_env_value(key, value)
         for level, message in messages:
             {"warning": print_warning, "success": print_success, "info": print_info}[level](message)
-    if home := prompt("Home chat ID (optional, for cron/notifications)", password=False).strip():
+    if home := prompt("Home chat ID (optional, for scheduled deliveries/notifications)", password=False).strip():
         save_env_value("WECOM_HOME_CHANNEL", home)
         print_success(f"Home channel set to {home}")
     elif remove_env_value("WECOM_HOME_CHANNEL"):

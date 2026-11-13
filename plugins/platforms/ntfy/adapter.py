@@ -326,7 +326,7 @@ async def _standalone_send(
     pconfig, chat_id: str, message: str, *,
     thread_id: Optional[str] = None, media_files: Optional[list[str]] = None, force_document: bool = False,
 ) -> dict[str, Any]:
-    """Out-of-process publish for cron / send_message_tool when no gateway adapter is live.
+    """Out-of-process publish for scheduled sends / send_message_tool when no gateway adapter is live.
 
     ``thread_id``/``media_files`` are signature parity only (ntfy has no thread
     or attachment primitive). Markdown is honored if ``NTFY_MARKDOWN`` is set
@@ -367,7 +367,7 @@ def register(ctx) -> None:
         required_env=["NTFY_TOPIC"], install_hint="pip install httpx   # already a Hermes dependency",
         env_enablement_fn=_env_enablement,  # env-only setups show in `gateway status`
         cron_deliver_env_var="NTFY_HOME_CHANNEL",
-        standalone_sender_fn=_standalone_send,  # out-of-process cron delivery
+        standalone_sender_fn=_standalone_send,  # out-of-process scheduled delivery
         allowed_users_env="NTFY_ALLOWED_USERS", allow_all_env="NTFY_ALLOW_ALL_USERS",
         max_message_length=MAX_MESSAGE_LENGTH, emoji="🔔",
         pii_safe=True,  # topic names only — no phone numbers / emails to redact

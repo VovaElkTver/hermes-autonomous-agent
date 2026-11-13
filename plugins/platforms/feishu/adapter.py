@@ -4347,7 +4347,7 @@ _MIGRATION_AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
 
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
-    """standalone_sender_fn: out-of-process delivery (cron without gateway) via a transient adapter."""
+    """standalone_sender_fn: out-of-process delivery (one-shot sends without a gateway) via a transient adapter."""
     if not await asyncio.to_thread(_load_lark_oapi):
         return send_error("Feishu dependencies not installed. Run `hermes setup` to install Feishu support.")
     try:
@@ -4485,8 +4485,8 @@ def interactive_setup() -> None:
     save_env_value("FEISHU_GROUP_POLICY", "open" if group_idx == 0 else "disabled")
     print_info("Group chats enabled (bot must be @mentioned)." if group_idx == 0 else "Group chats disabled.")
 
-    print_info("Leave blank to clear a previously saved home channel (cron / notifications).")
-    home_channel = prompt("Home chat ID (optional, for cron/notifications)", password=False).strip()
+    print_info("Leave blank to clear a previously saved home channel (scheduled deliveries / notifications).")
+    home_channel = prompt("Home chat ID (optional, for scheduled deliveries/notifications)", password=False).strip()
     if home_channel:
         save_env_value("FEISHU_HOME_CHANNEL", home_channel)
         print_success(f"Home channel set to {home_channel}")

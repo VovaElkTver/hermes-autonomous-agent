@@ -103,7 +103,7 @@ def deliver(line: str, target: str, *, hermes_bin: str = "hermes",
 
 
 def render_gates_snapshot(conn) -> dict:
-    """The deterministic gate snapshot (same rules the cron tick used):
+    """The deterministic gate snapshot (same rules the periodic tick used):
     needs_human tasks + tasks whose latest contract revision is unagreed while
     the task is draft/ready. Returns {task_id: reason} — the digest over it is
     what dedupes the human-gates alert."""

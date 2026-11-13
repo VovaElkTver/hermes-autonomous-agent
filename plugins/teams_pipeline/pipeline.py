@@ -314,7 +314,7 @@ class TeamsMeetingPipeline:
         temp_root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=str(temp_root), prefix="teams-recording-") as tmp_dir:
             # display_name is organizer-controlled Graph data: keep only the basename so a crafted
-            # "../../etc/cron.d/evil" cannot escape tmp_dir. Path(...).name leaves "." / ".." / ""
+            # "../../etc/init.d/evil" cannot escape tmp_dir. Path(...).name leaves "." / ".." / ""
             # unchanged (joining "tmp/.." resolves to the parent), so reject those explicitly.
             fallback_name = f"{recording.artifact_id}.mp4"
             recording_name = Path(recording.display_name or fallback_name).name

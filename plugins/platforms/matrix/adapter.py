@@ -7,7 +7,7 @@ Env vars (config.yaml ``matrix:`` keys alias several — env wins):
   MATRIX_DEVICE_ID (stable E2EE device), MATRIX_RECOVERY_KEY (cross-signing after key rotation),
   MATRIX_RECOVERY_KEY_OUTPUT_FILE (one-time 0600 write of a bootstrapped key), MATRIX_PROXY;
   MATRIX_ALLOWED_USERS, MATRIX_ALLOWED_ROOMS (whitelist; DMs exempt), MATRIX_IGNORE_USER_PATTERNS
-  (regexes for bridge ghosts), MATRIX_HOME_ROOM (cron delivery), MATRIX_REACTIONS (default true);
+  (regexes for bridge ghosts), MATRIX_HOME_ROOM (scheduled deliveries), MATRIX_REACTIONS (default true);
   MATRIX_REQUIRE_MENTION (default true), MATRIX_THREAD_REQUIRE_MENTION, MATRIX_FREE_RESPONSE_ROOMS,
   MATRIX_PROCESS_NOTICES, MATRIX_ALLOW_ROOM_MENTIONS, MATRIX_ALLOW_PUBLIC_ROOMS (all default false);
   MATRIX_AUTO_THREAD (default true), MATRIX_DM_AUTO_THREAD, MATRIX_DM_MENTION_THREADS,
@@ -1397,7 +1397,7 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         sends off a supplied ``thread_id``. ``None`` when disconnected or the seed send failed.
 
         In-thread replies keep the ROOM's chat_type (``dm``/``group``) in the session key — the
-        handoff watcher and the cron seeder mirror that shape rather than the shared ``thread`` slot."""
+        handoff watcher and the scheduled-job seeder mirror that shape rather than the shared ``thread`` slot."""
         if self._client is None:
             return None
         result = await self.send(parent_chat_id, (name or "").strip() or t("platform.matrix.handoff.default_name"))
@@ -3438,7 +3438,7 @@ def _matrix_describe_scope(source, session_key: str, *, scope=None):
 
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
-    """standalone_sender_fn: out-of-process delivery via the Client-Server API (cron without gateway)."""
+    """standalone_sender_fn: out-of-process delivery via the Client-Server API (send without a co-resident gateway)."""
     extra = getattr(pconfig, "extra", {}) or {}
     try:
         import aiohttp
@@ -3453,7 +3453,7 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
             return send_error("Matrix not configured (MATRIX_HOMESERVER, MATRIX_ACCESS_TOKEN required)")
         from urllib.parse import quote
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        # asyncio.wait_for, not aiohttp.ClientTimeout: cron invokes this via
+        # asyncio.wait_for, not aiohttp.ClientTimeout: scheduled sends invoke this via
         # run_coroutine_threadsafe ("Timeout context manager should be used inside a task").
         async with aiohttp.ClientSession() as session:
             async def _do_send(payload):
@@ -3546,10 +3546,10 @@ def interactive_setup() -> None:
             print_success("Matrix allowlist configured")
         else:
             print_info("⚠️  No allowlist set - anyone who can message the bot can use it!")
-        for line in ("📬 Home Room: where Hermes delivers cron job results and notifications.",
+        for line in ("📬 Home Room: where Hermes delivers scheduled job results and notifications.",
                      "   Room IDs look like !abc123:server (shown in Element room settings)",
                      "   You can also set this later by typing /set-home in a Matrix room.",
-                     "Leave blank to clear a previously saved home room (cron / notifications)."):
+                     "Leave blank to clear a previously saved home room (scheduled deliveries / notifications)."):
             print_info(line)
         home_room = prompt("Home room ID (leave empty to set later with /set-home)").strip()
         if home_room:

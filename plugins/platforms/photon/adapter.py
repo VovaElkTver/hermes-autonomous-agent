@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SIDECAR_PORT = 8789
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 8000  # iMessage caps practical size at ~16 KB; conservative, matches BlueBubbles
-# Out-of-process senders (cron, `hermes send`) need the live sidecar's port + spawn-time
+# Out-of-process senders (scheduled sends, `hermes send`) need the live sidecar's port + spawn-time
 # token; persisted once /healthz passes, removed on every stop / failed-start path.
 # --------------------------------------------------------------------------- Sidecar runtime record The
 # gateway persists this record once the sidecar passes its /healthz readiness check, and removes it on every
@@ -1100,7 +1100,7 @@ class PhotonAdapter(BasePlatformAdapter):
                         f"Photon sidecar exited with code {self._sidecar_proc.returncode} before becoming ready")
                 try:
                     resp = await client.post(self._sidecar_url("/healthz"), headers=self._sidecar_headers())
-                    if resp.status_code == 200:  # let out-of-process senders (cron) reach this sidecar
+                    if resp.status_code == 200:  # let out-of-process senders reach this sidecar
                         _write_runtime_record(self._sidecar_port, self._sidecar_token, self._sidecar_proc.pid)
                         return
                 except httpx.RequestError as e:
@@ -1536,7 +1536,7 @@ class PhotonAdapter(BasePlatformAdapter):
                                        kind: str = "attachment") -> SendResult:
         """POST a local file to ``/send-attachment``. ``kind="voice"`` sends audio as a voice
         note (downgrades to a plain audio attachment where unsupported)."""
-        safe_path = self.validate_media_delivery_path(str(path))  # send_*_file / cron may pass arbitrary strings
+        safe_path = self.validate_media_delivery_path(str(path))  # send_*_file / scheduled sends may pass arbitrary strings
         if not safe_path:
             return SendResult(success=False, error=f"unsafe or missing attachment path: {path}")
         body = _attachment_body(
@@ -1608,8 +1608,8 @@ def _cache_inbound_attachment(content: dict[str, Any], name: str, mime: str, *,
         return None
 
 
-# -- Standalone (out-of-process) send for cron deliveries when the gateway is not
-# co-resident. Reuses a live sidecar (cron processes cannot spawn one). -----------
+# -- Standalone (out-of-process) send for scheduled deliveries when the gateway is not
+# co-resident. Reuses a live sidecar (detached senders cannot spawn one). -----------
 
 def _standalone_error(resp: Any) -> dict[str, Any]:
     """Structured error dict for a failed standalone call (mirrors
