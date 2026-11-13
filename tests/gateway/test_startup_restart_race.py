@@ -179,9 +179,9 @@ def _patch_aborted_startup(monkeypatch, runner_cls):
 
 
 @pytest.mark.asyncio
-async def test_start_gateway_does_not_start_cron_after_aborted_startup(tmp_path, monkeypatch):
+async def test_start_gateway_does_not_start_periodic_threads_after_aborted_startup(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    cron_started = False
+    periodic_started = False
     export_shutdown_calls = 0
 
     class ExportRuntime:
@@ -217,19 +217,19 @@ async def test_start_gateway_does_not_start_cron_after_aborted_startup(tmp_path,
             self.session_store.close_all_db_handles()
             self._session_db.close()
 
-    def fail_if_cron_starts(*args, **kwargs):
-        nonlocal cron_started
-        cron_started = True
+    def fail_if_periodic_starts(*args, **kwargs):
+        nonlocal periodic_started
+        periodic_started = True
 
     _patch_aborted_startup(monkeypatch, AbortedStartupRunner)
-    monkeypatch.setattr("gateway.run._start_cron_ticker", fail_if_cron_starts)
+    monkeypatch.setattr("gateway.run._start_gateway_periodic_threads", fail_if_periodic_starts)
     monkeypatch.setattr("tools.mcp_tool_lifecycle.shutdown_mcp_servers", lambda: None)
 
     with pytest.raises(SystemExit) as exc:
         await gateway_run.start_gateway(config=GatewayConfig(), replace=False, verbosity=None)
 
     assert exc.value.code == GATEWAY_SERVICE_RESTART_EXIT_CODE
-    assert cron_started is False
+    assert periodic_started is False
     assert export_shutdown_calls == 1
 
 
@@ -239,7 +239,7 @@ async def test_start_gateway_preserves_service_restart_fallback_after_aborted_st
 ):
     """A legacy service restart without an explicit exit code still exits with EX_TEMPFAIL."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    cron_started = False
+    periodic_started = False
 
     class AbortedStartupRunner:
         def __init__(self, config):
@@ -270,12 +270,12 @@ async def test_start_gateway_preserves_service_restart_fallback_after_aborted_st
             self.session_store.close_all_db_handles()
             self._session_db.close()
 
-    def fail_if_cron_starts(*args, **kwargs):
-        nonlocal cron_started
-        cron_started = True
+    def fail_if_periodic_starts(*args, **kwargs):
+        nonlocal periodic_started
+        periodic_started = True
 
     _patch_aborted_startup(monkeypatch, AbortedStartupRunner)
-    monkeypatch.setattr("gateway.run._start_cron_ticker", fail_if_cron_starts)
+    monkeypatch.setattr("gateway.run._start_gateway_periodic_threads", fail_if_periodic_starts)
     monkeypatch.setattr("tools.mcp_tool_lifecycle.shutdown_mcp_servers", lambda: None)
 
     with pytest.raises(SystemExit) as exc:
@@ -284,7 +284,7 @@ async def test_start_gateway_preserves_service_restart_fallback_after_aborted_st
         )
 
     assert exc.value.code == GATEWAY_SERVICE_RESTART_EXIT_CODE
-    assert cron_started is False
+    assert periodic_started is False
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_start_gateway_classifies_startup_signal_exit(
     """A startup SIGTERM is restartable unless a planned-stop marker classified it as intentional."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     signal_state = None
-    cron_started = False
+    periodic_started = False
 
     class AbortedStartupRunner:
         def __init__(self, config):
@@ -337,15 +337,15 @@ async def test_start_gateway_classifies_startup_signal_exit(
         signal_state = state
         return lambda received_signal=None: None
 
-    def fail_if_cron_starts(*args, **kwargs):
-        nonlocal cron_started
-        cron_started = True
+    def fail_if_periodic_starts(*args, **kwargs):
+        nonlocal periodic_started
+        periodic_started = True
 
     _patch_aborted_startup(monkeypatch, AbortedStartupRunner)
     monkeypatch.setattr(
         "gateway.run_bootstrap._start_gateway_make_shutdown_signal_handler", capture_signal_state
     )
-    monkeypatch.setattr("gateway.run._start_cron_ticker", fail_if_cron_starts)
+    monkeypatch.setattr("gateway.run._start_gateway_periodic_threads", fail_if_periodic_starts)
     monkeypatch.setattr("tools.mcp_tool_lifecycle.shutdown_mcp_servers", lambda: None)
 
     result = await gateway_run.start_gateway(
@@ -353,18 +353,19 @@ async def test_start_gateway_classifies_startup_signal_exit(
     )
 
     assert result is expected_success
-    assert cron_started is False
+    assert periodic_started is False
 
 
 @pytest.mark.asyncio
-async def test_failure_exit_still_stops_cron_housekeeping_and_mcp(monkeypatch):
+async def test_failure_exit_still_stops_background_and_mcp(monkeypatch):
     """``should_exit_with_failure`` used to return before the cooperative teardown, leaking the
-    cron ticker / housekeeping threads and open MCP connections for embedded callers (#12175)."""
+    housekeeping thread and open MCP connections for embedded callers (#12175)."""
     import threading
 
     stopped = []
-    cron_stop = threading.Event()
-    threads = [threading.Thread(target=cron_stop.wait, name=n, daemon=True) for n in ("cron", "housekeeping")]
+    periodic_stop = threading.Event()
+    housekeeping_thread = threading.Thread(target=periodic_stop.wait, name="housekeeping", daemon=True)
+    threads = [housekeeping_thread]
     for thread in threads:
         thread.start()
     watcher_stop = threading.Event()
@@ -375,17 +376,16 @@ async def test_failure_exit_still_stops_cron_housekeeping_and_mcp(monkeypatch):
         stopped.append("mcp")
 
     monkeypatch.setattr(gateway_run, "_shutdown_mcp_servers_nonblocking", fake_mcp_shutdown)
-    monkeypatch.setattr(gateway_run, "_stop_cron_provider", lambda provider: stopped.append("provider"))
     monkeypatch.setattr("hermes_cli.nous_auth_keepalive.stop_nous_auth_keepalive", lambda: None)
     runner = MagicMock(should_exit_with_failure=True, exit_reason="boom", exit_code=None)
 
     from gateway.run_bootstrap import _start_gateway_shutdown_tail
     result = await _start_gateway_shutdown_tail(
-        runner, None, cron_stop, object(), threads[0], threads[1], watcher_stop, watcher, [False])
+        runner, None, periodic_stop, housekeeping_thread, watcher_stop, watcher, [False])
 
     assert result is False
-    assert cron_stop.is_set() and watcher_stop.is_set()
-    assert stopped == ["provider", "mcp"]
+    assert periodic_stop.is_set() and watcher_stop.is_set()
+    assert stopped == ["mcp"]
     for thread in threads + [watcher]:
         thread.join(timeout=2)
         assert not thread.is_alive()

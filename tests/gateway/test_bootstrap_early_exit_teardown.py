@@ -30,7 +30,7 @@ async def test_refused_startup_keeps_startup_failed_and_crash_recovery(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_ready_publication_failure_stops_cron_and_housekeeping(monkeypatch):
+async def test_ready_publication_failure_stops_periodic_threads(monkeypatch):
     from gateway import run_bootstrap, run_runtime
     from gateway.config import GatewayConfig
     from hermes_constants import get_hermes_home
@@ -44,18 +44,18 @@ async def test_ready_publication_failure_stops_cron_and_housekeeping(monkeypatch
             thread = threading.Thread(target=stopped.wait, daemon=True)
             thread.start()
             threads.append(thread)
-        return stopped, None, *threads
+        return stopped, threads[-1]
 
     def refuse_ready(runner):
         raise RuntimeError('gateway stopped before session API readiness')
 
-    monkeypatch.setattr(run_bootstrap, '_start_gateway_start_cron_and_housekeeping', start_owned_threads)
+    monkeypatch.setattr(run_bootstrap, '_start_gateway_periodic_threads', start_owned_threads)
     monkeypatch.setattr(run_runtime, 'publish_gateway_runtime_ready', refuse_ready)
     try:
         with pytest.raises(RuntimeError, match='before session API readiness'):
             await asyncio.wait_for(run_bootstrap.start_gateway(GatewayConfig()), 30)
         assert threads
-        assert stopped.is_set(), 'READY failure left the cron ticker running'
+        assert stopped.is_set(), 'READY failure left the periodic threads running'
         assert all(not thread.is_alive() for thread in threads)
     finally:
         stopped.set()

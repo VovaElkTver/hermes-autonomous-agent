@@ -34,9 +34,6 @@ def _make_phase_runner(monkeypatch, events):
     import tools.process_registry as _pr
 
     monkeypatch.setattr(_pr.process_registry, "kill_all", _fake_kill_all)
-    monkeypatch.setattr(
-        "cron.scheduler.mark_running_jobs_interrupted", lambda *a, **k: []
-    )
     monkeypatch.setattr("tools.async_delegation.interrupt_all", lambda *a, **k: 0)
     monkeypatch.setattr(
         "tools.terminal_tool_lifecycle.cleanup_all_environments",
