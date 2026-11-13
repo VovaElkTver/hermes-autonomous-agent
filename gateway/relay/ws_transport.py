@@ -48,7 +48,7 @@ _TEARDOWN_AWAIT_TIMEOUT_S = 1.0
 _DISCONNECT_DRAIN_GRACE_S = 5.0
 # Ops whose reader-exit settlement is "possibly delivered" rather than failed:
 # the connector may have posted the attachment before the socket died, and its
-# consumers (send_message, cron) re-send or notify on a definite failure, which
+# consumers (send_message, scheduled) re-send or notify on a definite failure, which
 # would post it twice. Every other op keeps the definite connection-lost result.
 _AMBIGUOUS_ON_READER_EXIT_OPS = frozenset({"send_media"})
 

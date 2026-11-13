@@ -1,6 +1,6 @@
 """``context_length_cache.yaml`` writes and their cross-process serialization.
 
-Every agent (CLI, gateway sessions, cron jobs, subagents) persists probed context windows with a
+Every agent (CLI, gateway sessions, scheduled jobs, subagents) persists probed context windows with a
 load -> mutate -> write cycle; unserialized, one writer rewrites a stale snapshot and drops the
 other's entry (or resurrects an invalidated, too-large length).
 """

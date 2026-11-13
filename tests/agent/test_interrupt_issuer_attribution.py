@@ -31,16 +31,16 @@ def _bare_agent():
 
 
 def test_system_producer_is_recorded_and_logged_at_publication(caplog):
-    """The cron/gateway watchdog shape: the issuer survives to ``interrupt_issuer`` and ONE log line
+    """The scheduled/gateway watchdog shape: the issuer survives to ``interrupt_issuer`` and ONE log line
     names it at the point ``_interrupt_requested`` is set."""
     agent = _bare_agent()
     try:
         with caplog.at_level(logging.INFO, logger="run_agent"):
-            assert request_hard_interrupt(agent, "Cron job timed out (inactivity)", tool_reason="cron inactivity watchdog")
+            assert request_hard_interrupt(agent, "Scheduled job timed out (inactivity)", tool_reason="scheduled inactivity watchdog")
         assert agent._interrupt_requested is True
         assert interrupt_issuer(agent) == "cron_inactivity_watchdog"
         published = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Interrupt requested")]
-        assert len(published) == 1 and "cron inactivity watchdog" in published[0]
+        assert len(published) == 1 and "scheduled inactivity watchdog" in published[0]
     finally:
         set_interrupt(False)
 

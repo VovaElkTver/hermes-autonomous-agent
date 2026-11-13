@@ -59,7 +59,7 @@ def _render_distribution_plan(plan) -> None:
         else:
             print(
                 "  ⚠ Profile exists but is NOT a distribution.  Installing here will\n"
-                "    overwrite its SOUL.md and mcp.json and replace any skill or cron job\n"
+                "    overwrite its SOUL.md and mcp.json and replace any skill or scheduled job\n"
                 "    of the same name the distribution ships.\n"
                 "    Your memories, sessions, auth.json, and .env will be preserved,\n"
                 "    but any hand-edits to distribution-owned files will be lost."
@@ -79,7 +79,7 @@ def _render_distribution_plan(plan) -> None:
             print(line)
     if plan.has_cron:
         print(
-            "\n  ⚠ This distribution ships cron jobs.  They will NOT run "
+            "\n  ⚠ This distribution ships scheduled jobs.  They will NOT run "
             "automatically — review and enable manually."
         )
 
@@ -212,7 +212,7 @@ def _profile_create(args):
     print(f"\nProfile '{name}' created at {profile_dir}")
     if cloned:
         if clone_all:
-            print(f"Full copy from {source_label} (excluding session history, cron jobs, backups, and snapshots).")
+            print(f"Full copy from {source_label} (excluding session history, scheduled jobs, backups, and snapshots).")
         else:
             print(f"Cloned config, .env, SOUL.md, and skills from {source_label}.")
             from hermes_cli.profiles import cloned_plugin_names
@@ -517,8 +517,8 @@ def _profile_install(args):
             )
         if plan.has_cron:
             print(
-                "  Cron jobs were included but are NOT scheduled automatically.\n"
-                f"  Review them with:  hermes -p {plan.manifest.name} cron list"
+                "  Scheduled jobs were included but are NOT scheduled automatically.\n"
+                f"  Review them with:  hermes -p {plan.manifest.name} scheduled list"
             )
         print(f"\n  Use with:      hermes -p {plan.manifest.name} chat")
     except (DistributionError, ValueError) as e:
@@ -551,7 +551,7 @@ def _profile_update(args):
         plan = update_distribution(canon, force_config=force_config)
         print(f"\n✓ Updated '{plan.manifest.name}' → v{plan.manifest.version}")
         if plan.has_cron:
-            print(f"  Cron files were refreshed.  Review with:  hermes -p {plan.manifest.name} cron list")
+            print(f"  Scheduled files were refreshed.  Review with:  hermes -p {plan.manifest.name} scheduled list")
     except (DistributionError, ValueError) as e:
         _die(f"Error: {e}")
 

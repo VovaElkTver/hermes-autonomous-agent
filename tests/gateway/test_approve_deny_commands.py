@@ -413,7 +413,7 @@ class TestBlockingApprovalE2E:
 
 
 # ------------------------------------------------------------------
-# Fallback: no gateway callback (cron/batch mode)
+# Fallback: no gateway callback (scheduled/batch mode)
 # ------------------------------------------------------------------
 
 

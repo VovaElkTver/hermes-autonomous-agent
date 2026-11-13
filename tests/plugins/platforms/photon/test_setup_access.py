@@ -1,6 +1,6 @@
 """Tests for `hermes photon setup`'s access auto-configuration.
 
-`_autoconfigure_access` allowlists the operator and points the cron home
+`_autoconfigure_access` allowlists the operator and points the scheduled home
 channel at their DM, writing to the per-test ~/.hermes/.env (the hermetic
 HERMES_HOME fixture isolates this). It must fill only unset keys so a re-run
 never clobbers a hand-tuned allowlist.

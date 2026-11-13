@@ -406,10 +406,10 @@ canonical_method("clarify.lock", params=ClarifyLockParams, result=ClarifyLockRes
                      "locked); only a viewer attached to that session with session:respond may lock.")
 
 
-# ── cron / kanban / a2a producers ─────────────────────────────────────────────────────────────
+# ── scheduled / kanban / a2a producers ─────────────────────────────────────────────────────────────
 
 
-class CronRunParams(Params):
+class ScheduledRunParams(Params):
     job_id: str
     request_id: str
     extra_prompt: str | None
@@ -420,11 +420,11 @@ class CronSubmitResult(Result):
     admission_id: str
 
 
-canonical_method("cron.submit", params=CronRunParams, result=CronSubmitResult,
-                 doc="Admit one cron firing into the owning profile's durable FIFO.")
+canonical_method("scheduled.submit", params=ScheduledRunParams, result=CronSubmitResult,
+                 doc="Admit one scheduled firing into the owning profile's durable FIFO.")
 
 
-class CronStatusResult(OpenModel):
+class ScheduledStatusResult(OpenModel):
     """``result`` is the ``run_job`` tuple once terminal; ``recover`` adds the frozen ``job`` and
     answers ``status='missing'`` for a firing that was never admitted."""
 
@@ -434,25 +434,25 @@ class CronStatusResult(OpenModel):
     job: dict[str, JsonValue] | None = None
 
 
-canonical_method("cron.recover", params=CronRunParams, result=CronStatusResult,
+canonical_method("cron.recover", params=ScheduledRunParams, result=ScheduledStatusResult,
                  doc="Re-observe a firing after a scheduler restart (same request identity).")
 
 
-class CronAdmissionParams(Params):
+class ScheduledAdmissionParams(Params):
     session_id: str
     admission_id: str
 
 
-canonical_method("cron.status", params=CronAdmissionParams, result=CronStatusResult,
-                 doc="Status and, once terminal, the result of one cron admission.")
+canonical_method("cron.status", params=ScheduledAdmissionParams, result=ScheduledStatusResult,
+                 doc="Status and, once terminal, the result of one scheduled admission.")
 
 
-class CronCancelResult(Result):
+class ScheduledCancelResult(Result):
     ok: bool
 
 
-canonical_method("cron.cancel", params=CronAdmissionParams, result=CronCancelResult,
-                 doc="Cancel a queued cron admission or latch cancellation on a started one.")
+canonical_method("cron.cancel", params=ScheduledAdmissionParams, result=ScheduledCancelResult,
+                 doc="Cancel a queued scheduled admission or latch cancellation on a started one.")
 
 
 class KanbanRunParams(Params):

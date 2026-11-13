@@ -1,5 +1,5 @@
 """Conservative heredoc masking for shell-command scanners ('&' guard, blocked-command checks,
-cron lifecycle_guard) that false-positive on heredoc *bodies*. Stripping every body is unsafe the
+scheduled lifecycle_guard) that false-positive on heredoc *bodies*. Stripping every body is unsafe the
 other way (a fake ``<<`` in quotes can swallow an operator; unquoted bodies expand; ``bash <<'EOF'``
 executes), so a body is masked ONLY when every delimiter is quoted, every heredoc has an exact
 terminator line, the owning simple command is an allowlisted non-shell interpreter, and no list

@@ -3,7 +3,7 @@
 The gateway mounts the dashboard app (``app.state.gateway_runner`` set). The idle proof reads a
 standalone ``hermes serve`` child's ledgers only, so with an agent running on the gateway runner it
 used to answer ``idle: true`` and ``prepare``/``commit`` took the fence: every later dashboard RPC,
-cron tick and admission was refused while the gateway kept running. On the gateway listener the
+scheduled tick and admission was refused while the gateway kept running. On the gateway listener the
 routes now refuse and the fence stays open; a standalone serve keeps its permit protocol.
 """
 

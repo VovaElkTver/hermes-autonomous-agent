@@ -7,7 +7,7 @@ Either mints an anonymous Nous account (``POST /api/anonymous/create``); its ``a
 later exchanged for short-lived JWTs (``POST /api/anonymous/token``). The result is persisted as the
 singleton ``providers.nous``. Only a guest stamped with the trial claim carries inference
 (:func:`free_inference_active`), on every surface of the install once the desktop claimed it: chats,
-cron, side agents, workers, the CLI. Every other guest serves connectors and managed tools. In the resolver ladder (``resolve_provider``) a guest that
+scheduled, side agents, workers, the CLI. Every other guest serves connectors and managed tools. In the resolver ladder (``resolve_provider``) a guest that
 carries inference sits directly above the implicit AWS Bedrock chain (NS-829): any explicit provider
 (env key, ``model.provider``, OpenRouter pool, a logged-in ``active_provider``) beats it, and the
 ladder never creates one.
@@ -216,7 +216,7 @@ def free_inference_active(state: Any = None) -> bool:
 
 
 def trial_model() -> str:
-    """The last rung of model resolution, below every model the user named (``model.default``, a cron
+    """The last rung of model resolution, below every model the user named (``model.default``, a scheduled
     or task pin): ``nous/welcome`` while the welcome trial carries inference, else ''. Never written to
     config.yaml, so it stops applying the moment the user configures a real model."""
     return GUEST_MODEL if free_inference_active() else ""

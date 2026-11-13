@@ -1,11 +1,11 @@
-"""Regression coverage for finite repeat counts in the dashboard cron create API (#68012)."""
+"""Regression coverage for finite repeat counts in the dashboard scheduled create API (#68012)."""
 
 import pytest
 
 
 @pytest.fixture()
 def isolated_profiles(tmp_path, monkeypatch, _isolate_hermes_home):
-    """Route dashboard cron storage to an isolated default profile."""
+    """Route dashboard scheduled storage to an isolated default profile."""
     from hermes_constants import get_hermes_home
     from hermes_cli import profiles
 
@@ -45,7 +45,7 @@ def client(monkeypatch, isolated_profiles):
 def test_create_preserves_finite_repeat_count(client):
     """A finite repeat must survive request parsing and storage (route-level persistence)."""
     response = client.post(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         json={
             "prompt": "run the check",
             "schedule": "every 1h",
@@ -57,7 +57,7 @@ def test_create_preserves_finite_repeat_count(client):
     assert response.status_code == 200
     assert response.json()["repeat"] == {"times": 2, "completed": 0}
 
-    listed = client.get("/api/cron/jobs", params={"profile": "default"}).json()
+    listed = client.get("/api/scheduled/jobs", params={"profile": "default"}).json()
     assert [job["repeat"] for job in listed if job["name"] == "two checks"] == [
         {"times": 2, "completed": 0}
     ]
@@ -65,7 +65,7 @@ def test_create_preserves_finite_repeat_count(client):
 
 def test_create_without_repeat_remains_unlimited(client):
     response = client.post(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         json={
             "prompt": "run forever",
             "schedule": "every 1h",
@@ -80,7 +80,7 @@ def test_create_without_repeat_remains_unlimited(client):
 def test_create_rejects_invalid_repeat_count(client, repeat):
     """Invalid counts must 4xx instead of silently becoming unlimited jobs."""
     response = client.post(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         json={
             "prompt": "must not run forever",
             "schedule": "every 1h",
@@ -98,7 +98,7 @@ def test_create_rejects_invalid_repeat_count(client, repeat):
             for error in detail
         )
     assert client.get(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         params={"profile": "default"},
     ).json() == []
 
@@ -108,7 +108,7 @@ def test_create_accepts_cli_string_repeat_forms(client, repeat, expected_times):
     """The dashboard create path validates repeat through the same normalize_repeat_value
     the CLI uses: numeric strings coerce, 'once' → 1, 'forever' → unlimited."""
     response = client.post(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         json={
             "prompt": "string repeat form",
             "schedule": "every 1h",
@@ -123,10 +123,10 @@ def test_create_accepts_cli_string_repeat_forms(client, repeat, expected_times):
 def test_create_stores_the_missed_run_policy_only_when_given(client):
     """The editor's Missed runs choice must reach the job; omitting it keeps the default (no key)."""
     chosen = client.post(
-        "/api/cron/jobs",
+        "/api/scheduled/jobs",
         json={"prompt": "nightly", "schedule": "0 3 * * *", "name": "skip missed", "catch_up": False},
     )
-    plain = client.post("/api/cron/jobs", json={"prompt": "nightly", "schedule": "0 3 * * *", "name": "default"})
+    plain = client.post("/api/scheduled/jobs", json={"prompt": "nightly", "schedule": "0 3 * * *", "name": "default"})
 
     assert chosen.status_code == 200 and chosen.json()["catch_up"] is False
     assert plain.status_code == 200 and "catch_up" not in plain.json()

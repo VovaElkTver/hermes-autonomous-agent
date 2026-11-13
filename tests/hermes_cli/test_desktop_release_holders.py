@@ -53,7 +53,7 @@ def _never_asked(_prompt):
 
 def test_a_retry_that_fails_before_the_swap_leaves_no_consent_for_a_later_update(holder, tmp_path, monkeypatch):
     """Review N1: the consent belongs to one retry. Once that retry's swap attempt has run, a
-    later update from any source (gateway /update, cron) must not close the program unasked."""
+    later update from any source (gateway /update, scheduled) must not close the program unasked."""
     release, proc = holder
     _desktop_consent(release, proc, run_id="desktop-retry-1")
 

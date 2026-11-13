@@ -88,7 +88,7 @@ def _git(args: list, cwd: str, timeout: int = 15) -> subprocess.CompletedProcess
 def _tree_size_mb(path: Path, timeout: int = 30) -> Optional[int]:
     """Cheap directory size via ``du -sm`` — best-effort, None on failure or timeout. Not
     ``subprocess.run``: its post-kill ``wait()`` never returns for a ``du`` stuck in uninterruptible
-    disk I/O, so the caller (a ``hermes -w`` launch, the cron prune thread) would hang with it."""
+    disk I/O, so the caller (a ``hermes -w`` launch, the scheduled prune thread) would hang with it."""
     from hermes_cli._subprocess_compat import bounded_probe_run
 
     try:

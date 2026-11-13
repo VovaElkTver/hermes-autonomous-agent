@@ -62,14 +62,14 @@ class TestStripBlockedTools(unittest.TestCase):
 
     def test_strips_cronjob_toolset(self):
         """Regression for issue #43466: child subagents must not inherit
-        the cronjob toolset from a parent running on a gateway platform.
-        Without this guard, a delegated child could schedule new cron jobs
+        the scheduled job toolset from a parent running on a gateway platform.
+        Without this guard, a delegated child could schedule new scheduled jobs
         under the parent's identity.
         """
         result = _strip_blocked_tools(
-            ["terminal", "file", "cronjob", "web"]
+            ["terminal", "file", "scheduled job", "web"]
         )
-        self.assertNotIn("cronjob", result)
+        self.assertNotIn("scheduled job", result)
         self.assertIn("terminal", result)
         self.assertIn("file", result)
         self.assertIn("web", result)
@@ -107,7 +107,7 @@ class TestStripBlockedTools(unittest.TestCase):
         self.assertIn("browser", disabled)
         for toolset_name in (
             "clarify",
-            "cronjob",
+            "scheduled job",
             "delegation",
             "memory",
         ):
@@ -207,7 +207,7 @@ class TestDelegateTask(unittest.TestCase):
     def test_child_gets_dedicated_session_db_not_parents_handle(self):
         """#81267: children must not share the parent's SessionDB object.
 
-        cron run_job closes its per-job SessionDB in its finally block while
+        scheduled run_job closes its per-job SessionDB in its finally block while
         a fire-and-forget background delegation subagent is still flushing on
         a daemon thread. A SHARED handle then has ``_conn=None`` and every
         child flush raises ``'NoneType' object has no attribute 'execute'`` —
@@ -241,7 +241,7 @@ class TestDelegateTask(unittest.TestCase):
             self.assertIsInstance(child_db, SessionDB)
             self.assertIsNot(child_db, parent_db)
 
-            # Parent teardown (cron run_job finally, gateway session end)
+            # Parent teardown (scheduled run_job finally, gateway session end)
             # must not break the child's handle — the #81267 crash mechanism.
             parent_db.close()
             self.assertIsNotNone(child_db._conn)

@@ -75,7 +75,7 @@ def _is_delegated_child_context() -> bool:
 
 
 def _is_dispatcher_owned_worker() -> bool:
-    """False for delegate_task children AND for cron jobs fired in-process from
+    """False for delegate_task children AND for scheduled jobs fired in-process from
     a worker — i.e. whenever HERMES_KANBAN_* is present but not ours."""
     return _delegation_ctx("is_dispatcher_owned_worker_context", True)
 
@@ -195,7 +195,7 @@ def _default_task_id(arg: Any) -> Optional[str]:
     if _is_delegated_child_context():
         return None
     if not _is_dispatcher_owned_worker():
-        # A cron job fired in-process from a worker must never inherit the
+        # A scheduled job fired in-process from a worker must never inherit the
         # worker's task id as an implicit default.
         return None
     env_tid = os.environ.get("HERMES_KANBAN_TASK")
@@ -217,7 +217,7 @@ def _require_task_id(args: dict) -> str:
     if tid:
         return tid
     if os.environ.get("HERMES_KANBAN_TASK"):
-        # Env task present but not usable here (delegate child / cron run beside
+        # Env task present but not usable here (delegate child / scheduled run beside
         # a worker): it is not this session's to default to.
         raise _Reject(
             "task_id is required: this session does not own the inherited "
@@ -1181,7 +1181,7 @@ def _live_tui_session_key(session_key: str, profile: Optional[str]) -> str:
 
 
 def _resolve_notify_target() -> Optional[dict[str, Any]]:
-    """``kanban_db.add_notify_sub`` kwargs for the calling session, or None (CLI/cron/tests).
+    """``kanban_db.add_notify_sub`` kwargs for the calling session, or None (CLI/scheduled/tests).
     Gateway sessions: ``HERMES_SESSION_PLATFORM``/``CHAT_ID`` ContextVars. TUI/desktop:
     those are cleared but the subprocess inherits ``HERMES_SESSION_KEY`` -> ``platform="tui"``
     for the TUI poller. ``HERMES_SESSION_ID`` is deliberately NOT a fallback: it is set for
@@ -1240,7 +1240,7 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
     try:
         target = _resolve_notify_target()
         if target is None:
-            return False  # CLI / cron / test — no persistent channel
+            return False  # CLI / scheduled / test — no persistent channel
         from hermes_cli import kanban_db_notify as _kbn
         # Inheritance and explicit subscriptions already encode the delivery policy.
         # Auto-subscribe must not turn a passive destination into an agent wake.

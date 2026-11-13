@@ -79,7 +79,7 @@ def test_record_without_createtime_is_never_the_host_gateway(host_gateway, monke
 
 def test_topology_ignores_another_tenants_record_and_reads_the_launch_homes_state(tmp_path, monkeypatch, request):
     """#121352 reporting half: a record from ANOTHER Hermes root is not this tenant's host gateway
-    (doctor / cron status / the dashboard ladder), and a NAMED-hosted multiplexer's platforms are read
+    (doctor / scheduled status / the dashboard ladder), and a NAMED-hosted multiplexer's platforms are read
     from the home that launched it, not from a stale standalone record at the default root."""
     import json
     import os

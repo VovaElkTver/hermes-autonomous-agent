@@ -24,7 +24,7 @@ POST_AUXILIARY_CALL = "post_auxiliary_call"
 
 def _parent_turn_identity() -> dict[str, str]:
     """``session_id`` / ``task_id`` / ``turn_id`` / ``platform`` of the main turn this auxiliary
-    call runs under, or empty strings for turn-less callers (cron, gateway idle work)."""
+    call runs under, or empty strings for turn-less callers (scheduled, gateway idle work)."""
     ident = {"session_id": "", "task_id": "", "turn_id": "", "platform": ""}
     try:
         from agent.relay_runtime import current_turn

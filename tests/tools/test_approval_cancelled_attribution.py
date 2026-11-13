@@ -21,7 +21,7 @@ def gateway_session(monkeypatch):
     mod._gateway_queues.clear()
     mod._gateway_notify_cbs.clear()
     mod._session_approved.clear()
-    for k in ("HERMES_CRON_SESSION", "HERMES_YOLO_MODE", "HERMES_INTERACTIVE"):
+    for k in ("HERMES_SCHEDULED_SESSION", "HERMES_YOLO_MODE", "HERMES_INTERACTIVE"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
     monkeypatch.setenv("HERMES_SESSION_KEY", SESSION_KEY)
@@ -132,7 +132,7 @@ def test_coalesced_follower_inherits_the_leaders_cancellation(gateway_session):
 @pytest.fixture
 def cli_session(monkeypatch):
     mod._session_approved.clear()
-    for k in ("HERMES_CRON_SESSION", "HERMES_YOLO_MODE", "HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK"):
+    for k in ("HERMES_SCHEDULED_SESSION", "HERMES_YOLO_MODE", "HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("HERMES_INTERACTIVE", "1")
     monkeypatch.setattr(mod, "_YOLO_MODE_FROZEN", False)

@@ -59,7 +59,7 @@ def _platform_name() -> str:
         return turn.lease.platform
     if platform := session_platform():
         return platform
-    return "cron" if is_truthy_value(get_session_env("HERMES_CRON_SESSION", "")) else "cli"
+    return "cron" if is_truthy_value(get_session_env("HERMES_SCHEDULED_SESSION", "")) else "cli"
 
 
 def request_surface() -> str:

@@ -33,7 +33,7 @@ def task_scope_from_env() -> dict[str, str] | None:
     Read through agent.session_client_env.session_env: inside a gateway-hosted
     turn this returns the client_env the spawning worker process froze into its
     session (stage003 step 2); in a plain process it falls back to os.environ,
-    so CLI/cron/direct callers keep the pre-bridge behaviour.
+    so CLI/scheduled/direct callers keep the pre-bridge behaviour.
     """
     from agent.session_client_env import session_env
     kind = session_env("HERMES_SCOPE_KIND") or ""

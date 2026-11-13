@@ -236,7 +236,7 @@ def _print_setup_summary(config: dict, hermes_home):
     print()
     print(_setup.color(f"📁 All your files are in {_dhh()}/:", _setup.Colors.CYAN, _setup.Colors.BOLD), end="\n\n")
     for label, value in (("Settings:", f"  {_setup.get_config_path()}"), ("API Keys:", f"  {_setup.get_env_path()}"),
-                         ("Data:", f"      {hermes_home}/cron/, sessions/, logs/")):
+                         ("Data:", f"      {hermes_home}/scheduled/, sessions/, logs/")):
         print(f"   {_setup.color(label, _setup.Colors.YELLOW)}{value}")
     print()
 

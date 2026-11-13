@@ -752,8 +752,8 @@ class GatewayTurnPrepareMixin:
 
         # The context prompt render is pinned per session, keyed by a hash of the renderer inputs, so
         # the system prompt cannot drift turn-over-turn; a miss (thread rename, /sethome) re-renders.
-        # A LOCAL session (CLI one-shot, ACP, cron run-now, TUI attach) is the operator's own machine:
-        # the messaging block ("Source: Local", connected platforms, cron delivery targets) was never
+        # A LOCAL session (CLI one-shot, ACP, scheduled run-now, TUI attach) is the operator's own machine:
+        # the messaging block ("Source: Local", connected platforms, scheduled delivery targets) was never
         # part of the classic in-process prompt, and the TUI gateway still builds that prompt in-process.
         # Rendering it here would make every surface hop of one durable session a system-prompt
         # (and prompt-cache) break.

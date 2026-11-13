@@ -2,7 +2,7 @@
 
 ``load_config()`` merges ``DEFAULT_CONFIG`` first, which is wrong for readers that treat a
 missing key as "unset" (the gateway's presence-sensitive env bridge, ``cfg == {}`` sentinels,
-cron model pinning) — so nine surfaces used to hand-roll raw-read → overlay → expand in
+scheduled model pinning) — so nine surfaces used to hand-roll raw-read → overlay → expand in
 differing orders and none of them replayed the model-key canonicalization or the last-known-good
 recovery ``load_config()`` gained. This module is that one primitive.
 

@@ -226,7 +226,7 @@ def generate_transcript(seed: int, n_turns: int, workdir: Path, *, kinds: Iterab
 
 
 def job_turn(seed: int, workdir: Path, rounds: int) -> TurnSpec:
-    """A cron-shaped run: ONE user message (the job prompt) followed by many tool rounds, so compaction
+    """A scheduled-shaped run: ONE user message (the job prompt) followed by many tool rounds, so compaction
     has to fire mid-turn with the job prompt as the only real ask."""
     rng = random.Random(seed)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -376,7 +376,7 @@ def assert_wire_request_ok(body: dict[str, Any], turn_marker: str, base_system: 
     if base_system is not None:
         # The system anchor is built once per session; compaction may only append its note.
         assert msgs[0]["content"].startswith(base_system), f"{where}: the session system prompt was rewritten"
-    # The in-flight ask (for a cron run: the job prompt) must reach the model AFTER any summary; a summary
+    # The in-flight ask (for a scheduled run: the job prompt) must reach the model AFTER any summary; a summary
     # that swallows it leaves the model told to "respond to the message below" with nothing below (#100818).
     text = "\n".join(flatten(m.get("content")) for m in msgs[1:] if m["role"] in ("user", "assistant", "tool"))
     ask_at = max((i for i, m in enumerate(msgs) if m["role"] == "user" and turn_marker in flatten(m.get("content"))),

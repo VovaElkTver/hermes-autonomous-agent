@@ -3,7 +3,7 @@
 The multiplexer used to enumerate ``profiles/`` once at boot; these pin the runtime reconcile: a
 profile created afterwards is served, a deleted one is torn down and unrouted, a served profile whose
 config/.env changed (bot token added after create) gets its adapters, and none of it touches the other
-profiles' live adapters. The cron ticker's live enumerator is covered in ``tests/cron``.
+profiles' live adapters. The scheduled ticker's live enumerator is covered in ``tests/scheduled``.
 
 The runner is set up the way ``run_bootstrap.start_gateway`` leaves it: the boot set reserved through
 ``process_ownership`` and frozen into ``config._runtime_profile_homes``. The reconcile must diff the
@@ -284,8 +284,8 @@ async def test_created_then_credentialed_profile_is_served_without_restart(tmp_p
         alpha_adapter = runner._profile_adapters["alpha"][Platform.DISCORD]
         assert _served_record(home) == ["default", "alpha"]
 
-        # 1. Created while running, no token yet: served (routes/prefixes/cron), zero adapters, and the
-        #    reservation grew to include it (the next restart's reserve, the served set, the cron ticker).
+        # 1. Created while running, no token yet: served (routes/prefixes/scheduled), zero adapters, and the
+        #    reservation grew to include it (the next restart's reserve, the served set, the scheduled ticker).
         gamma_dir = _mkprofile(home, "gamma")
         result = await runner.reconcile_served_profiles()
         assert result["added"] == ["gamma"]

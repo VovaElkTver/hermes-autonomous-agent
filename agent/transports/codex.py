@@ -22,7 +22,7 @@ from agent.transports.types import NormalizedResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
-# Cron fires use ``cron_<job_id>_<YYYYMMDD_HHMMSS>``; the per-fire timestamp is
+# Scheduled fires use ``cron_<job_id>_<YYYYMMDD_HHMMSS>``; the per-fire timestamp is
 # stripped so repeat fires of one job share a cache scope.
 # See #51395, #52295.
 _CRON_SESSION_ID_RE = re.compile(r"^(cron_.+)_\d{8}_\d{6}$")
@@ -34,9 +34,9 @@ def _cache_scope_from_session_id(session_id: Optional[str]) -> str:
     match = _CRON_SESSION_ID_RE.match(sid)
     if match:
         return match.group(1)
-    # The unified scheduler used to admit cron fires into a ``local-*`` session
+    # The unified scheduler used to admit scheduled fires into a ``local-*`` session
     # and recover a stable job scope from the bound admission; that producer was
-    # excised with the cron package.
+    # excised with the scheduled package.
     return sid
 
 
@@ -425,7 +425,7 @@ def _content_cache_key(instructions: str, tools: Optional[list[dict[str, Any]]],
 
     ``scope_id`` (pass ``_cache_scope_from_session_id(session_id)``) keeps unrelated sessions — independent
     conversations, main vs. child/subagent, sibling children — from concentrating onto the same bucket
-    merely because their static prefix matches (see #78941), while still letting recurring cron fires of one
+    merely because their static prefix matches (see #78941), while still letting recurring scheduled fires of one
     job share a stable key across their timestamped session_ids (the original #51395/#52295 fix this built
     on). Sorting tools by name keeps the hash insertion-order independent.
     """
@@ -868,11 +868,11 @@ class ResponsesApiTransport(ProviderTransport):
             kwargs["max_output_tokens"] = params["max_tokens"]
 
         if is_xai_responses and session_id:
-            # Scoped like the body key so cron fires don't each pin a different xAI backend server.
+            # Scoped like the body key so scheduled fires don't each pin a different xAI backend server.
             _merge_extra_headers(kwargs, **{"x-grok-conv-id": _cache_scope})
             # xAI reads prompt_cache_key from the body; extra_body survives SDK builds whose
             # Responses.stream() dropped the typed kwarg. An explicit request_overrides value wins.
-            # Scoped like the body cache key below — otherwise cron's per-fire timestamp in session_id
+            # Scoped like the body cache key below — otherwise scheduled's per-fire timestamp in session_id
             # (cron_<id>_<ts>) pins every fire of the same job to a different xAI backend server (#78941).
             # xAI Responses cache-routing — body-level field per
             # https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits. A

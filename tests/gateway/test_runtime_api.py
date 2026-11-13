@@ -18,7 +18,7 @@ async def test_http_lifespan_does_not_start_or_stop_runtime_services(monkeypatch
     calls = []
     monkeypatch.setenv("HERMES_DESKTOP", "1")
     for name in ("_warm_gateway_module", "_eager_reconcile_own_session_db",
-                 "_start_desktop_cron_ticker", "_terminate_desktop_managed_gateway"):
+                 "_start_desktop_ticker_seam", "_terminate_desktop_managed_gateway"):
         monkeypatch.setattr(web, name, lambda *a, _name=name, **k: calls.append(_name))
     for name in ("start_hosted_room_service", "stop_hosted_room_service"):
         monkeypatch.setattr(methods_groups, name, lambda *a, _name=name, **k: calls.append(_name))

@@ -114,7 +114,7 @@ def test_refusal_folded_into_a_summary_is_left_alone_and_a_busy_chat_waits(tmp_p
 
 def test_subagent_and_cron_runs_keep_their_record(tmp_path):
     """A delegated run's one "turn" is the whole run: retaining it would hollow out the record and
-    unlock nothing. Delegated and cron runs keep it by source even after an answered exchange; a chat
+    unlock nothing. Delegated and scheduled runs keep it by source even after an answered exchange; a chat
     never answered before a refused run that used tools (an ACP task run) keeps it by shape. A Bot Chat
     refused at its very first plain message is still unlocked: there /new becomes /compact, and so is
     an answered chat whose refused turn ran tools (only a never-answered tool run is a task run)."""

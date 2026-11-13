@@ -206,7 +206,7 @@ def test_workspace_container_key_is_idempotent_and_lazy_setup_creates_the_sessio
                         lambda *a, **kw: created.append(kw['task_id']) or object())
     monkeypatch.setattr(terminal_tool, '_start_cleanup_thread', lambda: None)
     saved = dict(terminal_tool._active_environments)
-    terminal_tool._active_environments['default'] = other  # a messaging/cron turn's profile container
+    terminal_tool._active_environments['default'] = other  # a messaging/scheduled turn's profile container
     try:
         with _turn(_policy(home, ws1, persistent=True), 'local-a'):
             eff = _resolve_container_task_id('local-a')

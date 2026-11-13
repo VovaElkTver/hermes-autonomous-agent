@@ -1923,7 +1923,7 @@ def test_peer_recovery_replays_the_same_execution_generation(tmp_path: Path):
 
 def test_local_profiles_skips_delete_tombstones_and_dot_dirs(tmp_path: Path):
     """`hermes profile delete` leaves ``profiles/.deleted/<name>``; neither the tombstone dir, a
-    tombstoned profile, nor a marker-less cron shell is a roster member (#106847: ``.deleted``
+    tombstoned profile, nor a marker-less scheduled shell is a roster member (#106847: ``.deleted``
     failed validate_roster every cycle; #99392: side-effect dirs listed as bots)."""
     from hermes_constants import mark_named_profile_deleted
 

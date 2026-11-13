@@ -119,7 +119,7 @@ def test_persistence_failure_default_copy_is_actionable_and_profile_aware(monkey
 
 @pytest.mark.parametrize("exit_reason", ["empty_response_exhausted", "local_processing_error(TypeError)"])
 def test_advisory_exit_reasons_stamp_a_code_but_never_flip_failed(exit_reason):
-    """Cron silence, the kanban dispatcher breaker and gateway transcript persistence all key
+    """Scheduled silence, the kanban dispatcher breaker and gateway transcript persistence all key
     on ``failed``; these two exits must keep failed=False and only gain the descriptor code."""
     verdict = exit_reason_failure(exit_reason)
     assert verdict is not None and verdict.fails_turn is False

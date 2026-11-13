@@ -431,7 +431,7 @@ class TestPerResponseRunNonceIsolation:
         )
 
     def test_cron_normalization_stays_the_only_carve_out(self):
-        """The one accepted exception: cron's per-fire timestamp (#51395)."""
+        """The one accepted exception: scheduled's per-fire timestamp (#51395)."""
         assert (
             _cache_scope_from_session_id("cron_backup_20260814_120000")
             == "cron_backup"

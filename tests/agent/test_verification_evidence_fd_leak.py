@@ -1,6 +1,6 @@
 """Regression: the verification-evidence ledger must close every connection.
 
-Sibling of the cron execution-ledger leak (#69567 / PR #69594). The evidence
+Sibling of the scheduled execution-ledger leak (#69567 / PR #69594). The evidence
 ledger used ``with _connect() as conn:`` where the connection context manager
 commits/rolls back but never closes, leaking the db/-wal/-shm file descriptors
 on every recorded terminal result, workspace edit, and status read. These tests

@@ -226,7 +226,7 @@ def test_real_run_takes_pre_snapshot(backup_env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# cron-jobs backup + rollback (the part issue #18671's follow-up adds)
+# scheduled-jobs backup + rollback (the part issue #18671's follow-up adds)
 # ---------------------------------------------------------------------------
 
 
@@ -235,7 +235,7 @@ def test_real_run_takes_pre_snapshot(backup_env, monkeypatch):
 def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(backup_env):
     """A UTF-8 BOM on jobs.json (Windows editors) must not break the job
     count, and the snapshot copy is written BOM-less so rollback restores a
-    file cron/jobs.load_jobs can read."""
+    file scheduled/jobs.load_jobs can read."""
     cb = backup_env["cb"]
     _write_skill(backup_env["skills"], "alpha")
     cron_dir = backup_env["home"] / "cron"
@@ -258,7 +258,7 @@ def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(backup_env):
 
 
 def test_rollback_reports_excised_cron_links(backup_env):
-    """Post-excision rollback must succeed and note that cron links were skipped."""
+    """Post-excision rollback must succeed and note that scheduled links were skipped."""
     cb = backup_env["cb"]
     _write_skill(backup_env["skills"], "alpha")
     snap = cb.snapshot_skills(reason="pre-curator-run")

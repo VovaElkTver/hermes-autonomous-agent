@@ -35,7 +35,7 @@ def test_sidebar_archive_mutation_retires_canonical_bot_chat(tmp_path, reaped):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('hidden', [False, True])
 async def test_delivery_after_archive_of_delivery_minted_bot_chat_mints_fresh(hidden, monkeypatch):
-    """The delivery door mints the canonical chat VISIBLE (cron, teammate, ``chat -c "Bot Chat"
+    """The delivery door mints the canonical chat VISIBLE (scheduled, teammate, ``chat -c "Bot Chat"
     --create-if-missing``) and generation 0 reuses an untitled row as an interrupted mint. After a
     sidebar Archive the next delivery must land in a fresh "Bot Chat", never wedge on
     ``admission_conflict`` (visible) nor re-title the archived row (hidden) (#139779)."""
@@ -72,7 +72,7 @@ async def test_delivery_after_archive_of_delivery_minted_bot_chat_mints_fresh(hi
 
 @pytest.mark.parametrize('writer', ['sidebar', 'set_session_archived'])
 def test_archive_of_visible_reaped_bot_chat_retires_the_name(tmp_path, writer):
-    """A VISIBLE canonical (delivery/cron/``-c --create-if-missing`` mint) the reaper already closed is
+    """A VISIBLE canonical (delivery/scheduled/``-c --create-if-missing`` mint) the reaper already closed is
     still the user's chat: their Archive retires it, or the roster lookup un-archives it on the next
     poll and clicks keep landing in it."""
     db = SessionDB(db_path=tmp_path / 'state.db')

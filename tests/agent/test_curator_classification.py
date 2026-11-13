@@ -333,7 +333,7 @@ def test_reconcile_absorbed_into_beats_everything_else(curator_env):
     summary block, the heuristic's substring match misses because the
     umbrella's patch content doesn't literally contain the old skill's
     slug. Previously this fell through to 'no-evidence fallback' prune,
-    which dropped the cron ref instead of rewriting. With absorbed_into
+    which dropped the scheduled ref instead of rewriting. With absorbed_into
     declared, the model tells us directly.
     """
     out = curator_env._reconcile_classification(

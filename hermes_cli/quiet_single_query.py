@@ -40,7 +40,7 @@ def exit_single_query(code: int) -> None:
     sys.exit(code)
 
 
-# A spawner that bounds only the TURN (the cron Bot Chat lane) hands the quiet child a report
+# A spawner that bounds only the TURN (the scheduled Bot Chat lane) hands the quiet child a report
 # path here. The child records the turn's outcome there the moment the turn ends, BEFORE the
 # one-shot exit linger, so the spawner can book the delivery and stop waiting while the linger
 # keeps protecting nested ``notify_on_complete`` replies. Popped before the turn runs (same

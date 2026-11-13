@@ -4,7 +4,7 @@ The TTS surface accepts agent/user-supplied absolute paths (writing to a
 chosen file is the whole point). What it must reject is paths that use
 ``..`` components to escape their declared base — those are almost
 always either a bug or prompt-injection-controlled
-(e.g. ``output_path="audio/../../etc/cron.d/x"``).
+(e.g. ``output_path="audio/../../etc/scheduled.d/x"``).
 """
 
 import json
@@ -18,7 +18,7 @@ def test_output_path_rejects_traversal_escape():
     """A path with '..' components must be rejected before any provider work."""
     result = json.loads(text_to_speech_tool(
         text="hello",
-        output_path="audio/../../etc/cron.d/malicious",
+        output_path="audio/../../etc/scheduled.d/malicious",
     ))
     assert result["success"] is False
     assert "traversal" in result["error"].lower()

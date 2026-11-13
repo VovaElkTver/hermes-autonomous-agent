@@ -326,8 +326,8 @@ def test_execute_code_gateway_uses_selected_transport(monkeypatch):
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: True)
     monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: True)
-    monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
-    monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: False)
+    monkeypatch.setattr(approval, "_is_scheduled_approval_context", lambda: False)
+    monkeypatch.setattr(tools_approval_context, "_is_scheduled_approval_context", lambda: False)
     monkeypatch.setattr(
         approval, "get_current_session_key", lambda *args, **kwargs: "session-a"
     )

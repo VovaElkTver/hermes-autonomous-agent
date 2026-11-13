@@ -476,7 +476,7 @@ async def test_refresh_response_with_new_refresh_token_rotates(tmp_path, monkeyp
 # `gateway run`). With a provider that rotates refresh tokens, the loser of the
 # race POSTs a token the winner already consumed and gets 400 — while a valid
 # replacement sits on disk. Clearing state there forces an interactive browser
-# reauth that a cron/background context cannot satisfy.
+# reauth that a scheduled/background context cannot satisfy.
 # ---------------------------------------------------------------------------
 
 

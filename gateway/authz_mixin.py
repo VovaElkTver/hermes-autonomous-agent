@@ -224,7 +224,7 @@ class GatewayAuthorizationMixin:
         profile_adapters = self._profile_adapters_map()
         if profile_name in profile_adapters:
             adapters = profile_adapters[profile_name]
-            # The credential-platform preflight went with the cron package; the
+            # The credential-platform preflight went with the scheduled package; the
             # satellite check alone decides borrowing now.
             if not self._is_shared_bot_satellite(profile_name):
                 return adapters
@@ -300,7 +300,7 @@ class GatewayAuthorizationMixin:
         placeholder). With *platform*, only a bot it owns on THAT platform makes it a credential
         boundary there — the per-destination borrow in ``_routed_primary_adapter``. Restored/cached
         sources carry no transport ref, so this keeps heartbeats, completions and goal notices
-        deliverable after a restart (the same rule ``kanban_watchers_notifier`` and cron apply)."""
+        deliverable after a restart (the same rule ``kanban_watchers_notifier`` and scheduled apply)."""
         config = getattr(self, "config", None)
         if not getattr(config, "multiplex_profiles", False):
             return False
@@ -362,7 +362,7 @@ class GatewayAuthorizationMixin:
         with a bot of its own). With no live provenance the unique owner of ``(platform,
         runtime_profile)`` delivers — ``_adapters_for_profile`` holds one adapter per platform per
         profile, a shared-bot satellite drains through the primary, and a disconnected secondary
-        fails closed to ``{}`` rather than borrowing the default bot. Restored sessions, cron,
+        fails closed to ``{}`` rather than borrowing the default bot. Restored sessions, scheduled,
         kanban and completion notices all rely on this row. Matrix: gateway/AGENTS.md § Profile scope.
         """
         if source is None:

@@ -1001,7 +1001,7 @@ def launchd_status(deep: bool = False):
         print("  launchd cannot manage the gateway on this macOS version.")
         if fallback_pid:
             print(f"✓ Detached fallback process is running (PID {fallback_pid})")
-            print("  Cron jobs will fire. Stop with: hermes gateway stop")
+            print("  Scheduled jobs will fire. Stop with: hermes gateway stop")
         else:
             print("✗ No fallback process is running")
             print("  Run: hermes gateway start")

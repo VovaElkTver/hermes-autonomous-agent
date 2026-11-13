@@ -96,7 +96,7 @@ XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
 XAI_OAUTH_SCOPE = "openid profile email offline_access grok-cli:access api:access"
 XAI_OAUTH_DEVICE_CODE_URL = f"{XAI_OAUTH_ISSUER}/oauth2/device/code"
 # xAI/Grok OAuth access tokens are short-lived (~6h). A two-minute refresh window leaves noisy
-# credential-expiry gaps for gateway/cron workloads that touch the provider every ~30 min, so refresh
+# credential-expiry gaps for gateway/scheduled workloads that touch the provider every ~30 min, so refresh
 # up to an hour early.
 XAI_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 3600
 QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"

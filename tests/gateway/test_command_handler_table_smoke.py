@@ -45,7 +45,7 @@ def test_no_dead_names_in_command_tuples():
 
 
 def test_suggestions_absent_by_contract():
-    """/suggestions was excised with cron storage spine — deliberately gone."""
+    """/suggestions was excised with scheduled storage spine — deliberately gone."""
     runner = _make_runner()
     assert "suggestions" not in runner._IDLE_COMMANDS
     assert "suggestions" not in runner._PLAIN_COMMANDS

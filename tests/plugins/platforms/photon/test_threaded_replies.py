@@ -161,7 +161,7 @@ async def test_reply_after_restart_is_still_marked_own(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_to_bare_phone_is_found_from_dm_guid(monkeypatch):
-    """Cron/standalone sends often target the bare E.164; replies arrive in the DM GUID space."""
+    """Scheduled/standalone sends often target the bare E.164; replies arrive in the DM GUID space."""
     adapter = _make_adapter(monkeypatch)
     handled = _capture_handled(adapter, monkeypatch)
     _capture_sidecar(adapter, message_id="out-7")
@@ -191,7 +191,7 @@ async def test_attachment_send_is_recorded_as_label(monkeypatch, tmp_path):
 
 
 def _fake_standalone_sidecar(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stand-in for the sidecar HTTP API behind ``_standalone_send``: ids are ``cron-<n>``."""
+    """Stand-in for the sidecar HTTP API behind ``_standalone_send``: ids are ``scheduled-<n>``."""
     monkeypatch.setenv("PHOTON_SIDECAR_TOKEN", "tok")
     counter = {"n": 0}
 
@@ -216,7 +216,7 @@ def _fake_standalone_sidecar(monkeypatch: pytest.MonkeyPatch) -> None:
 
         async def post(self, url: str, json: dict[str, Any], headers=None):
             counter["n"] += 1
-            return _Resp(f"cron-{counter['n']}")
+            return _Resp(f"scheduled-{counter['n']}")
 
     monkeypatch.setattr(photon_adapter.httpx, "AsyncClient", _FakeClient)
 
@@ -242,8 +242,8 @@ async def test_standalone_send_records_text_and_attachments(monkeypatch, tmp_pat
     assert result.get("success") is True
 
     adapter = _make_adapter(monkeypatch)
-    assert await _reply_text_for(adapter, monkeypatch, "cron-1") == "daily digest"
-    assert await _reply_text_for(adapter, monkeypatch, "cron-2") == "[attachment: chart.png]"
+    assert await _reply_text_for(adapter, monkeypatch, "scheduled-1") == "daily digest"
+    assert await _reply_text_for(adapter, monkeypatch, "scheduled-2") == "[attachment: chart.png]"
 
 
 @pytest.mark.asyncio

@@ -1185,13 +1185,13 @@ async def _fs_owned_session(session_id: Optional[str], profile: Optional[str]) -
 def _fs_profile_home(profile: Optional[str]) -> Optional[Path]:
     """HERMES_HOME of a requested profile (404/400 on an unknown one), None for the request's
     own profile (omitted, ``""`` or ``current``, as ``_is_current_profile`` reads them)."""
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
     from hermes_cli.web_server_profiles import _is_current_profile
 
     if _is_current_profile(profile):
         return None
 
-    return _cron_profile_home(profile)[1]
+    return _profile_home(profile)[1]
 
 
 @router.get("/api/fs/read-data-url")

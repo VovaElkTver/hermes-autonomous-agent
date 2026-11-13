@@ -171,7 +171,7 @@ class TestClassification:
     def test_classify_keeps_unknown_in_visible(self):
         """A tool we can't classify stays visible — never silently dropped.
 
-        This is the OpenClaw #84141 regression guard (cron lost ``exec``
+        This is the OpenClaw #84141 regression guard (scheduled lost ``exec``
         because it wasn't in the catalog).
         """
         from tools.tool_search import classify_tools
@@ -476,9 +476,9 @@ class TestHandleFunctionCallIntegration:
 
 
 class TestRegression_OpenClawCron84141:
-    """Regression guard for the OpenClaw cron-tool-loss class of bug.
+    """Regression guard for the OpenClaw scheduled-tool-loss class of bug.
 
-    OpenClaw #84141: ``toolsAllow: ["exec"]`` on an isolated cron turn
+    OpenClaw #84141: ``toolsAllow: ["exec"]`` on an isolated scheduled turn
     resulted in the agent receiving only ``sessions_send`` — the catalog
     builder silently dropped the requested core tool.
 

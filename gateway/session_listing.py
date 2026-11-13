@@ -6,7 +6,7 @@ from hermes_state_runtime import RuntimeStoreError
 from gateway.owner_identity import same_owner
 from gateway.session_route_recovery import _messaging_platform, mountable
 
-# Local labels (a cron run is a canonical local session whose last viewer is its own fire).
+# Local labels (a scheduled run is a canonical local session whose last viewer is its own fire).
 _LOCAL_SOURCES = ('cli', 'tui', 'gui', 'desktop', 'local', 'cron')
 
 

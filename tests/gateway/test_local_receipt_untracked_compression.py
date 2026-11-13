@@ -294,7 +294,7 @@ async def test_a_chain_that_loops_back_past_one_walk_is_not_adopted(tmp_path, mo
 
 @pytest.mark.asyncio
 async def test_a_restore_on_the_owner_loop_hands_the_catch_up_to_a_worker(tmp_path, monkeypatch):
-    """A restore reached synchronously on the owner loop (a bot, cron or A2A turn, a claim) never takes
+    """A restore reached synchronously on the owner loop (a bot, scheduled or A2A turn, a claim) never takes
     the writer lock there: a contended writer would stall every profile the loop serves. It hands the
     catch-up to a tracked worker and refuses this read; the worker's commit is published on the loop."""
     import asyncio

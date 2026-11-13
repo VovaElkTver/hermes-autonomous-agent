@@ -206,7 +206,7 @@ class SessionPersistenceMixin:
         profile = self._named_profile_for_key(session_key)
         if profile is None:
             # Default-profile (``agent:main``) rows belong to the launch home, not to whichever
-            # profile's scope happens to be active: a scoped drain tick or cron mirror touching a
+            # profile's scope happens to be active: a scoped drain tick or scheduled mirror touching a
             # default chat used to write its rows into the secondary's store (#102157's picture).
             routing_home = getattr(self, "_routing_home", None)
             if routing_home is None or not getattr(self.config, "multiplex_profiles", False):

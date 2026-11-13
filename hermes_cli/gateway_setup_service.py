@@ -90,7 +90,7 @@ def ensure_gateway_service(context: str = "setup", *, interactive: bool = False,
             gw.launchd_start()
         else:
             gw._gw_windows().start()
-        gw.print_success("Gateway service running (cron jobs + messaging platforms).")
+        gw.print_success("Gateway service running (scheduled jobs + messaging platforms).")
         return True
     except gw.UserSystemdUnavailableError as exc:
         gw.print_warning("Could not reach user systemd to start the gateway service:")

@@ -277,7 +277,7 @@ class TestConnectionLifecycle:
 
         writable.close()
 
-        # close() must NOT TRUNCATE: transient per-cron-run connections firing
+        # close() must NOT TRUNCATE: transient per-scheduled-run connections firing
         # full WAL resets race the gateway's live writer and corrupt B-tree
         # pages (issue #45383). It uses PASSIVE instead.
         assert not any(
@@ -841,13 +841,13 @@ class TestMessageStorage:
         get_messages_as_conversation() so providers receive coherent multi-turn
         reasoning context."""
         db.create_session(session_id="s1", source="telegram")
-        db.append_message("s1", role="user", content="create a cron job")
+        db.append_message("s1", role="user", content="create a scheduled job")
         db.append_message(
             "s1",
             role="assistant",
             content=None,
-            tool_calls=[{"function": {"name": "cronjob", "arguments": "{}"}, "id": "c1", "type": "function"}],
-            reasoning="I should call the cronjob tool to schedule this.",
+            tool_calls=[{"function": {"name": "scheduled job", "arguments": "{}"}, "id": "c1", "type": "function"}],
+            reasoning="I should call the scheduled job tool to schedule this.",
         )
         db.append_message("s1", role="tool", content='{"job_id": "abc"}', tool_call_id="c1")
 
@@ -856,7 +856,7 @@ class TestMessageStorage:
         # reasoning must be present on the assistant message
         assistant = conv[1]
         assert assistant["role"] == "assistant"
-        assert assistant.get("reasoning") == "I should call the cronjob tool to schedule this."
+        assert assistant.get("reasoning") == "I should call the scheduled job tool to schedule this."
         # user and tool messages must NOT carry reasoning
         assert "reasoning" not in conv[0]
         assert "reasoning" not in conv[2]
@@ -5084,11 +5084,11 @@ class TestSessionIdSearch:
 
 
 class TestListCronJobRuns:
-    """``list_cron_job_runs`` powers the desktop cron run-history endpoint.
+    """``list_cron_job_runs`` powers the desktop scheduled run-history endpoint.
 
     It must scope to exactly one job's runs via an id prefix range (not a
     substring), order newest-first, enrich with preview/last_active, and stay
-    bounded by the requested window rather than the whole cron history.
+    bounded by the requested window rather than the whole scheduled history.
     """
 
     def _seed_run(self, db, job_id: str, idx: int, started_at: float):

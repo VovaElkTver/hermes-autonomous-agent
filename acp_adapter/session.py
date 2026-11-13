@@ -531,7 +531,7 @@ class SessionManager:
             default_model = model_cfg.strip()
 
         if enabled_toolsets is None:
-            # The same per-platform resolver as the gateway/cron/api_server: platform_toolsets.acp wins, else
+            # The same per-platform resolver as the gateway/scheduled/api_server: platform_toolsets.acp wins, else
             # hermes-acp; its MCP half (every enabled server, a listed-name allowlist, or none for ``no_mcp``)
             # comes back as bare server names, which ACP keys as ``mcp-<server>`` like its session servers.
             resolved = _get_platform_tools(config, "acp")
@@ -540,7 +540,7 @@ class SessionManager:
         kwargs = {
             "platform": "acp", "quiet_mode": True, "session_id": session_id, "session_db": self._get_db(),
             "enabled_toolsets": list(enabled_toolsets),
-            # agent.disabled_toolsets is subtracted at tool granularity by the agent, as on the CLI/gateway/cron.
+            # agent.disabled_toolsets is subtracted at tool granularity by the agent, as on the CLI/gateway/scheduled.
             "disabled_toolsets": (list(disabled_toolsets) if disabled_toolsets is not None
                                   else parse_config_string_list((config.get("agent") or {}).get("disabled_toolsets")) or None),
             "model": model or default_model,

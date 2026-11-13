@@ -195,7 +195,7 @@ def _run_quiet_single_query(cli, effective_query, emitter=None):
     )
 
     author = take_turn_author_from_env()
-    # A spawner that bounds only the turn (cron Bot Chat lane) learns the outcome from this
+    # A spawner that bounds only the turn (scheduled Bot Chat lane) learns the outcome from this
     # report, written before the linger below; popped so tool subprocesses do not inherit it.
     turn_report_path = take_turn_report_path()
     author_kwargs = {"turn_author": author} if author is not None and _accepts_keyword(cli.agent.run_conversation, "turn_author") else {}

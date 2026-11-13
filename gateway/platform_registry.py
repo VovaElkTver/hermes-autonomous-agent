@@ -87,7 +87,7 @@ class PlatformEntry:
     allow_update_command: bool = True  # /update may be issued from this platform
     platform_hint: str = ""  # injected into the system prompt; empty = none
     # ``{tool_name: sentence}`` appended to ``platform_hint`` only when the session's toolset (fixed at
-    # prompt build) has that tool, so the hint never recommends a tool cron or the profile disabled.
+    # prompt build) has that tool, so the hint never recommends a tool scheduled or the profile disabled.
     platform_hint_tool_notes: dict = field(default_factory=dict)
     # ``() -> Optional[dict]`` of ``extra`` fields to seed when auto-enabled from env; runs in
     # ``_apply_env_overrides`` BEFORE adapter construction so ``gateway status`` sees it.
@@ -98,7 +98,7 @@ class PlatformEntry:
     # and never under a multiplexed secondary's scope; a hand-rolled ``os.environ[...] =`` is
     # first-profile-wins. Contract: docs/developer-guide/adding-platform-adapters.md.
     apply_yaml_config_fn: Optional[Callable[[dict, dict], Optional[dict]]] = None
-    cron_deliver_env_var: str = ""  # home-channel env var read for cron ``deliver=<name>``
+    scheduled_deliver_env_var: str = ""  # home-channel env var read for scheduled ``deliver=<name>``
     # ``(target_ref) -> Optional[(chat_id, thread_id)]`` run before channel-directory
     # fallback so plugins can declare native target syntax; None = continue resolution.
     parse_target_ref_fn: Optional[Callable[[str], Optional[tuple[str, Optional[str]]]]] = None
@@ -125,7 +125,7 @@ class PlatformEntry:
     # Whole-request delivery ``(args, normalized_chat_id, platform_name, pconfig)``, sync or
     # async; prefer standalone_sender_fn when the standard send contract suffices.
     send_message_handler: Optional[Callable[[dict, str, str, Any], Any]] = None
-    # Out-of-process sender for cron without a co-resident gateway:
+    # Out-of-process sender for scheduled without a co-resident gateway:
     # ``async (pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False)
     # -> {"success": True, "message_id": ...} | {"error": str}``; ``notify`` only if declared/**kwargs.
     standalone_sender_fn: Optional[Callable[..., Awaitable[dict]]] = None

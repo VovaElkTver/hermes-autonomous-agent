@@ -678,7 +678,7 @@ class TestEnvironmentHints:
         assert "inside" in result.lower()
 
     def test_build_environment_hints_uses_terminal_cwd_over_launch_dir(self, monkeypatch, tmp_path):
-        """THE BUG: gateway/cron set TERMINAL_CWD but the prompt emitted os.getcwd()
+        """THE BUG: gateway/scheduled set TERMINAL_CWD but the prompt emitted os.getcwd()
         (the daemon launch dir). Regression for #24882/#24969/#27383/#29265."""
         import agent.prompt_builder as _pb
         monkeypatch.setattr(_pb, "is_wsl", lambda: False)

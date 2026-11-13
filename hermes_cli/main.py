@@ -3,7 +3,7 @@
 
 Usage:
     hermes                     # Interactive chat (default)
-    hermes chat / gateway / setup / status / cron / doctor / update / ...
+    hermes chat / gateway / setup / status / scheduled / doctor / update / ...
     hermes --version           # Show version and update status
     hermes <cmd> --help        # Per-command help
 """
@@ -198,7 +198,7 @@ def _wants_tui_early(argv: list[str] | None = None) -> bool:
 
     Precedence: ``--cli`` wins, then ``--tui``/``HERMES_TUI=1``, then a
     real-TTY gate, then ``display.interface``. The TTY gate is load-bearing
-    for headless spawners (kanban workers, cron, pipes running ``chat -q``):
+    for headless spawners (kanban workers, scheduled, pipes running ``chat -q``):
     a ``display.interface: tui`` default used to boot the TUI here, whose
     no-TTY bail-out exits 0 without doing the task. An explicit ``--tui``
     still reaches that informative bail-out.
@@ -2482,7 +2482,7 @@ def _dashboard_prepare_runtime(args, headless_backend) -> bool:
     # Bridge terminal.* config into TERMINAL_* env for THIS process, like the
     # CLI (cli.py env_mappings) and gateway (_terminal_env_map) do. The
     # dashboard/serve backend runs agents in-process (tui_gateway.ws →
-    # server._make_agent) and ticks cron itself when desktop-spawned; without
+    # server._make_agent) and ticks scheduled itself when desktop-spawned; without
     # this those consumers saw an unset TERMINAL_ENV and ran every command on
     # the host even under `terminal.backend: docker` (#63141, #54449).
     try:
@@ -2732,7 +2732,7 @@ def _is_tui_chat_launch(args) -> bool:
     # here, so the wrapper pre-warmed its own MCP discovery while the TUI
     # gateway (spawned moments later) ran a second one — an idle stdio MCP
     # server copy held dead for the whole session. Only chat commands can
-    # launch the TUI; other commands (gateway, acp, cron) keep
+    # launch the TUI; other commands (gateway, acp, scheduled) keep
     # their own discovery behavior untouched.
     if getattr(args, "command", None) not in {None, "chat"}:
         return False
@@ -2804,7 +2804,7 @@ def _prepare_agent_startup(args) -> None:
     except Exception:
         logger.debug("MCP server filter setup failed", exc_info=True)
 
-    # TUI launches background MCP discovery with a bounded join; acp/gateway/cron do their own.
+    # TUI launches background MCP discovery with a bounded join; acp/gateway/scheduled do their own.
     if _chat_runs_at_gateway(args):  # chat turns run in the gateway: it owns MCP, hooks, webhooks
         if _accept_hooks:  # rides session.create (env_launch_flags) and the classic CLI's consent check
             os.environ["HERMES_ACCEPT_HOOKS"] = "1"
@@ -3424,7 +3424,7 @@ def main():
         os.environ["HERMES_YOLO_MODE"] = "1"
 
     # Plugin discovery + shell hooks once, gated so introspection commands
-    # (hooks list, cron list, gateway status, ...) pay no discovery cost and
+    # (hooks list, scheduled list, gateway status, ...) pay no discovery cost and
     # trigger no consent prompts for hooks the user is still inspecting.
     _prepare_agent_startup(args)
 

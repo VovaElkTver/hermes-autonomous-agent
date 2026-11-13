@@ -27,7 +27,6 @@ async def _observe_queued_then(tmp_path, monkeypatch, release):
     db, authority, execute, _returned = _authority(tmp_path, agent)
     monkeypatch.setattr(session_finite, 'execute_finite_admission', execute)
     monkeypatch.setattr(run_runtime, 'TURN_SETTLE_SECONDS', 1.0, raising=False)
-    monkeypatch.setattr('gateway.session_cron.unbind_owner', lambda authority: None)
     try:
         with db:
             await authority.submit(ACTOR, Submission(request_id='running', ref=REF, payload={'text': 'a'}, intent='queue'))

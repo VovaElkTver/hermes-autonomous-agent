@@ -8,7 +8,7 @@ Covers the composed behavior of PRs #77080 / #79578 / #80120 / #85613 /
    send_image(), and inbound session thread_id.
 2. reply_in_thread / reply_to_mode config honoring — the opt-out posts
    flat on every send path, including progress routing and the
-   out-of-process cron sender.
+   out-of-process scheduled sender.
 3. _PLATFORM_DEFAULTS coverage — buzz no longer inherits the verbose
    _GLOBAL_DEFAULTS (#95841).
 
@@ -262,7 +262,7 @@ class TestReplyThreadingConfig:
 
     @pytest.mark.asyncio
     async def test_standalone_send_honors_opt_out(self, monkeypatch, tmp_path):
-        """Out-of-process cron delivery must not thread when opted out."""
+        """Out-of-process scheduled delivery must not thread when opted out."""
         fake_cli = tmp_path / "buzz"
         fake_cli.write_text("#!/bin/sh\n")
         fake_cli.chmod(0o755)
@@ -272,7 +272,7 @@ class TestReplyThreadingConfig:
 
         async def fake_exec(cli_path, args, *, relay_url, private_key, auth_tag="", input_text=None, timeout=None):
             captured["args"] = args
-            return 0, json.dumps({"accepted": True, "event_id": "evt-cron"}), ""
+            return 0, json.dumps({"accepted": True, "event_id": "evt-scheduled"}), ""
 
         monkeypatch.setattr(_buzz_mod, "_exec_buzz", fake_exec)
 
@@ -280,7 +280,7 @@ class TestReplyThreadingConfig:
             extra = {"relay_url": "https://test.relay", "cli_path": str(fake_cli)}
 
         monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test")
-        result = await _buzz_mod._standalone_send(_PC(), CHANNEL, "cron msg", thread_id="evt-1")
+        result = await _buzz_mod._standalone_send(_PC(), CHANNEL, "scheduled msg", thread_id="evt-1")
         assert result.get("success") is True
         assert "--reply-to" not in captured["args"]
 
@@ -293,7 +293,7 @@ class TestReplyThreadingConfig:
 
         async def fake_exec(cli_path, args, *, relay_url, private_key, auth_tag="", input_text=None, timeout=None):
             captured["args"] = args
-            return 0, json.dumps({"accepted": True, "event_id": "evt-cron"}), ""
+            return 0, json.dumps({"accepted": True, "event_id": "evt-scheduled"}), ""
 
         monkeypatch.setattr(_buzz_mod, "_exec_buzz", fake_exec)
 
@@ -301,7 +301,7 @@ class TestReplyThreadingConfig:
             extra = {"relay_url": "https://test.relay", "cli_path": str(fake_cli)}
 
         monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test")
-        result = await _buzz_mod._standalone_send(_PC(), CHANNEL, "cron msg", thread_id="evt-1")
+        result = await _buzz_mod._standalone_send(_PC(), CHANNEL, "scheduled msg", thread_id="evt-1")
         assert result.get("success") is True
         assert "--reply-to" in captured["args"]
         assert captured["args"][captured["args"].index("--reply-to") + 1] == "evt-1"

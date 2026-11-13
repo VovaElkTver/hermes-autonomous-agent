@@ -6,7 +6,7 @@ shutdown could not wake it), ``_count_stale_attempt`` counts each attempt once s
 stale streak stayed at 1, ``_check_stale_giveup`` only runs before a call, and only
 /stop ended the turn. Now the call abandons the worker after ``_STALE_ABANDON_KILLS``
 kills of the same attempt and raises a retryable ``TimeoutError``, the way the /stop path
-already leaves a worker behind. An inline call (cron, delegated children) cannot be
+already leaves a worker behind. An inline call (scheduled, delegated children) cannot be
 abandoned, so it stops reporting activity and the owner's inactivity watchdog ends it.
 """
 
@@ -179,9 +179,9 @@ def test_abandon_after_invisible_deltas_retries_instead_of_an_empty_stub(monkeyp
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_wedged_inline_call_stops_reporting_activity(wedged, monkeypatch, caplog):
-    """Cron turns and delegated children run the request inline, so there is no worker to
+    """Scheduled turns and delegated children run the request inline, so there is no worker to
     abandon. Past the kill limit the monitor must stop touching activity (kills and
-    heartbeat), so the cron / delegate inactivity watchdog can end the job."""
+    heartbeat), so the scheduled / delegate inactivity watchdog can end the job."""
     monkeypatch.setattr(helpers, "should_use_direct_api_call", lambda agent: True)
     monkeypatch.setattr(monitor, "_STALE_ABANDON_KILLS", 3, raising=False)
     touches, calls = [], []

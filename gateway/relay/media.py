@@ -39,7 +39,7 @@ _REQUEST_TIMEOUT_S = 30.0
 # Upload retry: the delays BEFORE each extra attempt (3 attempts in all). A transient
 # hop failure (an egress proxy's own 403, a reset, a connector store outage) usually
 # clears within seconds, and a dropped attachment is worse than a short wait. Worst
-# case per file is 3 x _REQUEST_TIMEOUT_S + 7s, well inside cron's per-attachment
+# case per file is 3 x _REQUEST_TIMEOUT_S + 7s, well inside scheduled's per-attachment
 # media-send timeout (300s default).
 _UPLOAD_RETRY_DELAYS_S = (2.0, 5.0)
 # Statuses worth another attempt. The connector itself never answers 403 on

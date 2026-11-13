@@ -45,15 +45,15 @@ def test_ssh_paths_resolve_on_the_remote_and_stay_guarded(monkeypatch):
         assert resolve("x.txt") == "~/proj/x.txt"
         assert resolve("~/y.txt") == "~/y.txt"
         assert resolve("~bob/z.txt") == "~bob/z.txt"
-        assert _check_sensitive_path("../../../etc/cron.d/evil", "sess") is not None
+        assert _check_sensitive_path("../../../etc/scheduled.d/evil", "sess") is not None
         go_live(_remote_home="/home/probe", _remote_home_detected=False)  # a guess, not detected
         assert resolve("x.txt") == "~/proj/x.txt"
 
         # The terminal tool connects inside the failed bring-up's retry window.
         go_live(_remote_home="/config", _remote_home_detected=True)
         assert resolve("x.txt") == "/config/proj/x.txt"
-        assert resolve("../../etc/cron.d/evil") == "/etc/cron.d/evil"
-        assert _check_sensitive_path("../../etc/cron.d/evil", "sess") is not None
+        assert resolve("../../etc/scheduled.d/evil") == "/etc/scheduled.d/evil"
+        assert _check_sensitive_path("../../etc/scheduled.d/evil", "sess") is not None
         resolved = paths._resolve_path_for_task("x.txt", task_id="sess")
         assert paths._path_resolution_warning("x.txt", resolved, task_id="sess") is None
 

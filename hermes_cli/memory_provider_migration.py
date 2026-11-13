@@ -9,7 +9,7 @@ name, the settings it already read, its data directory and tool names, so the mi
 * agent init — when the configured provider cannot be found at all, once per process (Desktop
   users update through the app and never run ``hermes update`` by hand). After a failed attempt,
   starts skip it for :data:`STARTUP_RETRY_SECONDS`, doubling with each further failure up to
-  :data:`STARTUP_RETRY_MAX_SECONDS` (``hermes update`` always retries): every ``hermes chat``, cron
+  :data:`STARTUP_RETRY_MAX_SECONDS` (``hermes update`` always retries): every ``hermes chat``, scheduled
   run and Desktop restart otherwise paid the network round trip again and showed the same failure.
 
 Both install the catalog entry at its reviewed pin through the normal plugin install path (kill

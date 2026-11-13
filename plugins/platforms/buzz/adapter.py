@@ -1951,7 +1951,7 @@ def register(ctx):
         validate_config=validate_config, is_connected=is_connected, required_env=["BUZZ_RELAY_URL", "BUZZ_PRIVATE_KEY"],
         install_hint="Requires the buzz CLI binary (https://github.com/block/buzz) on PATH or at BUZZ_CLI_PATH",
         setup_fn=interactive_setup, env_enablement_fn=_env_enablement, apply_yaml_config_fn=_apply_yaml_config,
-        cron_deliver_env_var="BUZZ_HOME_CHANNEL", standalone_sender_fn=_standalone_send,
+        scheduled_deliver_env_var="BUZZ_HOME_CHANNEL", standalone_sender_fn=_standalone_send,
         allowed_users_env="BUZZ_ALLOWED_USERS", allow_all_env="BUZZ_ALLOW_ALL_USERS", emoji="🐝",
         pii_safe=False,  # identities are pubkeys, not phone numbers
         allow_update_command=True,

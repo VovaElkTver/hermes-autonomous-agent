@@ -1,7 +1,7 @@
 """One user's machine across one real ``hermes update``, observed once per column.
 
-A manual gateway (with its cron ticker and embedded kanban dispatcher) and a manual dashboard run
-in one shared-PID-namespace sandbox. A kanban worker is in flight and a one-shot cron job comes due
+A manual gateway (with its scheduled ticker and embedded kanban dispatcher) and a manual dashboard run
+in one shared-PID-namespace sandbox. A kanban worker is in flight and a one-shot scheduled job comes due
 mid-update. The scenario runs once per column and records what the user would see; each property
 is its own test over that record, gated on its own issue. The expensive part (stage, boot, update,
 settle) is paid once per column, not once per property.
@@ -50,7 +50,7 @@ _FOREIGN_UNIT_GATE = (r"the update restarted the systemd unit \S+ the dashboard 
 DASHBOARD_GATES = {"n1": [_FOREIGN_UNIT_GATE]}
 CRON_GATES = {
     "n1": (r"fired into the update swap window and failed importing",
-           "gated on #113293: a cron job due during an update fires into the swap window, fails, and loses its slot"),
+           "gated on #113293: a scheduled job due during an update fires into the swap window, fails, and loses its slot"),
 }
 
 # ``hermes update``'s own line for each systemd unit it restarted (or tried to) after stopping a dashboard.
@@ -67,7 +67,7 @@ def _gated(entries):
 
 
 class Model:
-    """The fake provider's brain. Chat turns get ``REPLY``; the cron job's prompt is counted; each
+    """The fake provider's brain. Chat turns get ``REPLY``; the scheduled job's prompt is counted; each
     kanban worker completes its own card (``kanban_complete`` counted per card), and the first card's
     worker blocks on its first call until ``release`` so it spans the whole update."""
 
@@ -99,7 +99,7 @@ class Model:
         if self.cron_marker in text:
             with self._lock:
                 self.cron_calls.append(time.time())
-            return Text(f"cron ran {self.cron_marker}")
+            return Text(f"scheduled ran {self.cron_marker}")
         return Text(REPLY)
 
 
@@ -273,7 +273,7 @@ def _quiet_wait(pred, *, timeout: float, what: str, interval: float = 1.0):
 def run(column: str, root: Path) -> SimpleNamespace:
     """Boot the fleet, update, let everything settle, and record what the user would see."""
     o = SimpleNamespace(column=column)
-    model = Model(f"CRON-HANDOFF-{secrets.token_hex(4)}")
+    model = Model(f"SCHEDULED-HANDOFF-{secrets.token_hex(4)}")
     with FakeLLMServer(model) as srv, X.cell(
             column, root, srv.base_url, extra={"kanban": {"dispatch_interval_seconds": 3}}) as inst:
         before = X.start_gateway(inst)
@@ -303,7 +303,7 @@ def run(column: str, root: Path) -> SimpleNamespace:
             due = dt.datetime.now(dt.UTC).replace(microsecond=0) + dt.timedelta(seconds=CRON_DUE_S + 5)
             cp = inst.cli("cron", "create", due.isoformat(), f"Reply with the word done. {model.cron_marker}",
                           "--name", model.cron_marker)
-            assert cp.returncode == 0, "premise: cron create failed\n" + H.describe(cp)
+            assert cp.returncode == 0, "premise: scheduled create failed\n" + H.describe(cp)
             job = next((j for j in cron_jobs(inst) if j.get("name") == model.cron_marker), None)
             assert job and job.get("id"), f"premise: the job is not in jobs.json: {cron_jobs(inst)}"
             o.job_id = job["id"]
@@ -333,10 +333,10 @@ def run(column: str, root: Path) -> SimpleNamespace:
             back = _quiet_wait(dash_back, timeout=240, what="a new dashboard on its port")
             o.dash_new = back if back and back > 0 else None
 
-            if o.ident:  # the cron ticker and the kanban dispatcher live in the gateway
+            if o.ident:  # the scheduled ticker and the kanban dispatcher live in the gateway
                 _quiet_wait(lambda: dt.datetime.now(dt.UTC) > due + dt.timedelta(seconds=5), timeout=600,
-                            what="the cron due time")
-                _quiet_wait(lambda: model.cron_calls, timeout=240, what="the cron job's provider call")
+                            what="the scheduled due time")
+                _quiet_wait(lambda: model.cron_calls, timeout=240, what="the scheduled job's provider call")
                 _quiet_wait(lambda: card_status(inst, o.card1) == "done" and card_status(inst, o.card2) == "done",
                             timeout=300, what="both kanban cards to finish")
                 # A re-fire or a duplicate worker shows up within a full ticker interval on the new gateway.
@@ -375,7 +375,7 @@ def run(column: str, root: Path) -> SimpleNamespace:
         o.cgroup = Path("/proc/self/cgroup").read_text(errors="replace").strip() if sys.platform == "linux" else ""
         o.diag = (inst.diagnostics(o.up) + f"\n--- cgroup of the sandbox ---\n{o.cgroup}"
                   f"\n--- gateway.pid history ---\n{watch.render()}"
-                  f"\n--- cron job ---\n{json.dumps(o.cron_job_after, indent=1)[-2000:]}"
+                  f"\n--- scheduled job ---\n{json.dumps(o.cron_job_after, indent=1)[-2000:]}"
                   f"\n--- kanban ---\ncards={o.cards} provider kanban_complete calls={o.completes}\n"
                   f"peak live workers per card={o.worker_peak} (at, pids)={o.worker_evidence}\nruns={json.dumps(o.runs)}"
                   f"\n--- worker logs ---\n{o.worker_logs[-5000:]}")

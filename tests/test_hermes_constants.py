@@ -309,7 +309,7 @@ class TestResolvePerModelReasoningEffort:
 
 class TestResolveReasoningConfig:
     """Tests for resolve_reasoning_config() — the single shared chokepoint
-    every surface (CLI, gateway, TUI, cron, /model switch, fallback) calls.
+    every surface (CLI, gateway, TUI, scheduled, /model switch, fallback) calls.
 
     Contract: per-model override > global agent.reasoning_effort; the raw
     global value passes through uncoerced (YAML False = disabled); an

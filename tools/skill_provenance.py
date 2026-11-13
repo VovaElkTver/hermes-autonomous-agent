@@ -18,7 +18,7 @@ def reset_current_write_origin(token: contextvars.Token[str]) -> None:
 
 
 def get_current_write_origin() -> str:
-    """"foreground" for any regular agent (CLI, gateway, cron, subagent); "background_review" for the review fork."""
+    """"foreground" for any regular agent (CLI, gateway, scheduled, subagent); "background_review" for the review fork."""
     return _write_origin.get()
 
 

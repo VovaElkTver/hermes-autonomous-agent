@@ -146,9 +146,9 @@ def test_ladder_schedule_honours_retry_after_and_platform_stop_hint(monkeypatch)
     tg = _Agent(platform="telegram")
     _settle(tg, plain)
     assert "send /stop to cancel" in tg.statuses[0]
-    cron = _Agent(platform="cron")
-    _settle(cron, plain)
-    assert cron.statuses[0].endswith("(cycle 1/5)")
+    scheduled = _Agent(platform="cron")
+    _settle(scheduled, plain)
+    assert scheduled.statuses[0].endswith("(cycle 1/5)")
 
 
 def test_interrupt_during_ladder_wait_returns_interrupted_result():

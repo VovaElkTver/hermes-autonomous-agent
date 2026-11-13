@@ -87,7 +87,7 @@ class GatewaySecondaryReconnectMixin:
             owner_origin=owner_origin, incoming_origin=incoming_origin,
         ) or self._refuse_duplicate_claim(listener_claim, claimed, profile_name, platform, "listener"):
             return None
-        # The profile owns this bot from here on, connected or not: cron and the delivery drain read
+        # The profile owns this bot from here on, connected or not: scheduled and the delivery drain read
         # ownership here from another thread, never from the live map a fatal error rewrites.
         bot_platforms = getattr(self, "_profile_bot_platforms", None)
         if bot_platforms is None:
@@ -97,7 +97,7 @@ class GatewaySecondaryReconnectMixin:
 
     def _disown_secondary_platform(self, profile_name: str, platform: Platform) -> None:
         """Undo ``_claim_secondary_platform``'s ownership record for a never-built platform that gave up for good:
-        cron and the delivery drain read it to decide that the profile owns the bot."""
+        scheduled and the delivery drain read it to decide that the profile owns the bot."""
         (getattr(self, "_profile_bot_platforms", None) or {}).get(profile_name, set()).discard(platform)
 
     def _adapter_claims(self, platform: Platform, adapter: BasePlatformAdapter) -> tuple[Optional[tuple], Optional[tuple]]:
@@ -241,7 +241,7 @@ class GatewaySecondaryReconnectMixin:
         """Decide whether a reconnect ends after an attempt that installed nothing, and settle ownership: it
         gave up for good (``(None, None)``: needs a config change), its connected adapter was not installed (a
         newer task won the slot, or shutdown began), or it hit a non-retryable fatal. A never-built platform
-        that ends for good (not the connected case) drops its bot ownership, which cron and the delivery drain
+        that ends for good (not the connected case) drops its bot ownership, which scheduled and the delivery drain
         read."""
         if adapter is None:
             final = success is None

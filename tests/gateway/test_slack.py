@@ -1095,7 +1095,7 @@ def _fake_slack_sdk_modules(client):
 class TestStandaloneSendMedia:
     @pytest.mark.asyncio
     async def test_uploads_local_media_with_message_as_caption(self, tmp_path):
-        """Standalone cron sends must upload via files_upload_v2 — the text
+        """Standalone scheduled sends must upload via files_upload_v2 — the text
         posts as its own message and the file follows (caption-mode, where
         text rides the upload as initial_comment, is chosen by the tool
         layer via the ``caption=`` kwarg — covered in
@@ -1144,7 +1144,7 @@ class TestStandaloneSendMedia:
 
 class TestStandaloneSendUserDmResolution:
     """_standalone_send resolves user IDs (U.../W...) to DM channels via
-    conversations.open before posting (#17444). Cron `deliver=slack:U…`
+    conversations.open before posting (#17444). Scheduled `deliver=slack:U…`
     bypasses send_message()'s tool-level resolution, so the standalone
     sender must resolve on its own."""
 

@@ -91,7 +91,7 @@ def _write_block_cache(writer: str, what: str, skip_label: str, *args,
                        unavailable: str = "", failed: str = "", **kwargs) -> tuple[Optional[str], str]:
     """Call ``gateway.platforms.base.<writer>(*args, **kwargs)``: ``(path, "")`` or ``(None,
     marker)``. Fail-open so one bad block never kills the tool result: gateway deps missing
-    (cron without gateway) → ``unavailable``; any other cache error → warning + ``failed``."""
+    (scheduled without gateway) → ``unavailable``; any other cache error → warning + ``failed``."""
     try:
         import gateway.platforms.base as _base
         return getattr(_base, writer)(*args, **kwargs), ""

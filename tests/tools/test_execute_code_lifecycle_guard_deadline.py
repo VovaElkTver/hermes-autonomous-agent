@@ -2,7 +2,7 @@
 
 The same ``_is_supervised_gateway_process`` probe that wedged ``terminal_tool`` runs
 ahead of every ``execute_code`` cell; a probe that renders no verdict must fail closed
-within the deadline instead of holding the tool call (and its cron slot) forever.
+within the deadline instead of holding the tool call (and its scheduled slot) forever.
 """
 
 from __future__ import annotations

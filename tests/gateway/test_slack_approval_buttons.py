@@ -397,7 +397,7 @@ class TestSlackThreadContext:
         mock_client = adapter._team_clients["T1"]
         mock_client.conversations_replies = AsyncMock(return_value={
             "messages": [
-                {"ts": "1000.0", "bot_id": "B_CRON", "text": "Cron summary"},
+                {"ts": "1000.0", "bot_id": "B_CRON", "text": "Scheduled summary"},
                 # Self-bot child reply -> kept with [assistant] label
                 {
                     "ts": "1000.1",
@@ -417,7 +417,7 @@ class TestSlackThreadContext:
             channel_id="C1", thread_ts="1000.0", current_ts="1000.3", team_id="T1"
         )
 
-        assert "Cron summary" in context
+        assert "Scheduled summary" in context
         assert "[thread parent]" in context
         # Self-bot child reply is now kept with the [assistant] label
         assert "[assistant] Previous self reply" in context

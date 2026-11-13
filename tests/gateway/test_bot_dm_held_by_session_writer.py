@@ -284,12 +284,12 @@ async def test_a_settle_refused_by_a_retired_owner_keeps_the_unknown_outcome(hel
 @pytest.mark.asyncio
 async def test_a_refusal_alone_leaves_the_id_open_for_a_same_id_retry(held):
     """Only the Bot DM tool's settle records a not-sent disposition. A producer that retries its
-    queued record under the same id (the cron drain) after a held refusal still admits it once."""
+    queued record under the same id (the scheduled drain) after a held refusal still admits it once."""
     from hermes_cli.gateway_client import GatewayRPCError
     delivery_id = 'c' * 64
     with pytest.raises(GatewayRPCError) as refused:
-        await asyncio.to_thread(_resubmit, held, delivery_id, 'cron report')
+        await asyncio.to_thread(_resubmit, held, delivery_id, 'scheduled report')
     assert str(refused.value) == 'runtime_coordination_required' and refused.value.data.get('admitted') is False
     held.release()
-    admitted = await asyncio.to_thread(_resubmit, held, delivery_id, 'cron report')
+    admitted = await asyncio.to_thread(_resubmit, held, delivery_id, 'scheduled report')
     assert admitted.get('admission_id') and _admissions(held) == ['bot:' + delivery_id], admitted

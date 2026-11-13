@@ -54,7 +54,7 @@ def _excluded_member(ti: tarfile.TarInfo) -> bool:
 # Snapshot id: UTC ISO with colons replaced by dashes (Windows-safe filename); optional ``-NN`` suffix for same-second snapshots.
 _ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
 
-LEGACY_JOB_STORE_COPY = "cron-jobs.json"
+LEGACY_JOB_STORE_COPY = "scheduled-jobs.json"
 _ARCHIVE_NAME = "skills.tar.gz"
 _STAGING_PREFIX = ".rollback-staging-"
 _UNRESTORED_PREFIX = ".rollback-unrestored-"  # retained staging; outside _STAGING_PREFIX so _prune_old keeps it

@@ -10,7 +10,7 @@ are asserted:
   explicit error or recovers, within a bounded number of retries (never a silent loop);
 * safety    -- no user message is lost from state.db, tool_call/tool_result pairs stay matched in the
   live rows AND in every request, the system prompt stays the session's, and the in-flight ask (for a
-  cron run: the job prompt) reaches the model after every summary;
+  scheduled run: the job prompt) reaches the model after every summary;
 * persisted == sent -- state.db at request time is exactly the request's history prefix (+ only the
   in-flight turn), the live rows equal the host's in-memory history after each turn, and a fresh agent
   resumed from state.db continues with the same history.

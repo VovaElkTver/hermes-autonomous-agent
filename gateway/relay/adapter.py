@@ -886,7 +886,7 @@ class RelayAdapter(RelayDiscordInteractionMixin, BasePlatformAdapter):
         self.descriptor = descriptor
         self.MAX_MESSAGE_LENGTH = descriptor.max_message_length
         self.supports_code_blocks = descriptor.markdown_dialect not in ("", "plain")
-        # Cron in_channel continuable surface (D6 gate in cron/scheduler.py);
+        # Scheduled in_channel continuable surface (D6 gate in scheduled/scheduler.py);
         # class default is False, so only an explicit descriptor bit turns it on.
         self.supports_inchannel_continuable = bool(getattr(descriptor, "supports_inchannel_continuable", False))
 
@@ -1114,7 +1114,7 @@ class RelayAdapter(RelayDiscordInteractionMixin, BasePlatformAdapter):
         return bool(platform_value) and any(p == str(platform_value) for p, _ in ids)
 
     def supports_inchannel_continuable_for_platform(self, platform: Any) -> bool:
-        """Whether ONE fronted platform can host the flat continuable cron surface (D6
+        """Whether ONE fronted platform can host the flat continuable scheduled surface (D6
         gate). The scalar bit is the PRIMARY's only, so resolve the platform's own
         negotiated descriptor; fall back to the scalar when unavailable."""
         per_platform = self._negotiated_descriptor(str(getattr(platform, "value", platform) or ""))
@@ -1248,7 +1248,7 @@ class RelayAdapter(RelayDiscordInteractionMixin, BasePlatformAdapter):
                 "chat_id": chat_id,
                 "content": content,
                 "reply_to": reply_to,
-                # format_hints on the explicit-platform lane too: the cron brief
+                # format_hints on the explicit-platform lane too: the scheduled brief
                 # must render blocks exactly like an interactive send.
                 "metadata": self._with_scope(
                     chat_id, self._with_format_hints_for_platform(platform_value, _sfp_metadata)
@@ -1708,7 +1708,7 @@ class RelayAdapter(RelayDiscordInteractionMixin, BasePlatformAdapter):
         result = await self._gated_op(chat_id, action, surface_declines=True, surface_ambiguous=True)
         if result is None:
             return _MediaNotDelivered("connector did not deliver the attachment") if source_is_path else None
-        if result.get("ambiguous"):  # ack lost: possibly delivered (as cron's live-send timeout); no notice/re-send
+        if result.get("ambiguous"):  # ack lost: possibly delivered (as scheduled's live-send timeout); no notice/re-send
             logger.warning("relay send_media to %s unconfirmed (ack lost): %s", chat_id, result.get("error"))
             return SendResult(success=True, raw_response={"ambiguous": True, "error": result.get("error")})
         if not result.get("success"):
@@ -1776,7 +1776,7 @@ class RelayAdapter(RelayDiscordInteractionMixin, BasePlatformAdapter):
     ) -> SendResult:
         """One local file through the send_media lane, else ``fallback`` (the base caption +
         "couldn't send" notice). When the lane was available but the file still never arrived,
-        the notice goes out exactly as before, yet the send is reported FAILED: cron, the
+        the notice goes out exactly as before, yet the send is reported FAILED: scheduled, the
         send_message tool and the turn tracker must not record a dropped attachment as sent.
         ``failure_notice_sent`` stops the turn dispatcher from posting a second notice."""
         result = await self._send_media(

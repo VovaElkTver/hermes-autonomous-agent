@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, Optional
 from agent.i18n import t
 from gateway.config import Platform
 from gateway.restart import (
-    DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, GATEWAY_SERVICE_RESTART_EXIT_CODE,
+    DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT, GATEWAY_SERVICE_RESTART_EXIT_CODE,
     effective_stop_drain_timeout, effective_stop_watchdog_delay, resolve_background_drain_budget
 )
 from gateway.run_common import _UNSET
@@ -1703,9 +1703,9 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         )
         _api_at_start = self._active_api_run_count()
         _deferred_at_start = ctx.deferred_count()
-        # Background floor clamped to the watchdog leash; getattr-guard for bare shutdown-path doubles.
-        # (The pre-fork key spelling survives until the loader-side rename.)
-        _bg_drain_cfg = getattr(self, "_cron_drain_timeout", DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)
+        # Scheduled-run floor clamped to the watchdog leash; getattr-guard for bare
+        # shutdown-path doubles.
+        _bg_drain_cfg = getattr(self, "_scheduled_drain_timeout", DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT)
         # Under launchd the real leash is launchd's own exit timeout, not our watchdog
         # (drain + grace): a signal-driven stop that lets background work push past it is SIGKILLed
         # before cleanup runs.

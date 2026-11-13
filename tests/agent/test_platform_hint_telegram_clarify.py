@@ -2,7 +2,7 @@
 
 Without it the model faked decision controls with Telegram copy-to-clipboard buttons, which never
 send a choice back to the waiting session. The advice is only given when the session's toolset has
-``clarify``: cron jobs delivering to Telegram and clarify-disabled profiles must not be told to call it.
+``clarify``: scheduled jobs delivering to Telegram and clarify-disabled profiles must not be told to call it.
 """
 
 from types import SimpleNamespace
@@ -32,20 +32,14 @@ def test_telegram_stable_prompt_prefers_clarify_buttons_over_fake_controls():
     assert "copy-to-clipboard" in stable
 
 
-def _cron_tool_names():
-    from cron.scheduler import _resolve_cron_disabled_toolsets
-    from model_tools import get_tool_definitions
-    defs = get_tool_definitions(disabled_toolsets=_resolve_cron_disabled_toolsets({}), quiet_mode=True)
-    return [d["function"]["name"] for d in defs]
-
-
-@pytest.mark.parametrize("surface", ["clarify_disabled_profile", "cron_delivering_to_telegram"])
+@pytest.mark.parametrize("surface", ["clarify_disabled_profile", "scheduled_delivering_to_telegram"])
 def test_telegram_hint_never_recommends_clarify_without_the_tool(surface, monkeypatch):
-    if surface == "cron_delivering_to_telegram":
-        monkeypatch.setenv("HERMES_CRON_AUTO_DELIVER_PLATFORM", "telegram")
-        names = _cron_tool_names()
-        assert "clarify" not in names
-        stable = _stable("cron", names)
+    if surface == "scheduled_delivering_to_telegram":
+        # A scheduled run delivering to Telegram sees the channel hint through the platform="cron"
+        # delivery-destination seam; its toolset here carries no ``clarify``, so neither the channel
+        # hint nor the destination echo may recommend calling it.
+        monkeypatch.setenv("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", "telegram")
+        stable = _stable("cron", ["terminal", "read_file"])
         assert "Delivery destination (telegram): You are on Telegram." in stable
     else:
         stable = _stable("telegram", ["terminal", "read_file"])

@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
 
-# "Never set here" (falls back to os.environ for CLI/cron) vs "" = explicitly cleared (no fallback).
+# "Never set here" (falls back to os.environ for CLI/scheduled) vs "" = explicitly cleared (no fallback).
 _UNSET: Any = object()
 
 # Process-level latch: has set_session_vars() ever bound a session?  When engaged, the subprocess
@@ -30,12 +30,13 @@ def session_context_engaged() -> bool:
 # * UI_SESSION_ID: in-process UI tab id, separate from the durable SESSION_ID, so a stale/rotated
 #   durable key is not consumed by the wrong poller.
 # * MESSAGE_ID: reply anchor keeping notifications inside the originating Telegram topic.
-# * CRON_SESSION: tri-state — _UNSET = legacy env fallback; "1" = cron; "" = non-cron, masks env.
+# * SCHEDULED_SESSION: tri-state — _UNSET = legacy env fallback; "1" = scheduled run; "" = interactive,
+#   masks env.
 _SESSION_VARS = (
     _SESSION_PLATFORM, _SESSION_SOURCE, _SESSION_CHAT_ID, _SESSION_CHAT_TYPE,
     _SESSION_CHAT_NAME, _SESSION_THREAD_ID, _SESSION_USER_ID, _SESSION_USER_ID_ALT,
     _SESSION_USER_NAME, _SESSION_SCOPE_ID, _SESSION_KEY, _SESSION_ID,
-    _SESSION_UI_SESSION_ID, _SESSION_MESSAGE_ID, _SESSION_PROFILE, _CRON_SESSION, _SESSION_PARENT_CHAT_ID,
+    _SESSION_UI_SESSION_ID, _SESSION_MESSAGE_ID, _SESSION_PROFILE, _SCHEDULED_SESSION, _SESSION_PARENT_CHAT_ID,
     _SESSION_ACTOR_ID, _SESSION_ACTOR_NAME,
 ) = tuple(ContextVar(name, default=_UNSET) for name in (
     "HERMES_SESSION_PLATFORM", "HERMES_SESSION_SOURCE", "HERMES_SESSION_CHAT_ID",
@@ -43,8 +44,8 @@ _SESSION_VARS = (
     "HERMES_SESSION_USER_ID", "HERMES_SESSION_USER_ID_ALT", "HERMES_SESSION_USER_NAME",
     "HERMES_SESSION_SCOPE_ID", "HERMES_SESSION_KEY", "HERMES_SESSION_ID",
     "HERMES_UI_SESSION_ID", "HERMES_SESSION_MESSAGE_ID", "HERMES_SESSION_PROFILE",
-    "HERMES_CRON_SESSION", "HERMES_SESSION_PARENT_CHAT_ID",
-    # The trusted sender of THIS turn. USER_ID is the session ROUTE (kanban/cron/send_message rebuild
+    "HERMES_SCHEDULED_SESSION", "HERMES_SESSION_PARENT_CHAT_ID",
+    # The trusted sender of THIS turn. USER_ID is the session ROUTE (kanban/send_message rebuild
     # routes from it) and is empty in a shared chat (Telegram observe mode); ACTOR is who asked.
     "HERMES_SESSION_ACTOR_ID", "HERMES_SESSION_ACTOR_NAME",
 ))
@@ -58,16 +59,16 @@ _SESSION_ASYNC_DELIVERY = ContextVar("HERMES_SESSION_ASYNC_DELIVERY", default=_U
 # or child-process export: a bound id alone cannot authorize detached delivery.
 _SESSION_HISTORY_DELIVERY = ContextVar("HERMES_SESSION_HISTORY_DELIVERY", default=_UNSET)
 
-# Cron auto-delivery vars, set per-job in run_job() so concurrent jobs don't clobber.
-_CRON_AUTO_DELIVER_PLATFORM = ContextVar("HERMES_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
-_CRON_AUTO_DELIVER_CHAT_ID = ContextVar("HERMES_CRON_AUTO_DELIVER_CHAT_ID", default=_UNSET)
-_CRON_AUTO_DELIVER_THREAD_ID = ContextVar("HERMES_CRON_AUTO_DELIVER_THREAD_ID", default=_UNSET)
+# Scheduled-run auto-delivery vars, bound per run so concurrent runs don't clobber.
+_SCHEDULED_AUTO_DELIVER_PLATFORM = ContextVar("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", default=_UNSET)
+_SCHEDULED_AUTO_DELIVER_CHAT_ID = ContextVar("HERMES_SCHEDULED_AUTO_DELIVER_CHAT_ID", default=_UNSET)
+_SCHEDULED_AUTO_DELIVER_THREAD_ID = ContextVar("HERMES_SCHEDULED_AUTO_DELIVER_THREAD_ID", default=_UNSET)
 
 # Legacy env-var name -> ContextVar for get_session_env (_SESSION_ASYNC_DELIVERY deliberately
 # absent: it is a bool capability, read via async_delivery_supported).
 _VAR_MAP = {var.name: var for var in (
-    *_SESSION_VARS, _CRON_AUTO_DELIVER_PLATFORM, _CRON_AUTO_DELIVER_CHAT_ID,
-    _CRON_AUTO_DELIVER_THREAD_ID,
+    *_SESSION_VARS, _SCHEDULED_AUTO_DELIVER_PLATFORM, _SCHEDULED_AUTO_DELIVER_CHAT_ID,
+    _SCHEDULED_AUTO_DELIVER_THREAD_ID,
 )}
 
 
@@ -137,7 +138,7 @@ def set_session_vars(
     chat_name: str = "", thread_id: str = "", user_id: str = "", user_id_alt: str = "",
     user_name: str = "", scope_id: str = "", session_key: str = "", session_id: str = "",
     message_id: str = "", profile: str = "", cwd: str = "", async_delivery: bool = True,
-    ui_session_id: str = "", cron_session: Any = _UNSET, parent_chat_id: str = "",
+    ui_session_id: str = "", scheduled_session: Any = _UNSET, parent_chat_id: str = "",
     session_history_delivery: str | None = None, actor_id: str = "", actor_name: str = "",
 ) -> list:
     """Set all session context variables and return reset tokens.  Call
@@ -154,7 +155,7 @@ def set_session_vars(
     values = (
         platform, source, chat_id, chat_type, chat_name, thread_id, user_id, user_id_alt,
         user_name, scope_id, session_key, session_id, ui_session_id, message_id, profile,
-        cron_session, parent_chat_id, actor_id or user_id, actor_name or user_name,
+        scheduled_session, parent_chat_id, actor_id or user_id, actor_name or user_name,
     )
     tokens = [var.set(value) for var, value in zip(_SESSION_VARS, values)]
     tokens.append(_SESSION_ASYNC_DELIVERY.set(bool(async_delivery)))
@@ -189,13 +190,29 @@ def reset_session_vars() -> None:
     _runtime_cwd("clear_session_cwd")
 
 
+# Transitional map: pre-rename fleet processes still export the old HERMES_CRON_* spellings.
+# Lookup order for a mapped name: ContextVar -> os.environ[new] -> os.environ[legacy] -> default.
+_LEGACY_ENV_FALLBACKS = {
+    "HERMES_SCHEDULED_SESSION": "HERMES_CRON_SESSION",
+    "HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM": "HERMES_CRON_AUTO_DELIVER_PLATFORM",
+    "HERMES_SCHEDULED_AUTO_DELIVER_CHAT_ID": "HERMES_CRON_AUTO_DELIVER_CHAT_ID",
+    "HERMES_SCHEDULED_AUTO_DELIVER_THREAD_ID": "HERMES_CRON_AUTO_DELIVER_THREAD_ID",
+}
+
+
 def get_session_env(name: str, default: str = "") -> str:
-    """Read a session var by legacy ``HERMES_SESSION_*`` name; drop-in for os.getenv.  The
+    """Read a session var by its ``HERMES_*`` env name; drop-in for os.getenv.  The
     ContextVar wins if ever set here (even to ``""``); else ``os.environ``; else *default*."""
     var = _VAR_MAP.get(name)
     if var is not None and (value := var.get()) is not _UNSET:
         return value
-    return os.getenv(name, default)
+    if name in os.environ:
+        return os.environ[name]
+    legacy = _LEGACY_ENV_FALLBACKS.get(name)
+    if legacy:
+        value = os.getenv(legacy, default)  # transitional fallback, drop after fleet redeploy
+        return value
+    return default
 
 
 # Surfaces that are not a human chat channel (gateway binds HERMES_SESSION_PLATFORM, CLI/TUI/

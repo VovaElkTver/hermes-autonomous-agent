@@ -2,7 +2,7 @@
 
 Every tenant (profile) owns a set of random canaries: its provider key (same env var NAME in every
 profile, different value), its API-server key, a non-secret ``.env`` marker, its model id, memory
-text, SOUL text, terminal cwd and a cron prompt. Each tenant also owns its own loopback provider
+text, SOUL text, terminal cwd and a scheduled prompt. Each tenant also owns its own loopback provider
 (``FakeLLMServer``) that accepts only its own key, so every request the provider records is proof of
 WHO sent it. The invariant shared by every scenario is ``leaks(...) == []``: no tenant's canary may
 appear in another tenant's provider request, tool-subprocess env snapshot, or on-disk file.
@@ -143,7 +143,7 @@ class Tenant:
 
     @property
     def cron_prompt(self) -> str:
-        return f"cron-canary-{self.name}-{self.tag}: run the environment probe"
+        return f"scheduled-canary-{self.name}-{self.tag}: run the environment probe"
 
     def canaries(self) -> dict[str, str]:
         return {
@@ -250,12 +250,12 @@ def request_leaks(tenants: dict[str, Tenant]) -> list[str]:
 
 def env_snapshots(t: Tenant) -> list[tuple[str, str]]:
     """``(origin, output)`` of every ENV_PROBE terminal call as sent back to the tenant's provider;
-    origin is ``cron job`` when the conversation is the tenant's cron prompt, else ``turn``."""
+    origin is ``scheduled job`` when the conversation is the tenant's scheduled prompt, else ``turn``."""
     assert t.srv is not None
     seen: dict[str, tuple[str, str]] = {}  # tool_call_id -> (origin, output); results are re-sent later
     cron_mark = t.cron_prompt.split(":")[0]
     for r in list(t.srv.requests):
-        origin = "cron job" if cron_mark in json.dumps(r["body"].get("messages") or []) else "turn"
+        origin = "scheduled job" if cron_mark in json.dumps(r["body"].get("messages") or []) else "turn"
         for m in r["body"].get("messages") or []:
             content = m.get("content")
             text = content if isinstance(content, str) else json.dumps(content)
@@ -290,7 +290,7 @@ def snapshot_problems(tenants: dict[str, Tenant]) -> list[str]:
 
 def file_leaks(tenants: dict[str, Tenant], launch: str = "default") -> list[str]:
     """Byte-scan every file of every tenant home (state.db + WAL, logs, sessions, config, .env,
-    memories, cron output) for any other tenant's canary. The launch home's ``profiles/`` subtree
+    memories, scheduled output) for any other tenant's canary. The launch home's ``profiles/`` subtree
     belongs to the other tenants and is scanned as theirs."""
     problems: list[str] = []
     for t in tenants.values():
@@ -333,14 +333,14 @@ def text_leaks(label: str, text: str, tenants: dict[str, Tenant], owner: str | N
     return out
 
 
-_SEED_CRON = ("import sys; from cron.jobs import create_job, trigger_job, list_jobs; "
+_SEED_CRON = ("import sys; from scheduled.jobs import create_job, trigger_job, list_jobs; "
               "jobs = [j for j in list_jobs(include_disabled=True) if j.get('name') == 'tenancy-canary']; "
               "j = jobs[0] if jobs else create_job(prompt=sys.argv[1], schedule='every 1h', name='tenancy-canary', "
               "deliver='local'); trigger_job(j['id']); print(j['id'])")
 
 
 def seed_due_cron_job(t: Tenant, home: Path) -> str:
-    """Create (once) an hourly job in the tenant's own cron store and mark it due now (the state the
+    """Create (once) an hourly job in the tenant's own scheduled store and mark it due now (the state the
     "run on next tick" action produces), so the multiplexed ticker's first tick fires it."""
     r = subprocess.run([sys.executable, "-c", _SEED_CRON, t.cron_prompt], cwd=str(home),
                        env=hermetic_env(home, {"HERMES_HOME": str(t.home)}), capture_output=True, text=True,
@@ -350,7 +350,7 @@ def seed_due_cron_job(t: Tenant, home: Path) -> str:
 
 
 def cron_requests(t: Tenant) -> int:
-    """Provider requests driven by the tenant's cron job (its prompt canary is in the user turn)."""
+    """Provider requests driven by the tenant's scheduled job (its prompt canary is in the user turn)."""
     assert t.srv is not None
     return sum(t.cron_prompt.split(":")[0] in json.dumps(r["body"]) for r in list(t.srv.requests))
 
@@ -468,7 +468,7 @@ class TuiBackend:
 class ServeBackend(TuiBackend):
     """The real Desktop backend: ``hermes serve --port 0`` with the JSON-RPC surface on ``/api/ws``.
 
-    ``HERMES_DESKTOP=1`` marks it app-spawned, which is also what runs the cron ticker in-process.
+    ``HERMES_DESKTOP=1`` marks it app-spawned, which is also what runs the scheduled ticker in-process.
     """
 
     def __init__(self, home: Path, log_path: Path, extra_env: dict[str, str] | None = None) -> None:

@@ -88,7 +88,7 @@ def test_subagent_context_suppresses_every_write_and_recall_path():
 
 
 def test_primary_and_cron_contexts_still_write_and_recall():
-    """The control, and the scope: cron keeps the provider-side contract it had before."""
+    """The control, and the scope: scheduled keeps the provider-side contract it had before."""
     for context in ("primary", "cron"):
         provider = _RecordingProvider()
         recall = _drive_session(_manager_with(provider, agent_context=context))

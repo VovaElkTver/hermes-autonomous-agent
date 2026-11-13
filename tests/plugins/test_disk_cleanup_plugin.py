@@ -201,7 +201,7 @@ class TestGuessCategory:
 
     def test_cron_subtree_categorised(self, _isolate_env):
         dg = _load_lib()
-        # Only files under ``cron/output/`` are disposable run artifacts.
+        # Only files under ``scheduled/output/`` are disposable run artifacts.
         output_dir = _isolate_env / "cron" / "output" / "job_123"
         output_dir.mkdir(parents=True)
         p = output_dir / "run.md"
@@ -416,16 +416,16 @@ class TestGitWorktreeFilesNeverCleaned:
 
 
 class TestStaleCronEntryMigration:
-    """Regression tests for #37721 — stale cron-output entries in tracked.json."""
+    """Regression tests for #37721 — stale scheduled-output entries in tracked.json."""
 
     def test_quick_skips_stale_cron_output_for_jobs_json(self, _isolate_env):
         """A stale tracked.json entry with category="cron-output" for
-        cron/jobs.json must NOT be deleted by quick().
+        scheduled/jobs.json must NOT be deleted by quick().
 
         This is the exact scenario from #37721: an old tracked.json has
-        {"path": ".../cron/jobs.json", "category": "cron-output"} which
+        {"path": ".../scheduled/jobs.json", "category": "cron-output"} which
         would pass the delete filter but must be skipped because
-        guess_category() now returns None for non-output cron paths.
+        guess_category() now returns None for non-output scheduled paths.
         """
         dg = _load_lib()
         cron_dir = _isolate_env / "cron"
@@ -445,7 +445,7 @@ class TestStaleCronEntryMigration:
         }]))
 
         summary = dg.quick()
-        assert summary["deleted"] == 0, "cron/jobs.json must not be deleted"
+        assert summary["deleted"] == 0, "scheduled/jobs.json must not be deleted"
         assert jobs_json.exists(), "jobs.json must still exist"
         # The stale entry should have been dropped from tracking.
         remaining = json.loads(tracked_file.read_text())
@@ -453,7 +453,7 @@ class TestStaleCronEntryMigration:
 
 
     def test_dry_run_omits_stale_cron_output(self, _isolate_env):
-        """dry_run() should also skip stale cron-output entries."""
+        """dry_run() should also skip stale scheduled-output entries."""
         dg = _load_lib()
         cron_dir = _isolate_env / "cron"
         cron_dir.mkdir()
@@ -470,11 +470,11 @@ class TestStaleCronEntryMigration:
         }]))
 
         auto, prompt = dg.dry_run()
-        assert len(auto) == 0, "stale cron-output for jobs.json must not appear"
+        assert len(auto) == 0, "stale scheduled-output for jobs.json must not appear"
         assert len(prompt) == 0
 
     def test_legitimate_cron_output_still_deleted(self, _isolate_env):
-        """A valid cron-output entry under cron/output/ must still be deleted."""
+        """A valid scheduled-output entry under scheduled/output/ must still be deleted."""
         dg = _load_lib()
         output_dir = _isolate_env / "cron" / "output" / "job_1"
         output_dir.mkdir(parents=True)
@@ -495,7 +495,7 @@ class TestStaleCronEntryMigration:
         }]))
 
         summary = dg.quick()
-        assert summary["deleted"] == 1, "valid old cron-output should be deleted"
+        assert summary["deleted"] == 1, "valid old scheduled-output should be deleted"
         assert not run_md.exists()
 
 
@@ -593,7 +593,7 @@ class TestPostToolCallHook:
 
     def test_paths_the_call_did_not_create_are_never_tracked(self, _isolate_env):
         """'test' items are deleted at age 0 when the turn ends (rmtree for dirs), so only what a
-        call CREATED may be tracked. A user's cron script the agent patched, and a hook dir it
+        call CREATED may be tracked. A user's scheduled script the agent patched, and a hook dir it
         merely listed (by argument or in `find` output), must survive the turn."""
         pi = _load_plugin_init()
         script = _isolate_env / "scripts" / "test_uptime.py"

@@ -196,7 +196,7 @@ def test_concurrent_hermes_pkce_refresh_loses_credential_despite_valid_token_on_
         "though the account is not actually exhausted -- a sibling Hermes "
         "process holds a perfectly valid rotated token. This causes "
         "spurious 're-authenticate with Anthropic' failures under "
-        "ordinary concurrent Hermes usage (fleet workers, cron jobs, "
+        "ordinary concurrent Hermes usage (fleet workers, scheduled jobs, "
         "multiple CLI sessions)."
     )
 

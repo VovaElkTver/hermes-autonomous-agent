@@ -111,7 +111,7 @@ def test_repeated_setup_routes_records_once(hermes_home, mode, component, config
 
 class TestSetupLogging:
     def test_profile_routing_follows_context_home(self, hermes_home, tmp_path):
-        """Desktop multiplex cron records are written to their owning profile."""
+        """Desktop multiplex scheduled records are written to their owning profile."""
         from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
         profile_home = tmp_path / "profile-b"
@@ -121,19 +121,19 @@ class TestSetupLogging:
             [hermes_home, profile_home]
         ) is True
 
-        logger = logging.getLogger("cron.scheduler.profile-routing-test")
+        logger = logging.getLogger("scheduled.scheduler.profile-routing-test")
         token = set_hermes_home_override(profile_home)
         try:
-            logger.info("profile-routed cron record")
+            logger.info("profile-routed scheduled record")
         finally:
             reset_hermes_home_override(token)
         hermes_logging.flush_log_queue()
 
-        assert "profile-routed cron record" in (
+        assert "profile-routed scheduled record" in (
             profile_home / "logs" / "agent.log"
         ).read_text(encoding="utf-8-sig")
         default_log = hermes_home / "logs" / "agent.log"
-        assert not default_log.exists() or "profile-routed cron record" not in default_log.read_text(encoding="utf-8-sig")
+        assert not default_log.exists() or "profile-routed scheduled record" not in default_log.read_text(encoding="utf-8-sig")
 
     @pytest.mark.parametrize("launch_redacts, routed_opt_out, routed_redacted", [
         (False, None, True),      # the launch profile opted out, the routed one did not
@@ -246,7 +246,7 @@ class TestSetupLogging:
         assert "turn of the launch profile" in a_log and "turn of the launch profile" not in b_log
 
     def test_setup_for_an_already_routed_home_adds_no_duplicate_writer(self, hermes_home, tmp_path):
-        """Routing already on (multiplexed gateway, Desktop cron ticker): a profile's agent starting
+        """Routing already on (multiplexed gateway, Desktop scheduled ticker): a profile's agent starting
         up must not add a second writer for its home on top of the router."""
         from logging.handlers import RotatingFileHandler
 
@@ -313,7 +313,7 @@ class TestSetupLogging:
             [hermes_home, profile_home]
         ) is True
 
-        logger = logging.getLogger("cron.scheduler.profile-routing-deleted-test")
+        logger = logging.getLogger("scheduled.scheduler.profile-routing-deleted-test")
         # The default home's agent.log must exist before the fallback assertion
         # can mean anything (lazy-opening handlers may not have created it yet).
         logger.info("routing fallback default-home probe record")
@@ -368,7 +368,7 @@ class TestSetupLogging:
         profile_home.mkdir(parents=True)
         hermes_logging.setup_logging(hermes_home=hermes_home)
         assert hermes_logging.enable_profile_log_routing([hermes_home, profile_home]) is True
-        logger = logging.getLogger("cron.scheduler.out-of-band-delete-test")
+        logger = logging.getLogger("scheduled.scheduler.out-of-band-delete-test")
 
         def emit(message):
             token = set_hermes_home_override(profile_home)
@@ -426,7 +426,7 @@ class TestSetupLogging:
         profile_home.mkdir(parents=True)
         hermes_logging.setup_logging(hermes_home=hermes_home)
         assert hermes_logging.enable_profile_log_routing([hermes_home, profile_home]) is True
-        logger = logging.getLogger("cron.scheduler.liveness-rate-limit-test")
+        logger = logging.getLogger("scheduled.scheduler.liveness-rate-limit-test")
         calls = []
         real = hermes_logging.named_profile_is_deleted
 

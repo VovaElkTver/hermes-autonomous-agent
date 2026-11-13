@@ -28,7 +28,7 @@ _MULTIPLEX_ACTIVE: bool = False
 _AUTO_PINNED_HOME = None
 
 # Context-local counterpart: a task serving a profile OTHER than the process's own, inside a
-# process that is not a multiplexer as a whole — the desktop backend's cron ticker firing a
+# process that is not a multiplexer as a whole — the desktop backend's scheduled ticker firing a
 # sibling profile's job. Every isolation keyed on ``is_multiplex_active()`` (the routed-dotenv
 # guard, ``get_secret``'s fail-closed miss, subprocess scrubbing, passthrough) applies inside
 # it while the process's own turns keep single-profile semantics. A contextvar, so it reaches
@@ -44,7 +44,7 @@ def set_multiplex_active(active: bool) -> None:
     from here on "is this task routed" compares the override against the home the process was
     launched with, not against whatever a host later mirrors into ``os.environ["HERMES_HOME"]``.
     Deactivation releases only the pin activation itself created — a transient toggle
-    (``gateway_migrate._multiplex_read_mode``, a cron worker restoring the caller's mode) must not
+    (``gateway_migrate._multiplex_read_mode``, a scheduled worker restoring the caller's mode) must not
     drop the host's explicit pin (#119242)."""
     global _MULTIPLEX_ACTIVE, _AUTO_PINNED_HOME
     from hermes_constants import (
@@ -91,7 +91,7 @@ class _BoundScope(NamedTuple):
 def serves_routed_profile() -> bool:
     """True when the current task runs for a profile other than the process's own: always under
     multiplexing, else when a HERMES_HOME override names another home (dashboard/desktop backend,
-    per-profile cron ticker) or a secret scope stamped with a foreign home is bound. The MCP
+    per-profile scheduled ticker) or a secret scope stamped with a foreign home is bound. The MCP
     registry scope and the check_fn cache key both follow this predicate so a served profile's
     view never aliases the launch profile's (#111151). A host that mirrors the turn's profile into
     ``HERMES_HOME`` pins its own home with ``hermes_constants.pin_process_hermes_home`` so the
@@ -234,7 +234,7 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
     ``default`` under multiplexing (never another profile's ``os.environ`` value)
     but falls through to ``os.environ`` otherwise — single-profile deployments
     inject credentials via the process env (systemd, ``op run``), so the scope
-    must stay a ``.env`` overlay, not a blindfold (otherwise cron 401s). With no
+    must stay a ``.env`` overlay, not a blindfold (otherwise scheduled 401s). With no
     scope: multiplex INACTIVE reads ``os.environ``; ACTIVE raises (fail closed).
     """
     if _is_global_env(name):
@@ -318,7 +318,7 @@ def _parse_env_value(raw_value: str) -> str:
 
 
 # Per-path memo of parsed ``.env`` files. ``build_profile_secret_scope()`` runs on every gateway
-# turn, cron fire, MCP/browser adoption and housekeeping drain, and each call used to re-read and
+# turn, scheduled fire, MCP/browser adoption and housekeeping drain, and each call used to re-read and
 # re-parse the whole file.
 #
 # FRESHNESS: every call still OPENS and READS the file (a few hundred bytes) and keys on its exact
@@ -427,7 +427,7 @@ def build_profile_secret_scope(hermes_home: Path) -> dict[str, str]:
     # semantics ``get_secret`` never reads ``os.environ`` on a scope miss, so a scope built from
     # the profile files alone would drop a managed-only credential and let the user's value win a
     # managed-vs-user collision (#111187 review). Every multiplex-authoritative scope — gateway
-    # turn, routed cron fire, external worker — is built here, so managed authority is composed
+    # turn, routed scheduled fire, external worker — is built here, so managed authority is composed
     # once, not restored by each consumer.
     from hermes_cli.managed_scope import load_managed_env  # fail-open: {} when no managed scope
 
@@ -449,7 +449,7 @@ def _is_process_home(hermes_home: Path) -> bool:
 def refresh_installed_secret_scope(hermes_home: Path) -> bool:
     """Fold a fresh build of *hermes_home*'s secrets into the INSTALLED scope, in place.
 
-    A scope is frozen when installed, but a fire can learn of new values afterwards: a routed cron
+    A scope is frozen when installed, but a fire can learn of new values afterwards: a routed scheduled
     fire's first agent build discovers plugin secret sources, and under multiplex semantics the
     reload that follows is hydrate-only (never ``os.environ``), so nothing else would carry those
     values into the scope this fire already holds. The caller names the home the installed scope

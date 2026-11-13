@@ -373,7 +373,7 @@ def test_classify_persistence_error_turn_lease_lost_is_distinct():
 
 def test_persistence_error_causes_tuple_matches_classifier():
     """PERSISTENCE_ERROR_CAUSES must cover every value the classifier can
-    return (consumers like cron suppression iterate it)."""
+    return (consumers like scheduled suppression iterate it)."""
     from hermes_state import classify_persistence_error
     from hermes_state_errors import PERSISTENCE_ERROR_CAUSES
 

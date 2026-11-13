@@ -28,7 +28,7 @@ import webbrowser
 from functools import partialmethod
 
 # Cross-process advisory file locking for the refresh fence. Mirrors
-# cron/jobs.py: fcntl is Unix-only, msvcrt is the Windows fallback.
+# scheduled/jobs.py: fcntl is Unix-only, msvcrt is the Windows fallback.
 try:
     import fcntl
 except ImportError:  # pragma: no cover - non-Unix
@@ -70,7 +70,7 @@ class RefreshFenceTimeout(RuntimeError):
 
 
 # POSIX flock: EWOULDBLOCK/EAGAIN, EACCES on some NFS; msvcrt.locking: EACCES/EDEADLK.
-# Same set as cron.scheduler._is_lock_contention_errno (not imported: that module is heavy).
+# Same set as scheduled.scheduler._is_lock_contention_errno (not imported: that module is heavy).
 _FENCE_CONTENTION_ERRNOS = frozenset({errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES, errno.EDEADLK})
 
 
@@ -810,7 +810,7 @@ def _make_redirect_handler(port: int, redirect_uri: str | None = None, redirect_
             return
         # Fail fast when non-interactive: a cached-but-unusable token makes the SDK fall through to the
         # authorization-code flow past the token-file guard, and the waiter would block for the full timeout.
-        # Fail fast at the authorization boundary in non-interactive contexts (systemd gateway, cron,
+        # Fail fast at the authorization boundary in non-interactive contexts (systemd gateway, scheduled,
         # background MCP discovery). Without this check we would print a URL and launch a browser flow no
         # operator can complete, then block in _wait_for_callback for the full timeout. Raise before
         # launching so gateway adapters start promptly and the caller can skip this server with an

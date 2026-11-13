@@ -399,7 +399,7 @@ class TestSpillover:
         yield
 
     def test_env_none_persists_to_spillover(self):
-        """No active sandbox env (MCP-only / cron session) must persist
+        """No active sandbox env (MCP-only / scheduled session) must persist
         host-side instead of inline-truncating — the guglielmo bundle bug."""
         content = "x" * 60_000
         result = maybe_persist_tool_result(

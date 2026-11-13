@@ -1,7 +1,7 @@
 """Cross-process lease watcher: ``display.lease`` for transitions made OUTSIDE ``hermes serve``.
 
 The lease (``tools.bot_desktop.lease``) lives on disk and is changed by whatever process hosts the
-agent — a ``hermes computer-use screen`` takeover from the CLI, a cron worker's release.
+agent — a ``hermes computer-use screen`` takeover from the CLI, a scheduled worker's release.
 ``lease.on_change`` only fires in the writing process, so ``methods_display``'s in-process
 listener never sees those; the Desktop's hero tone and pane state stayed stale until the
 pane was reopened. One daemon thread stats every served home's ``bot-desktop/lease.json`` (launch

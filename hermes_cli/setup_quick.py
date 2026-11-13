@@ -280,7 +280,7 @@ def _run_blank_slate_setup(config: dict, hermes_home, is_existing: bool):
           "through enabling more — opting in to exactly what you want.", "",
           "Forced on: Provider & Model, File Operations, Terminal, Vision, Skills.",
           "Everything else (web, browser, code exec, memory,",
-          "delegation, cron, plugins, MCP, …) starts disabled. The",
+          "delegation, scheduled, plugins, MCP, …) starts disabled. The",
           "essential `hermes-agent` skill is always kept so the agent",
           "can help you drive and configure Hermes itself.", None)
 

@@ -366,7 +366,7 @@ def register(ctx) -> None:
         check_fn=check_requirements, validate_config=validate_config, is_connected=is_connected,
         required_env=["NTFY_TOPIC"], install_hint="pip install httpx   # already a Hermes dependency",
         env_enablement_fn=_env_enablement,  # env-only setups show in `gateway status`
-        cron_deliver_env_var="NTFY_HOME_CHANNEL",
+        scheduled_deliver_env_var="NTFY_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send,  # out-of-process scheduled delivery
         allowed_users_env="NTFY_ALLOWED_USERS", allow_all_env="NTFY_ALLOW_ALL_USERS",
         max_message_length=MAX_MESSAGE_LENGTH, emoji="🔔",

@@ -108,7 +108,6 @@ async def test_failed_hot_serve_retires_session_and_bot_recovery_tasks(monkeypat
         watcher_seen.set()
         raise RuntimeError("late hot-serve failure")
 
-    unbound = []
     monkeypatch.setattr(run_runtime, "_build_profile_authority", build)
     monkeypatch.setattr(
         "gateway.session_local_recovery.recover_local_sessions", recover_local)
@@ -118,8 +117,6 @@ async def test_failed_hot_serve_retires_session_and_bot_recovery_tasks(monkeypat
     )
     monkeypatch.setattr(
         "gateway.session_hosted_service._ensure_hosted_service", fail_hosted)
-    monkeypatch.setattr(
-        "gateway.session_cron.unbind_owner", lambda value: unbound.append(value))
 
     try:
         with pytest.raises(RuntimeError, match="late hot-serve failure"):
@@ -131,7 +128,6 @@ async def test_failed_hot_serve_retires_session_and_bot_recovery_tasks(monkeypat
         assert pump_released.is_set()
         assert watcher is not None and watcher.done() and watcher.cancelled()
         assert not getattr(authority, "_bot_receipt_tasks", set())
-        assert unbound == [authority]
     finally:
         db.close()
 
@@ -218,7 +214,6 @@ async def test_failed_hot_serve_with_a_live_writer_parks_without_aborting_or_re_
     monkeypatch.setattr("gateway.session_bot.recover_bot_deliveries", recover_bot)
     monkeypatch.setattr("gateway.session_local_recovery.recover_local_sessions", lambda a, schedule: None)
     monkeypatch.setattr("gateway.platforms.webhook_ingress.recover_webhook_finalizations", no_webhooks)
-    monkeypatch.setattr("gateway.session_cron.unbind_owner", lambda authority: None)
     monkeypatch.setattr("hermes_cli.profiles.profiles_to_serve", lambda **kw: list(homes.items()))
     try:
         for attempt in range(2):

@@ -19,7 +19,7 @@ def _operator_owned_links(links: list[Path], home: Path) -> list[Path]:
     That boundary is the home itself and anything under it. A link *above* the home
     (macOS ``/tmp`` -> ``/private/tmp``, ``/var`` -> ``/private/var``, or any aliased parent
     the user happens to live in) says nothing about who owns :data:`home`, and treating it as
-    an operator-owned link left a fresh home and its ``cron``/``sessions``/``logs``/``memories``
+    an operator-owned link left a fresh home and its ``scheduled``/``sessions``/``logs``/``memories``
     subdirectories at the default ``0o755`` instead of ``0o700``.
     """
     return [link for link in links if link == home or home in link.parents]

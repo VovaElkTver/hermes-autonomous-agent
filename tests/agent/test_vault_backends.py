@@ -1,7 +1,7 @@
 """Invariants for external password-manager vault backends (1Password / Bitwarden).
 
 Two contracts that must never regress:
-1. A locked manager never prompts where nobody can answer (cron/headless) and never leaks a
+1. A locked manager never prompts where nobody can answer (scheduled/headless) and never leaks a
    value: browser_vault_list reports it under ``locked``, browser_vault_fill refuses.
 2. The unlock path hands the master password to the manager CLI through its documented
    non-interactive channel (bw: ``--passwordenv`` on the CHILD env only — never argv, never our
@@ -78,7 +78,7 @@ def test_locked_manager_is_reported_not_prompted_when_headless(fake_bw, monkeypa
     from tools.browser_vault_tool import browser_vault_fill, browser_vault_list
 
     patcher, backend = _enabled(exe)
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")  # headless: nobody can answer a prompt
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")  # headless: nobody can answer a prompt
     unlock_mod.set_unlock_prompt_callback(lambda *_: "correct horse")  # even a wired prompt must not fire
     try:
         with patcher, patch("agent.vault_backends.enabled_backends", return_value=[backend]):

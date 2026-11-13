@@ -111,7 +111,7 @@ def test_routed_turn_reads_every_terminal_consumer_from_profile(
         assert cfg["cwd"] == str(b_cwd)
         assert cfg["docker_volumes"] == []
         assert cfg["docker_shared_container_key"] == ""
-        # Session-less (cron) work for routed B keys B's own environment, never the launch
+        # Session-less (scheduled) work for routed B keys B's own environment, never the launch
         # profile's shared "default" one (which carries A's env and terminal policy).
         assert tt._resolve_container_task_id(None) == f"home:{os.path.realpath(home)}"
         assert gbase._parse_docker_volume_mounts() == []
@@ -147,7 +147,7 @@ def test_profile_omitting_keys_gets_defaults_not_launch_values(tmp_path):
 
 
 def test_persistent_docker_routed_profile_keeps_one_container(tmp_path):
-    """Persistent Docker is profile-scoped: a routed profile's session-less (cron) work must key the
+    """Persistent Docker is profile-scoped: a routed profile's session-less (scheduled) work must key the
     SAME container as its session-bound work, and never another profile's."""
     import gateway.run as gw
     import tools.terminal_tool as tt
@@ -207,7 +207,7 @@ def test_tui_and_cron_boundaries_bind_and_reset(tmp_path):
         assert terminal_env("TERMINAL_ENV") == "local"
         assert terminal_env("TERMINAL_SSH_HOST") == ""
     assert get_terminal_scope() is None
-    with install_and_reset_profile_terminal_scope(home):  # cron fire helper
+    with install_and_reset_profile_terminal_scope(home):  # scheduled fire helper
         assert terminal_env("TERMINAL_ENV") == "local"
     assert get_terminal_scope() is None
 

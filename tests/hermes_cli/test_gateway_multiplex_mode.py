@@ -193,7 +193,7 @@ def test_guard_refusal_is_recorded_in_runtime_status_and_cleared_on_default(tmp_
 def test_pre_lock_decision_never_publishes_a_rival_gateway_owner(tmp_path):
     """The multiplex decision is made while the config loads, before the runtime-lock claim. Writing
     it then published that launch's pid in gateway_state.json, and a launch racing it read that pid as
-    a live gateway and refused, so neither served (the cron e2e's "A gateway already owns this host").
+    a live gateway and refused, so neither served (the scheduled e2e's "A gateway already owns this host").
     A real `hermes gateway run`-shaped child records its decision without the lock; the rival must
     still see no owner, and the decision lands only once that child holds the lock."""
     import subprocess

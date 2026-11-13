@@ -49,7 +49,7 @@ def summarize_timeout_error(error: BaseException, provider: Optional[str] = None
     """Timeout summary naming the phase and the setting to change, or ``None``
     for any other error (the caller's existing summary handling then applies).
 
-    Both lines keep the "timed out" wording: cron failure notices and the error
+    Both lines keep the "timed out" wording: scheduled failure notices and the error
     classifier re-read this summary as text and match on it.
     """
     phase = _timeout_phase(error)

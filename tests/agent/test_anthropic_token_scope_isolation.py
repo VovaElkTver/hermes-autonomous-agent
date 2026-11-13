@@ -19,7 +19,7 @@ IMPACT
     reads the process-level os.environ instead of the active profile's secret scope.
     This causes:
       - Cross-profile credential leakage (profile A's key used for profile B's turn)
-      - Cron jobs in multiplex mode silently reading the wrong key
+      - Scheduled jobs in multiplex mode silently reading the wrong key
       - No fail-closed signal (UnscopedSecretError) when no scope is installed
 
 STATUS
@@ -216,13 +216,13 @@ class TestClaudeCodeOAuthTokenLeakage:
 
 
 # ---------------------------------------------------------------------------
-# Cron scheduler scenario: unscoped call in multiplex mode
+# Scheduled scheduler scenario: unscoped call in multiplex mode
 # ---------------------------------------------------------------------------
 
 class TestCronSchedulerUnscopedCall:
-    """Cron scheduler in multiplex mode: resolve_anthropic_token() must fail closed.
+    """Scheduled scheduler in multiplex mode: resolve_anthropic_token() must fail closed.
 
-    The cron scheduler (cron/scheduler.py) loads a credential_pool for the job's
+    The scheduled scheduler (scheduled/scheduler.py) loads a credential_pool for the job's
     provider, but does NOT call set_secret_scope() before running Anthropic calls.
     In multiplex mode, this means resolve_anthropic_token() runs with:
       - _MULTIPLEX_ACTIVE = True
@@ -232,14 +232,14 @@ class TestCronSchedulerUnscopedCall:
     which may be empty or hold a different profile's value. No error is raised.
 
     With get_secret() (after fix): raises UnscopedSecretError, signalling that the
-    cron scheduler must be updated to call set_secret_scope() for each job's profile.
+    scheduled scheduler must be updated to call set_secret_scope() for each job's profile.
     """
 
     def test_unscoped_call_in_multiplex_mode_fails_closed(self, monkeypatch):
         """An unscoped resolve_anthropic_token() in multiplex mode must raise UnscopedSecretError.
 
         Bug: os.getenv() at lines 1218/1226/1245 never raises — silently returning
-        the process-level key, masking the missing scope in cron scheduler context.
+        the process-level key, masking the missing scope in scheduled scheduler context.
         Fix: use get_secret(), which raises UnscopedSecretError when multiplex is
         active and no scope is installed (matching secret_scope.py's fail-closed contract).
         """
@@ -248,7 +248,7 @@ class TestCronSchedulerUnscopedCall:
         monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
 
         ss.set_multiplex_active(True)
-        # No set_secret_scope() call — simulates cron scheduler context
+        # No set_secret_scope() call — simulates scheduled scheduler context
 
         with pytest.raises(ss.UnscopedSecretError, match="ANTHROPIC"):
             resolve_anthropic_token()

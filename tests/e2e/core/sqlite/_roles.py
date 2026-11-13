@@ -195,7 +195,7 @@ def role_reader(a: dict, out: Out) -> int:
 
 
 def role_churn(a: dict, out: Out) -> int:
-    """`hermes sessions list` / doctor / cron-guard shape: open, read, close — ``iterations`` times in one
+    """`hermes sessions list` / doctor / scheduled-guard shape: open, read, close — ``iterations`` times in one
     process, alternating the production SessionDB with a bare sqlite3 opener (sqlite3 shell, backup tool).
     The fd count must not grow with the number of cycles."""
     from hermes_state import SessionDB

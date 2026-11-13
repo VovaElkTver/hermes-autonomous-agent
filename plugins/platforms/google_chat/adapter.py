@@ -1795,7 +1795,7 @@ def register(ctx) -> None:
         install_hint="Run `hermes setup` to install Google Chat support.",
         setup_fn=interactive_setup,
         env_enablement_fn=_env_enablement,
-        cron_deliver_env_var="GOOGLE_CHAT_HOME_CHANNEL",
+        scheduled_deliver_env_var="GOOGLE_CHAT_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send,
         allowed_users_env="GOOGLE_CHAT_ALLOWED_USERS",
         allow_all_env="GOOGLE_CHAT_ALLOW_ALL_USERS",

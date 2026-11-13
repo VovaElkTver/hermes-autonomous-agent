@@ -1353,7 +1353,7 @@ class TestOutboundThreadRouting:
         assert result == "spaces/X/threads/CACHED"
 
     def test_resolve_cron_delivery_does_not_fall_back_to_cached_thread(self, adapter):
-        """A cron delivery carries job_id in its metadata and must post as a
+        """A scheduled delivery carries job_id in its metadata and must post as a
         new top-level message, never as a reply to the last inbound thread."""
         adapter._last_inbound_thread["spaces/X"] = "spaces/X/threads/CACHED"
         result = adapter._resolve_thread_id(
@@ -1364,8 +1364,8 @@ class TestOutboundThreadRouting:
         assert result is None
 
     def test_resolve_cron_delivery_with_explicit_thread_still_uses_it(self, adapter):
-        """An explicit thread in cron metadata wins over the no-fallback rule;
-        only the implicit _last_inbound_thread cache is bypassed for cron."""
+        """An explicit thread in scheduled metadata wins over the no-fallback rule;
+        only the implicit _last_inbound_thread cache is bypassed for scheduled."""
         adapter._last_inbound_thread["spaces/X"] = "spaces/X/threads/STALE"
         result = adapter._resolve_thread_id(
             reply_to=None,
@@ -1375,7 +1375,7 @@ class TestOutboundThreadRouting:
         assert result == "spaces/X/threads/EXPLICIT"
 
     def test_resolve_cron_delivery_with_reply_to_thread_still_uses_it(self, adapter):
-        """A reply_to thread resource name still routes a cron delivery there."""
+        """A reply_to thread resource name still routes a scheduled delivery there."""
         adapter._last_inbound_thread["spaces/X"] = "spaces/X/threads/STALE"
         result = adapter._resolve_thread_id(
             reply_to="spaces/X/threads/EXPLICIT",
@@ -1385,7 +1385,7 @@ class TestOutboundThreadRouting:
         assert result == "spaces/X/threads/EXPLICIT"
 
     def test_resolve_interactive_dm_with_metadata_still_falls_back(self, adapter):
-        """Non-cron metadata (e.g. platform event routing) keeps the DM
+        """Non-scheduled metadata (e.g. platform event routing) keeps the DM
         fallback — job_id is the only marker that means 'automated delivery'."""
         adapter._last_inbound_thread["spaces/X"] = "spaces/X/threads/CACHED"
         result = adapter._resolve_thread_id(
@@ -1623,12 +1623,12 @@ class TestAuthorizationEmailMatch:
 
 
 # ===========================================================================
-# Cron scheduler registry (regression guard from /review)
+# Scheduled scheduler registry (regression guard from /review)
 #
 # After the generic-plugin-interface migration, Google Chat no longer lives in
 # the hardcoded ``_KNOWN_DELIVERY_PLATFORMS`` / ``_HOME_TARGET_ENV_VARS`` sets
-# in ``cron/scheduler.py``.  It earns cron delivery via
-# ``PlatformEntry.cron_deliver_env_var``, which the scheduler consults through
+# in ``scheduled/scheduler.py``.  It earns scheduled delivery via
+# ``PlatformEntry.scheduled_deliver_env_var``, which the scheduler consults through
 # ``_is_known_delivery_platform`` and ``_resolve_home_env_var``.  The tests
 # below check that public resolver behavior, not the hardcoded sets.
 # ===========================================================================
@@ -1641,7 +1641,7 @@ class TestCronSchedulerRegistry:
         The adapter's ``register(ctx)`` is only invoked during plugin
         discovery; module-level import alone does not register it.  We call
         discover + manually invoke the register hook so the resolver sees
-        ``cron_deliver_env_var``.
+        ``scheduled_deliver_env_var``.
         """
         from gateway.platform_registry import platform_registry
         if platform_registry.get("google_chat") is not None:
@@ -1669,12 +1669,12 @@ class TestCronSchedulerRegistry:
 
     def test_google_chat_is_known_delivery_platform(self):
         self._ensure_registered()
-        from cron.scheduler_delivery import _is_known_delivery_platform
+        from scheduled.scheduler_delivery import _is_known_delivery_platform
 
         assert _is_known_delivery_platform("google_chat") is True
 
 
-# ── _standalone_send (out-of-process cron delivery) ──────────────────────
+# ── _standalone_send (out-of-process scheduled delivery) ──────────────────────
 
 
 class _FakeAiohttpResponse:
@@ -1760,7 +1760,7 @@ class TestGoogleChatStandaloneSend:
             result = await _gc_mod._standalone_send(
                 PlatformConfig(enabled=True, extra={}),
                 "spaces/AAAA-BBBB",
-                "hello cron",
+                "hello scheduled",
             )
         finally:
             _gc_mod.service_account.Credentials.from_service_account_info = original
@@ -1774,5 +1774,5 @@ class TestGoogleChatStandaloneSend:
         url, kwargs = session.calls[0]
         assert url == "https://chat.googleapis.com/v1/spaces/AAAA-BBBB/messages"
         assert kwargs["headers"]["Authorization"] == "Bearer the-token"
-        assert kwargs["json"] == {"text": "hello cron"}
+        assert kwargs["json"] == {"text": "hello scheduled"}
 

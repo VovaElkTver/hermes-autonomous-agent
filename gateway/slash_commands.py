@@ -661,7 +661,7 @@ class GatewaySlashCommandsMixin(
             persist_home_channel(home, enabled_if_new=not via_relay)
         except Exception as e:
             return t("gateway.set_home.save_failed", error=e)
-        # Preserve legacy home env vars for existing cron/setup consumers.
+        # Preserve legacy home env vars for existing scheduled/setup consumers.
         try:
             from hermes_cli.config import save_env_value
             save_env_value(_home_target_env_var(platform_name), str(chat_id))

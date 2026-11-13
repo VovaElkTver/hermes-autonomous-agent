@@ -29,7 +29,7 @@ class PluginCapabilityCtxMixin:
 
         ``token`` is ``post_llm_call``'s ``side_question_token``: one attempt per turn, shared by
         every plugin of the session's profile, valid for 60 s and only until the next turn starts
-        (cron runs and subagent turns get no token). Same model, the whole
+        (scheduled runs and subagent turns get no token). Same model, the whole
         session (memory included) and its warm prompt cache; tools never run and nothing is
         written to the transcript. Needs the ``llm.side_question`` capability; without it this
         returns None and leaves the attempt to a consented plugin."""

@@ -410,7 +410,7 @@ class GatewayRuntimeAPI:
             return await self._serve(scope, receive, send_watched)
         except Exception as exc:
             # Uvicorn answers an upgrade that raised before accept with HTTP 500 and logs it only to
-            # its own logger, never gateway.log: the dialing cron worker or managed worker sees a bare
+            # its own logger, never gateway.log: the dialing scheduled worker or managed worker sees a bare
             # InvalidStatus (#139922). Name the cause here; uvicorn still sends the 500, but only when
             # nothing was sent yet: a handler that had closed the upgrade already got its 403 out.
             if not accepted:

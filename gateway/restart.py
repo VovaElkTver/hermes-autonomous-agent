@@ -53,8 +53,8 @@ DEFAULT_GATEWAY_RESTART_AFTER_TURN_TIMEOUT = float(DEFAULT_CONFIG["agent"]["rest
 # processor needs no stop-drain floor). ``restart_drain_timeout`` defaults to 0 because
 # interrupting a *chat* turn is cheap and recoverable (user told, session resume_pending); an
 # interrupted /v1 run fails its waiting caller — a 0s drain silently destroys work. The constant
-# name keeps the pre-fork config-key spelling until the loader-side rename lands.
-DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT = float(DEFAULT_CONFIG["agent"]["cron_drain_timeout"])
+# name follows the agent.scheduled_drain_timeout config key.
+DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT = float(DEFAULT_CONFIG["agent"]["scheduled_drain_timeout"])
 # Watchdog leash held back for post-drain work (interrupt agents, kill subprocesses, mark jobs,
 # disconnect adapters). Waiting past it trades a cleanly-interrupted unit for one SIGKILLed
 # mid-write and wedged forever.
@@ -309,15 +309,14 @@ def parse_restart_after_turn_timeout(raw: object) -> float:
     return _parse_timeout_keeping_zero(raw, DEFAULT_GATEWAY_RESTART_AFTER_TURN_TIMEOUT)
 
 
-def parse_cron_drain_timeout(raw: object) -> float:
+def parse_scheduled_drain_timeout(raw: object) -> float:
     """Parse the background-work drain floor (``0`` = opt out; interrupted on the chat budget).
 
-    Covers api_server (/v1) runs today; the name keeps the pre-fork scheduler spelling until the
-    loader-side rename lands. ``0`` is a deliberate opt-out — api_server (/v1) work is then
+    Covers api_server (/v1) runs today. ``0`` is a deliberate opt-out — api_server (/v1) work is then
     interrupted on the same budget as chat work, the pre-#82161 behaviour — and must not fall
     through to the default, unlike empty/missing input.
     """
-    return _parse_timeout_keeping_zero(raw, DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)
+    return _parse_timeout_keeping_zero(raw, DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT)
 
 
 def parse_signal_interrupt_grace_timeout(raw: object) -> float:
@@ -344,7 +343,7 @@ def resolve_background_drain_budget(
 
 
 def resolve_systemd_timeout_stop_sec(
-    drain_timeout: float, background_drain_timeout: float = DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, *,
+    drain_timeout: float, background_drain_timeout: float = DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT, *,
     cleanup_reserve_s: float = BACKGROUND_DRAIN_CLEANUP_RESERVE_S, headroom_s: float = SYSTEMD_STOP_HEADROOM_S,
     floor_s: float = SYSTEMD_TIMEOUT_STOP_SEC_FLOOR,
 ) -> int:

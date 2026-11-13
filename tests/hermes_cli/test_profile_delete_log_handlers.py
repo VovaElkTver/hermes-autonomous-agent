@@ -41,7 +41,7 @@ def routed_profile(tmp_path, monkeypatch):
 
 
 def _log_into(profile: Path, *, adopt: bool) -> None:
-    """Route one record to *profile*: explicitly (Desktop cron startup) or through the
+    """Route one record to *profile*: explicitly (Desktop scheduled startup) or through the
     ``setup_logging(hermes_home=<profile>)`` adoption path ``agent_init`` takes."""
     logger = logging.getLogger("agent.tests.profile-delete")
     token = set_hermes_home_override(profile)

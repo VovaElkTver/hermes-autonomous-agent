@@ -296,7 +296,7 @@ def test_recovery_copy_without_a_catalog_memory_entry_keeps_the_generic_hint(tmp
 
 def test_startup_recovery_backs_off_after_a_failed_install(tmp_path, monkeypatch):
     """A failed agent-start install is not retried by every following process start (each `hermes chat`,
-    cron run, Desktop restart): one failure, then a quiet hour; `hermes update` still retries."""
+    scheduled run, Desktop restart): one failure, then a quiet hour; `hermes update` still retries."""
     from pm import install as pm_install
 
     (tmp_path / "config.yaml").write_text("memory:\n  provider: hindsight\n", encoding="utf-8")

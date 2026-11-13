@@ -510,7 +510,7 @@ class _TurnRun:
 
 
 def _adopt_out_of_band_turns(session: dict) -> None:
-    """Fold turns another surface appended to this session (Telegram reply, cron run) into the model-facing
+    """Fold turns another surface appended to this session (Telegram reply, scheduled run) into the model-facing
     history before the turn snapshots it. The desktop already repaints them from the DB (#86588); without
     this the next prompt still ran on the in-memory history and the model never saw them (#42962).
     Foreign rows are the active rows between the highest ``_row_id`` the agent's own flushes stamped onto
@@ -537,7 +537,7 @@ def _adopt_out_of_band_turns(session: dict) -> None:
         return _below_ceiling(rid) and rid > seen
     # Keyset probe first: the common turn has nothing to adopt and must not pay a full transcript decode.
     # Address the live session, not session_key: a rotation moves the tip mid-session, so the parent
-    # holds none of the foreign rows (Telegram reply, cron) this function exists to adopt and the model
+    # holds none of the foreign rows (Telegram reply, scheduled) this function exists to adopt and the model
     # silently never sees them (#123545).
     with _session_db(session) as db:
         try:

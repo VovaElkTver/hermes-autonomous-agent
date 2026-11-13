@@ -1,4 +1,4 @@
-"""Regression tests for xAI OAuth auth resolution in profile/cron contexts."""
+"""Regression tests for xAI OAuth auth resolution in profile/scheduled contexts."""
 
 import pytest
 
@@ -9,9 +9,9 @@ from hermes_cli.auth import AuthError
 def test_read_xai_oauth_tokens_uses_credential_pool_when_provider_tokens_empty(monkeypatch):
     """Profile auth can have fresh pool tokens while singleton provider state is empty.
 
-    This mirrors profiled cron after re-auth/credential-pool sync: the xAI
+    This mirrors profiled scheduled after re-auth/credential-pool sync: the xAI
     OAuth credential is usable, but `providers.xai-oauth.tokens` may be empty
-    or stale. Treating that as missing auth makes cron keep failing after the
+    or stale. Treating that as missing auth makes scheduled keep failing after the
     user has successfully re-authenticated.
     """
     store = {

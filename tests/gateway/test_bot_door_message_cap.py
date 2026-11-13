@@ -1,5 +1,5 @@
 """The shared Bot door caps a relayed bot DM like main's relay edge (16,200), never a trusted
-producer's report: a cron bot-chat digest over that size is admitted whole."""
+producer's report: a scheduled bot-chat digest over that size is admitted whole."""
 import asyncio
 
 import pytest
@@ -16,7 +16,7 @@ KEY = 'e' * 32
 
 @pytest.mark.asyncio
 async def test_long_cron_report_is_admitted_and_relayed_dm_stays_capped(bot):
-    from cron.scheduler_delivery import bot_chat_message
+    from scheduled.scheduler_delivery import bot_chat_message
     from gateway.session_bot import deliver
     from tools.bot_live_delivery import read_delivery_result
     report = '\n'.join(f'- item {i}: status ok, details recorded' for i in range(480))
@@ -24,7 +24,7 @@ async def test_long_cron_report_is_admitted_and_relayed_dm_stays_capped(bot):
     assert len(message) > 16200
     await deliver(bot.connection, dict(id=KEY, profile='default', message=message))
     await async_wait_until(lambda: (read_delivery_result(bot.home, KEY) or {}).get('status') == 'settled',
-                           timeout=10, what='the cron report to settle')
+                           timeout=10, what='the scheduled report to settle')
     assert (await asyncio.to_thread(read_delivery_result, bot.home, KEY))['message'] == message
 
     relayed = SessionActor('uid:1000', 'default', frozenset({'session:submit', 'session:read'}), 'relay')

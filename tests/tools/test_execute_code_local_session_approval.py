@@ -69,7 +69,7 @@ def turn(monkeypatch, tmp_path):
         ``False`` is a plugin injection or another producer admission into the session. ``attached``: see
         ``_viewer_session``."""
         monkeypatch.setenv("HERMES_EXEC_ASK", "1")  # start_gateway() sets it process-wide
-        for name in ("HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_CRON_SESSION"):
+        for name in ("HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_SCHEDULED_SESSION"):
             monkeypatch.delenv(name, raising=False)
         answers.update(set_answers)
         vars_tokens = set_session_vars(platform=platform, session_key=SESSION_KEY, session_id=SESSION_KEY)

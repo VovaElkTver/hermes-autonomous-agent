@@ -2,9 +2,9 @@
 
 ContextCompressor._previous_summary is an instance variable that stores the
 previous compaction summary for iterative updates.  It is cleared by
-on_session_reset() which is called for /new and /reset, but NOT when a cron
-session ends naturally.  A cron session's compaction sets _previous_summary,
-then the cron session ends.  A subsequent live messaging session inherits this
+on_session_reset() which is called for /new and /reset, but NOT when a scheduled
+session ends naturally.  A scheduled session's compaction sets _previous_summary,
+then the scheduled session ends.  A subsequent live messaging session inherits this
 stale summary, and _generate_summary() injects it as "PREVIOUS SUMMARY:" into
 the summarizer prompt — contaminating the live session's context.
 
@@ -87,8 +87,8 @@ def _conversation_with_handoff(n_exchanges=12):
 def test_stale_previous_summary_cleared_when_no_handoff():
     """Cross-session guard: stale _previous_summary cleared when no handoff."""
     c = _make_compressor()
-    # Simulate state left by a prior cron session's compaction
-    c._previous_summary = "STALE CRON SUMMARY - this must not leak"
+    # Simulate state left by a prior scheduled session's compaction
+    c._previous_summary = "STALE SCHEDULED SUMMARY - this must not leak"
 
     messages = _conversation_without_handoff()
 

@@ -105,7 +105,7 @@ def test_v29_install_purges_child_rows_on_upgrade(tmp_path):
     if not old._trigram_available:
         old.close()
         pytest.skip("trigram tokenizer unavailable in this SQLite build")
-    # Recreate the v29 (cron-only) view/trigger boundary.
+    # Recreate the v29 (scheduled-only) view/trigger boundary.
     old._conn.executescript(
         """
         DROP TRIGGER messages_fts_trigram_insert;

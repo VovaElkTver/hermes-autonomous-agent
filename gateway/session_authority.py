@@ -993,7 +993,7 @@ class SessionAuthority:
         event_stream.lock after check_approval_generation. Before the turn adopts its agent the
         resident one is the previous turn's cached agent, which this turn may replace, so *text* is
         latched for the agent this generation adopts (adopt_agent, under the same lock):
-        ``(None, True)``. A claim with no steer seam (cron, managed worker) latches nothing."""
+        ``(None, True)``. A claim with no steer seam (scheduled, managed worker) latches nothing."""
         adopted_generation, agent = self.adopted.get(ref.session_id, (None, None))
         if adopted_generation != generation:
             agent = self.agent(ref) if self._runs_own_agent(ref) else None

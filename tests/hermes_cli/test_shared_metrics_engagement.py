@@ -99,10 +99,10 @@ def test_a_closed_day_reports_active_time_surfaces_and_primary_model_once(direct
 
 
 def test_internal_and_unattended_turns_are_not_engagement(direct_runtime, tmp_path, clock):
-    """API-server and cron turns add no active time, surface, profile or primary model: a day of them
+    """API-server and scheduled turns add no active time, surface, profile or primary model: a day of them
     alone reports nothing, and they never outvote the person's model."""
     _turn("api-1", "a1", platform="api_server", model=OTHER, clock=clock, at=DAY1)
-    _turn("cron-1", "c1", platform="cron", model=OTHER, clock=clock, at=DAY1 + 300, took=7200)
+    _turn("scheduled-1", "c1", platform="cron", model=OTHER, clock=clock, at=DAY1 + 300, took=7200)
     _turn("cli-1", "t0", clock=clock, at=DAY1 + 86_400)       # day 2 closes day 1
     _flush()
     assert not _stored_values(tmp_path, "hermes.engagement.day.count")

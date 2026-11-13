@@ -1,7 +1,7 @@
 """Recording a reply opens exactly one SQLite connection.
 
 ``record_obligation`` runs on every outbound final response. Its retention prune must run on the
-recording connection, inside the recording transaction — the way the cron ledgers prune — not on a
+recording connection, inside the recording transaction — the way the scheduled ledgers prune — not on a
 second connection opened after the first one closed.
 """
 from __future__ import annotations

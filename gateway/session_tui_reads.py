@@ -4,7 +4,7 @@ On main the TUI's ``slash.exec`` never reached the messaging gateway's handlers:
 ``session.status`` (``Hermes TUI Status``), ``/context`` was ``_format_live_context_output`` (the
 conversation counts, then the desktop gauge's category table). A TUI session on the shared owner
 gets the same lines here, read from the owner's live agent and stored row; every other surface keeps
-the gateway's own handlers (``gateway/session_commands.py``). ``/cron``, the classic CLI's handler
+the gateway's own handlers (``gateway/session_commands.py``). ``/scheduled``, the classic CLI's handler
 that main's TUI ran in its slash worker, is gateway/session_cron_commands.py.
 """
 from __future__ import annotations

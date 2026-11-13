@@ -390,7 +390,7 @@ def reply_latency_fields(*, platform: Any, seconds: float) -> dict[str, str]:
     }
 
 
-# ---- hermes.cron.run ----  (metric name is shared_metrics_contract's persisted series identity)
+# ---- hermes.sched.run ----  (metric name is shared_metrics_contract's persisted series identity)
 
 _RUN_NOTES_MAX = 512
 # execution id -> delivery kind, noted where the job dict is in hand; popped once at the terminal write.
@@ -445,9 +445,9 @@ def run_fields(*, outcome: str, delivery_kind: str, seconds: float) -> dict[str,
     from . import shared_metrics_contract as contract
 
     return {
-        "delivery_kind": delivery_kind if delivery_kind in contract.CRON_DELIVERY_KINDS else "other",
+        "delivery_kind": delivery_kind if delivery_kind in contract.SCHED_DELIVERY_KINDS else "other",
         "duration_bucket": contract.duration_bucket(int(seconds * 1000)),
-        "outcome": outcome if outcome in contract.CRON_RUN_OUTCOMES else "failed",
+        "outcome": outcome if outcome in contract.SCHED_RUN_OUTCOMES else "failed",
     }
 
 
@@ -470,12 +470,12 @@ def record_run_finish(record: Any, delivery_outcome: Any = None) -> None:
         outcome = "skipped"
     else:
         outcome = "success" if success else "failed"
-    _submit(_emit, "CRON_RUN_MARK", run_fields, outcome=outcome, delivery_kind=delivery_kind,
+    _submit(_emit, "SCHED_RUN_MARK", run_fields, outcome=outcome, delivery_kind=delivery_kind,
             seconds=_iso_seconds(started, record.get("finished_at")) if started else 0.0)
 
 
 def record_run_missed(job: Any) -> None:
     """A scheduled occurrence the scheduler dropped without running it (catch-up disabled after
     downtime, or a one-shot past its grace window)."""
-    _submit(_emit, "CRON_RUN_MARK", run_fields, outcome="missed",
+    _submit(_emit, "SCHED_RUN_MARK", run_fields, outcome="missed",
             delivery_kind=run_delivery_kind(job), seconds=0.0)

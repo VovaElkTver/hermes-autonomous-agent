@@ -233,7 +233,7 @@ def test_forum_general_topic_without_message_thread_id_keeps_thread_context():
 
 @pytest.mark.asyncio
 async def test_private_chat_explicit_thread_id_uses_message_thread_id_without_anchor():
-    """Cron-resolved private-chat forum topics route by message_thread_id."""
+    """Scheduled-resolved private-chat forum topics route by message_thread_id."""
     adapter = _make_adapter()
     call_log = []
 
@@ -245,7 +245,7 @@ async def test_private_chat_explicit_thread_id_uses_message_thread_id_without_an
 
     result = await adapter.send(
         chat_id="775566675",
-        content="cron topic delivery",
+        content="scheduled topic delivery",
         metadata={"thread_id": "270453"},
     )
 
@@ -1031,7 +1031,7 @@ async def test_dead_private_topic_reaches_root_with_prune_and_fallback_flag_not_
     """Bot API honours ``direct_messages_topic_id`` only in a channel's DM supergroup; in a bot's private chat it is
     ignored and the message lands in the root as a success (#151852). The stand-in bot follows that rule, so a
     native-id step would read as "delivered in the topic". Text and control sends must instead go to the root
-    themselves, prune the dead binding and (text) report ``thread_fallback`` for cron's note."""
+    themselves, prune the dead binding and (text) report ``thread_fallback`` for scheduled's note."""
     db = _topic_db(tmp_path)
     adapter = _make_adapter()
     adapter._session_store = SimpleNamespace(_db=db)

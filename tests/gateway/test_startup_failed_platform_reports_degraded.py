@@ -141,7 +141,7 @@ async def test_parked_platform_is_logged_at_error_and_the_run_is_degraded(monkey
 @pytest.mark.asyncio
 async def test_sole_parked_platform_keeps_the_gateway_up_degraded(monkeypatch, tmp_path, caplog):
     """Every enabled platform failing non-retryably (no ownership conflict) must not exit 78: local
-    clients and cron need the gateway, so the platform is parked and the run reports ``degraded``."""
+    clients and scheduled need the gateway, so the platform is parked and the run reports ``degraded``."""
     runner = _runner(
         monkeypatch, tmp_path,
         {Platform.API_SERVER: PlatformConfig(enabled=True, extra={"port": 8642})},
@@ -170,7 +170,7 @@ async def test_last_platform_lost_non_retryably_mid_run_keeps_the_gateway_up_deg
     monkeypatch, tmp_path, caplog
 ):
     """The mid-run twin of the all-fatal startup case: a revoked token on the only platform parks it
-    and the gateway stays up ``degraded`` for local clients and cron instead of stopping."""
+    and the gateway stays up ``degraded`` for local clients and scheduled instead of stopping."""
     with caplog.at_level(logging.ERROR):
         _, stop, real_stop = await _start_then_lose_the_only_platform(
             monkeypatch, tmp_path, "telegram_auth_error"

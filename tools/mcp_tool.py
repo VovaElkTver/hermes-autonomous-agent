@@ -392,7 +392,7 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
         # True from park until proven healthy again; logs the revival once.
         self._was_parked: bool = False
         # Why the server is parked (the revival_reason handed to _park), None once healthy again.
-        # Lets cron preflight tell a network-blip park (recovering) from a permanent-error park
+        # Lets scheduled preflight tell a network-blip park (recovering) from a permanent-error park
         # (revoked credentials, dead endpoint) that must not run the job tool-less forever.
         self._park_reason: Optional[str] = None
         self._last_park_line: Optional[str] = None  # last park WARNING text; identical re-parks log at DEBUG
@@ -571,7 +571,7 @@ def _mcp_registry_scope() -> Optional[str]:
     """Registry scope for MCP registrations: the session's own tool scope when one is bound, else a
     profile overlay when this process serves profiles, else None. Under ``gateway.multiplex_profiles``
     every turn runs scoped; a process that serves a routed profile through the HERMES_HOME override
-    (dashboard/desktop backend, per-profile cron ticker) is a multiplexer too, even with the flag
+    (dashboard/desktop backend, per-profile scheduled ticker) is a multiplexer too, even with the flag
     off — keying its connections by the bare name would hand one profile's credentialed connection
     to every other served profile (#111151). Single-profile processes (no override, or an override
     naming their own home) keep bare names."""

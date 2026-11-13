@@ -1,5 +1,5 @@
 """Shared interpreter-shutdown predicate for background threads that can outlive
-process teardown (cron delivery, concurrent tool submission, retry paths).
+process teardown (scheduled delivery, concurrent tool submission, retry paths).
 
 Once finalization starts, ``concurrent.futures`` refuses new work and asyncio's
 default executor is gone, so any further scheduling only produces noise (stray

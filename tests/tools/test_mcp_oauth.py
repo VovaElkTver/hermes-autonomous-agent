@@ -793,7 +793,7 @@ class TestNonInteractiveFailFastAtCallbackBoundary:
     """#57836: a cached-but-unusable token (expired/revoked, refresh rejected)
     makes the MCP SDK fall through to the authorization-code flow even though
     build_oauth_auth's token-file guard passed. In a non-interactive context
-    (systemd gateway, cron, background discovery) that flow must fail fast at
+    (systemd gateway, scheduled, background discovery) that flow must fail fast at
     the redirect/callback boundary — never launch a browser flow or bind a
     callback listener, and never block for the full timeout — so gateway
     startup is not gated on an unusable optional MCP server, and retries do not

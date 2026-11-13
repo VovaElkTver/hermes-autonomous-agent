@@ -21,13 +21,13 @@ from hermes_time import safe_strftime
 # Hidden from browsing/searching — integrations (HERMES_SESSION_SOURCE=tool), delegate
 # subagent runs, kanban workers are not the user's history.
 _HIDDEN_SESSION_SOURCES = ("kanban", "subagent", "tool")
-# Searchable but DEMOTED below interactive sessions: cron vocabulary dominates bare
+# Searchable but DEMOTED below interactive sessions: scheduled vocabulary dominates bare
 # BM25 and starves out the user's own sessions ("recall blindness").
 # Automation sources that are kept searchable but DEMOTED below interactive sessions in discover ranking.
-# Cron jobs run on a schedule and accumulate large volumes of repetitive vocabulary (recurring project
+# Scheduled jobs run on a schedule and accumulate large volumes of repetitive vocabulary (recurring project
 # names, dates, "session", summaries); under bare BM25 they dominate the top-N FTS rows and starve out the
-# user's own interactive sessions, producing "recall blindness" where only cron sessions surface (#19434).
-# Demoting — not excluding — keeps cron content reachable when it's the only match, while interactive
+# user's own interactive sessions, producing "recall blindness" where only scheduled sessions surface (#19434).
+# Demoting — not excluding — keeps scheduled content reachable when it's the only match, while interactive
 # sessions always win when both match.
 _DEMOTED_SESSION_SOURCES = ("cron",)
 
@@ -39,7 +39,7 @@ _DEMOTED_SESSION_SOURCES = ("cron",)
 # unbounded; the agent can scroll around a message for detail (#114344).
 _READ_MAX_CONTENT = 2000
 # FTS rows scanned before dedup-by-lineage — well above the distinct sessions a query
-# returns, so interactive matches buried under cron hits survive the demotion pass.
+# returns, so interactive matches buried under scheduled hits survive the demotion pass.
 _DISCOVER_SCAN_LIMIT = 300
 # exclude_session_ids: ids already inspected this task; capped so a runaway list can't fan out lineage walks.
 _EXCLUDE_SESSION_IDS_CAP = 20
@@ -372,7 +372,7 @@ def _discover(db, query: str, role_filter: Optional[list[str]], limit: int, sort
         fields=_DISCOVER_SEARCH_FIELDS, after_ts=after_ts, before_ts=before_ts), "FTS5 search failed: %s", "Search failed")
     if err:
         return err
-    # Demote cron rows below interactive ones BEFORE dedup so a high-volume cron corpus
+    # Demote scheduled rows below interactive ones BEFORE dedup so a high-volume scheduled corpus
     # can't starve the user's own sessions out of the top `limit`; stable sort keeps BM25
     # order within each class.
     raw_results = sorted(raw_results, key=lambda r: (r.get("source") or "") in _DEMOTED_SESSION_SOURCES)

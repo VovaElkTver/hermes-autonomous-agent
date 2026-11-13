@@ -334,18 +334,18 @@ def test_cron_ticker_stamps_move_but_user_cron_state_still_fails(tmp_path):
     (home / "cron" / "jobs.json").write_text('{"jobs": [1]}\n', encoding="utf-8")
     report = vus.verify_home(str(home), snap)
 
-    assert set(report["modified"]) == {"cron/jobs.json"}
+    assert set(report["modified"]) == {"scheduled/jobs.json"}
     assert report["tolerated_modified"] == [
-        "cron/ticker_heartbeat", "profiles/p/cron/ticker_last_success"]
-    # The user's own cron DEFINITIONS are still state that must not move.
+        "scheduled/ticker_heartbeat", "profiles/p/scheduled/ticker_last_success"]
+    # The user's own scheduled DEFINITIONS are still state that must not move.
     assert report["ok"] is False
 
 
 def test_a_lock_file_is_a_sentinel_not_user_content(tmp_path):
     """A live process's lock file is never user state and is never read.
 
-    Regression for the Windows install/update E2E: the gateway's cron ticker
-    holds a byte-range lock on ``cron/.tick.lock``, so hashing it raised
+    Regression for the Windows install/update E2E: the gateway's scheduled ticker
+    holds a byte-range lock on ``scheduled/.tick.lock``, so hashing it raised
     ``PermissionError`` and failed the upgrade for the harness's own ticker.
     """
     home = tmp_path / "home"
@@ -353,7 +353,7 @@ def test_a_lock_file_is_a_sentinel_not_user_content(tmp_path):
     lock = home / "cron" / ".tick.lock"
     lock.write_text("", encoding="utf-8")
     snap = vus.snapshot_home(str(home))
-    assert snap["entries"]["cron/.tick.lock"] == {"kind": "lock"}
+    assert snap["entries"]["scheduled/.tick.lock"] == {"kind": "lock"}
 
     lock.write_text("held", encoding="utf-8")
     assert vus.verify_home(str(home), snap)["ok"] is True
@@ -371,7 +371,7 @@ def test_snapshot_survives_a_byte_range_lock_held_by_another_handle(tmp_path):
             snap = vus.snapshot_home(str(home))
         finally:
             msvcrt.locking(holder.fileno(), msvcrt.LK_UNLCK, 1)
-    assert snap["entries"]["cron/.tick.lock"] == {"kind": "lock"}
+    assert snap["entries"]["scheduled/.tick.lock"] == {"kind": "lock"}
 
 
 @pytest.mark.platforms("posix")
@@ -419,7 +419,7 @@ def test_sqlite_sidecars_may_vanish_but_the_database_may_not(tmp_path):
 
     A snapshot taken with one live sees them; they vanish when it closes, and the
     report then reads as the upgrade DELETING user state (seen live on
-    cron/executions.db-shm and -wal). The database itself must still fail if lost.
+    scheduled/executions.db-shm and -wal). The database itself must still fail if lost.
     """
     home = tmp_path / "home"
     (home / "cron").mkdir(parents=True)
@@ -431,12 +431,12 @@ def test_sqlite_sidecars_may_vanish_but_the_database_may_not(tmp_path):
     os.remove(home / "cron" / "executions.db-shm")
     report = vus.verify_home(str(home), snap)
     assert report["deleted"] == []
-    assert report["tolerated_deleted"] == ["cron/executions.db-shm", "cron/executions.db-wal"]
+    assert report["tolerated_deleted"] == ["scheduled/executions.db-shm", "scheduled/executions.db-wal"]
     assert report["ok"] is True
 
     os.remove(home / "cron" / "executions.db")
     report = vus.verify_home(str(home), snap)
-    assert report["deleted"] == ["cron/executions.db"]
+    assert report["deleted"] == ["scheduled/executions.db"]
     assert report["ok"] is False
 
 
@@ -459,9 +459,9 @@ def test_a_sidecar_vanishing_mid_walk_is_not_a_scan_crash(tmp_path, monkeypatch)
 
     monkeypatch.setattr(vus, "_entry_record", racing)
     snap = vus.snapshot_home(str(home))
-    assert "cron/jobs.json" in snap["entries"]
+    assert "scheduled/jobs.json" in snap["entries"]
     # Never opened at all: recorded by kind, so the digest race cannot happen.
-    assert snap["entries"]["cron/executions.db-journal"] == {"kind": "file"}
+    assert snap["entries"]["scheduled/executions.db-journal"] == {"kind": "file"}
 
     gone.add("jobs.json")
     with pytest.raises(FileNotFoundError):
@@ -504,7 +504,7 @@ def test_the_running_gateways_state_record_may_change_but_not_vanish(tmp_path):
 def test_any_sqlite_database_is_judged_by_rows_not_bytes(tmp_path):
     """Live SQLite files churn bytes constantly; their contract is the rows.
 
-    state.db was already handled that way; cron/executions.db was not, so a run
+    state.db was already handled that way; scheduled/executions.db was not, so a run
     writing rows mid-window would have failed the leg as a byte modification.
     """
     home = tmp_path / "home"
@@ -526,7 +526,7 @@ def test_any_sqlite_database_is_judged_by_rows_not_bytes(tmp_path):
     with sqlite3.connect(db) as conn:          # rows lost: still fatal
         conn.execute("delete from cron_jobs")
     report = vus.verify_home(str(home), snap)
-    assert report["rows_shrank"] == ["cron/executions.db"]
+    assert report["rows_shrank"] == ["scheduled/executions.db"]
     assert report["ok"] is False
 
 

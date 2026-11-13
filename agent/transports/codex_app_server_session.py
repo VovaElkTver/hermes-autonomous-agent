@@ -184,7 +184,7 @@ def _classify_oauth_failure(primary: str = "", *, stderr: str = "") -> Optional[
 
 @dataclass
 class _ServerRequestRouting:
-    """Default approval policies when no interactive approval_callback is wired in (tests, cron)."""
+    """Default approval policies when no interactive approval_callback is wired in (tests, scheduled)."""
 
     auto_approve_exec: bool = False
     auto_approve_apply_patch: bool = False

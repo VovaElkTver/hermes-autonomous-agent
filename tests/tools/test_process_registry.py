@@ -2202,7 +2202,7 @@ class TestSystemdCgroupIsolation:
         assert "MemoryAccounting=yes" in properties
         # systemd rejects OOMPolicy= on transient --scope units across the versions
         # users run (239/245/249, #102486); emitting it fails the probe and every
-        # cron worker dispatch. MemoryMax + MemoryAccounting carry the isolation.
+        # scheduled worker dispatch. MemoryMax + MemoryAccounting carry the isolation.
         assert not any(p.startswith("OOMPolicy=") for p in properties), properties
         memory_max = next(
             value for value in properties if value.startswith("MemoryMax=")

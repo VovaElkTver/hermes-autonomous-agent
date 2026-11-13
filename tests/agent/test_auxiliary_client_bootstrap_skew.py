@@ -2,8 +2,8 @@
 agent.process_bootstrap that lacks build_keepalive_http_client.
 
 Desktop installs can run a runtime whose agent/process_bootstrap.py predates
-the helper while newer callers (cron scheduler → auxiliary_client) expect it.
-Before the fix the module-level import made every cron job die with
+the helper while newer callers (scheduled scheduler → auxiliary_client) expect it.
+Before the fix the module-level import made every scheduled job die with
 ImportError before any agent logic ran.
 """
 

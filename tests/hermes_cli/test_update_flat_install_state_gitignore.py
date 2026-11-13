@@ -47,17 +47,17 @@ FLAT_INSTALL_RUNTIME_STATE = (
     "state-snapshots/2026-09-14T06-00-00-pre-update/state.db",
     "sessions/2026-09-14_06-00-00_abcd123d.jsonl",
     "browser-profile/Cookies",
-    "cron/executions.db",
-    "cron/executions.db-wal",
-    "cron/executions.db-shm",
-    "cron/deliveries.db",
-    "cron/deliveries.db-wal",
-    "cron/notepad.db",
-    "cron/jobs.json",
-    "cron/.jobs.lock",
-    "cron/ticker_heartbeat",
-    "cron/output/job1/2026-09-14T06-00-00.md",
-    "cron.pid",
+    "scheduled/executions.db",
+    "scheduled/executions.db-wal",
+    "scheduled/executions.db-shm",
+    "scheduled/deliveries.db",
+    "scheduled/deliveries.db-wal",
+    "scheduled/notepad.db",
+    "scheduled/jobs.json",
+    "scheduled/.jobs.lock",
+    "scheduled/ticker_heartbeat",
+    "scheduled/output/job1/2026-09-14T06-00-00.md",
+    "scheduled.pid",
     "gateway.lock",
     "gateway.pid",
     "gateway_state.json",
@@ -165,8 +165,8 @@ def test_untracked_autostash_cannot_sweep_runtime_state(flat_install_repo):
 
 def test_untracked_autostash_leaves_open_wal_database_readable(flat_install_repo):
     """The updater's real stash step must not unlink the -wal/-shm sidecars of a
-    WAL-mode database the scheduler holds open (cron/executions.db). With the
-    base file ignored but its sidecars swept, the next ``cron.executions._connect()``
+    WAL-mode database the scheduler holds open (scheduled/executions.db). With the
+    base file ignored but its sidecars swept, the next ``scheduled.executions._connect()``
     finds a database whose WAL vanished under a live writer and fails with
     ``disk I/O error`` (the review repro on #111175)."""
     from hermes_cli.update_cmd_stash import _stash_local_changes_if_needed
@@ -186,7 +186,7 @@ def test_untracked_autostash_leaves_open_wal_database_readable(flat_install_repo
         stash_ref = _stash_local_changes_if_needed(["git"], flat_install_repo)
 
         assert stash_ref
-        # Fresh connection, exactly as every cron.executions call opens one.
+        # Fresh connection, exactly as every scheduled.executions call opens one.
         with sqlite3.connect(db_path) as reader:
             assert reader.execute("SELECT status FROM executions").fetchall() == [("ok",)]
     finally:

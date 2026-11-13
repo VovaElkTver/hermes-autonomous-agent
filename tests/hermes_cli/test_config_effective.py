@@ -1,5 +1,5 @@
 """Invariants for ``hermes_cli.config_effective.load_user_config_effective`` — the one loader every
-defaults-free config reader (gateway runtime, TUI gateway, cron, ``hermes send`` bridge, doctor,
+defaults-free config reader (gateway runtime, TUI gateway, scheduled, ``hermes send`` bridge, doctor,
 bootstrap modules) goes through."""
 import textwrap
 

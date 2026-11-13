@@ -65,7 +65,7 @@ def _add_agent_import_parsers(migrate_subparsers) -> None:
                              help="Also import OpenClaw's allowlisted API keys and bot tokens")
         if source.name in ("grok-bot", "openbot"):
             sub.add_argument("--activate-routines", action="store_true",
-                             help="Create the imported cron jobs running instead of paused")
+                             help="Create the imported scheduled jobs running instead of paused")
             sub.add_argument("--bot", action="append", metavar="NAME",
                              help="Only this Bot or agent, by name (repeatable)")
         sub.set_defaults(func=cmd_migrate_agent, migrate_agent=source.name)

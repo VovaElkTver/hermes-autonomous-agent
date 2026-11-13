@@ -4,7 +4,7 @@ Two behaviours are covered:
 
 1. ``load_hermes_dotenv()`` auto-loads ``~/.hermes/.op.env`` so the
    ``OP_SERVICE_ACCOUNT_TOKEN`` bootstrap token is available to
-   ``apply_onepassword_secrets()`` in cron / subprocess / macOS / Docker
+   ``apply_onepassword_secrets()`` in scheduled / subprocess / macOS / Docker
    contexts that inherit no shell state (no systemd EnvironmentFile, no
    ``op run``).  ``.op.env`` must never override a token already present
    in the environment (e.g. injected by a systemd ``EnvironmentFile``).

@@ -56,7 +56,7 @@ def test_gateway_stop_under_s6_is_planned(built_image: str, container_name: str)
     start_container(built_image, container_name, cmd="gateway run")
     wait_for_docker_logs(container_name, "s6 supervision", deadline_s=60.0)
 
-    # The supervised gateway (no platforms: it stays up for cron) must be up and
+    # The supervised gateway (no platforms: it stays up for scheduled) must be up and
     # past startup, so its signal handlers and planned-stop watcher are installed.
     # Boot seeds gateway_state=running before the process exists, so readiness is
     # the gateway's OWN state write (it stamps its pid) plus its startup-done line.

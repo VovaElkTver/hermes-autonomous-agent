@@ -1,10 +1,10 @@
 """Regression tests for #60432.
 
-``/update`` (and other gateway shutdown paths) must drain in-flight cron jobs
-before ``process_registry.kill_all()`` runs in final-cleanup.  Cron work runs on
-a thread-pool worker and is tracked in ``cron.scheduler._running_job_ids``, not
+``/update`` (and other gateway shutdown paths) must drain in-flight scheduled jobs
+before ``process_registry.kill_all()`` runs in final-cleanup.  Scheduled work runs on
+a thread-pool worker and is tracked in ``scheduled.scheduler._running_job_ids``, not
 in ``GatewayRunner._running_agents`` — so a zero-agent drain must still wait
-for cron to finish (or time out and take the interrupt/kill path).
+for scheduled to finish (or time out and take the interrupt/kill path).
 """
 import asyncio
 from unittest.mock import patch
@@ -26,11 +26,11 @@ async def test_drain_active_agents_waits_for_in_flight_cron_jobs():
         observed.set()
         return frozenset() if released.is_set() else frozenset({"job-1"})
 
-    with patch("cron.scheduler.get_running_job_ids", side_effect=_cron_in_flight):
+    with patch("scheduled.scheduler.get_running_job_ids", side_effect=_cron_in_flight):
         drain = asyncio.create_task(runner._drain_active_agents(10.0))
         try:
             await asyncio.wait_for(observed.wait(), timeout=5.0)
-            assert not drain.done(), "drain returned while cron still owned its work"
+            assert not drain.done(), "drain returned while scheduled still owned its work"
             released.set()
             _snapshot, timed_out = await asyncio.wait_for(drain, timeout=5.0)
         finally:

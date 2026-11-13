@@ -1186,7 +1186,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         print(_t("hatch.hatched", name=result.display_name))
 
     # ---- delegating handlers: /suggestions, /blueprint, /curator, /kanban, /skills, /memory --
-    # /suggestions went with the cron package; the handler slot is gone with it.
+    # /suggestions went with the scheduled package; the handler slot is gone with it.
 
     def _handle_curator_command(self, cmd: str):
         """Handle /curator — delegates to hermes_cli.curator so the CLI and the `hermes curator`
@@ -1548,7 +1548,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
     def _handle_heartbeat_command(self, cmd: str) -> None:
         """Dispatch /heartbeat: set / status / pause / resume / clear. ``/heartbeat every 10m <prompt>``
         sets the session's one recurring instruction, injected as a normal user turn when due.
-        Session-scoped and in-process — use `hermes cron` for durable schedules."""
+        Session-scoped and in-process — use `hermes scheduled` for durable schedules."""
         from hermes_cli.heartbeat import format_interval
         arg = _command_arg(cmd)
         lower = arg.lower()

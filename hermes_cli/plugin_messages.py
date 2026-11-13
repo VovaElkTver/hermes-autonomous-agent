@@ -2,7 +2,7 @@
 
 The conversation is the session bound in the calling context (a tool or hook running in its turn,
 its slash command, a hook fired for it): the plugin never names a chat, so it cannot reach another
-one. Outside any session (a timer, a plugin thread, cron, a process with no live gateway) the call
+one. Outside any session (a timer, a plugin thread, scheduled, a process with no live gateway) the call
 is refused with a result, never an exception. Routing and the edit fallback live in
 ``gateway/plugin_messages.py``; this side only hands work to the gateway loop and back.
 """

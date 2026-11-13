@@ -433,7 +433,7 @@ def test_idle_permits_are_reclaimed_from_a_peer_instance(db):
 
     Permits are held for a connection's whole life, pooled-idle included, so
     sharing them per path without this would hand the whole budget to whichever
-    handle warmed up first and demote every later one -- a cron job's transient
+    handle warmed up first and demote every later one -- a scheduled job's transient
     SessionDB, a second profile's store -- to the locked writer connection for
     the life of the process. Trading one bug for a quieter one.
     """

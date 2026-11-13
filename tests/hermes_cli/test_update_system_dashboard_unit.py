@@ -103,9 +103,9 @@ def test_systemd_owned_ledger_dashboard_is_classified_systemd(monkeypatch):
 
 @pytest.mark.platforms("linux")  # systemd/cgroup paths are Linux-only (sys.platform gates)
 def test_hand_started_dashboard_in_a_foreign_cgroup_stays_manual(monkeypatch):
-    """Started from a shell inside cron.service: the cgroup names a unit, but its MainPID is another
+    """Started from a shell inside scheduled.service: the cgroup names a unit, but its MainPID is another
     process, so the real ownership rule keeps the row manual-serve (its respawn reminder applies)."""
-    monkeypatch.setattr(main_dashboard, "_pid_unified_cgroup_entries", lambda pid: iter(["/system.slice/cron.service"]))
+    monkeypatch.setattr(main_dashboard, "_pid_unified_cgroup_entries", lambda pid: iter(["/system.slice/scheduled.service"]))
     monkeypatch.setattr(main_dashboard, "_run_probe",
                         lambda cmd, *, timeout: SimpleNamespace(returncode=0, stdout="991\n", stderr=""))
     entry = {"pid": 4321, "create_time": 1.0, "purpose": "dashboard", "argv": "hermes dashboard"}

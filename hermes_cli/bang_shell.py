@@ -3,7 +3,7 @@
 ``!git status`` at the composer runs directly in the session's working directory. The model is
 never invoked — no user/assistant message or tool result enters history — so a bang command costs
 zero tokens and cannot perturb role alternation or the prompt cache. CLI-only by design:
-gateway/API/cron sessions have their own shells and no composer (:func:`bang_shell_enabled`).
+gateway/API/scheduled sessions have their own shells and no composer (:func:`bang_shell_enabled`).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def parse_bang_command(text: str) -> str:
 def bang_shell_enabled() -> bool:
     """True only for interactive local CLI sessions.
 
-    Gateway, API, and cron sessions never reach the composer and their users already have a shell;
+    Gateway, API, and scheduled sessions never reach the composer and their users already have a shell;
     running arbitrary commands for them would be a remote-execution surface with no approving human
     at the keyboard.
     """
@@ -51,7 +51,9 @@ def bang_shell_enabled() -> bool:
         def env_var_enabled(name, default=""):  # type: ignore[misc]
             return str(os.getenv(name, default)).strip().lower() in {"1", "true", "yes", "on"}
 
-    return not (env_var_enabled("HERMES_GATEWAY_SESSION") or env_var_enabled("HERMES_CRON_SESSION")
+    # transitional HERMES_CRON_SESSION fallback, drop after fleet redeploy
+    scheduled = env_var_enabled("HERMES_SCHEDULED_SESSION") or env_var_enabled("HERMES_CRON_SESSION")
+    return not (env_var_enabled("HERMES_GATEWAY_SESSION") or scheduled
                 or (os.getenv("HERMES_SESSION_PLATFORM") or "").strip())
 
 

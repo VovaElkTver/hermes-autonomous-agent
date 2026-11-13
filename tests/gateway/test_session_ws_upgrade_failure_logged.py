@@ -1,9 +1,9 @@
 """An owner that fails a session WebSocket upgrade names the cause in gateway.log (#139922).
 
-The reporter's owner could not import its session WebSocket handler, so every cron agent turn and
+The reporter's owner could not import its session WebSocket handler, so every scheduled agent turn and
 managed-worker dial got ``InvalidStatus: ... HTTP 500`` while gateway.log stayed empty: uvicorn's own
 error logger is not a gateway logger. This boots a real owner (``python -m gateway.run``) in a
-throwaway home with that handler broken, then dials it the way an external cron worker and a managed
+throwaway home with that handler broken, then dials it the way an external scheduled worker and a managed
 worker do.
 """
 import json
@@ -33,13 +33,13 @@ _BROKEN_OWNER = textwrap.dedent('''
     runpy.run_module('gateway.run', run_name='__main__', alter_sys=True)
 ''')
 
-# An external cron worker's agent turn (no owner in-process), then a managed worker's persistence call.
+# An external scheduled worker's agent turn (no owner in-process), then a managed worker's persistence call.
 _DIALS = textwrap.dedent('''
     import json
-    from cron.scheduler_authority import run_canonical_job
+    from scheduled.scheduler_authority import run_canonical_job
     from agent.runtime_session_store import WorkerRPC
     from hermes_constants import get_hermes_home
-    success, _output, _answer, error = run_canonical_job({'id': 'cron4job', 'name': 'cron-4'},
+    success, _output, _answer, error = run_canonical_job({'id': 'cron4job', 'name': 'scheduled-4'},
                                                          execution_id='cron4-exec')
     try:
         WorkerRPC(get_hermes_home())('worker.heartbeat')
@@ -104,7 +104,7 @@ def test_a_failed_session_upgrade_is_logged_with_its_cause(tmp_path):
                     owner.wait(timeout=5)
     log = (home / 'logs' / 'gateway.log').read_text(encoding='utf-8')
     refused = [line for line in log.splitlines() if 'session WebSocket upgrade' in line]
-    # One line per refused dial (the cron turn's and the worker's), each naming the cause.
+    # One line per refused dial (the scheduled turn's and the worker's), each naming the cause.
     assert len(refused) == 2, log
     assert all("NameError: name 'Path' is not defined" in line for line in refused), refused
 

@@ -112,7 +112,7 @@ def test_isolation_host_keeps_every_user_import_path_out_of_process(tmp_path, mo
 
     home = _home_with_plugins(tmp_path, monkeypatch, {"platformprobe": PLATFORM_PLUGIN, "fine": PROBE_PLUGIN})
     # Category loaders' in-process import refuses user code under host isolation (the backstop
-    # behind the memory / context-engine / cron host routes).
+    # behind the memory / context-engine / scheduled host routes).
     import logging
     assert plugin_loader.load_plugin_module(
         "_hermes_user_x.fine", home / "plugins" / "fine", parents=("_hermes_user_x",),

@@ -344,7 +344,7 @@ def analyze_messages(session_id: str, title: str, messages: list[dict[str, Any]]
         "files_touched_count": len(files_touched),
         "delegate_calls": _count_tool(tool_sequence, "delegate_task"),
         "process_calls": _count_tool(tool_sequence, "process") + hits(r"background\s*=\s*true"),
-        "cron_calls": _count_tool(tool_sequence, "cronjob"),
+        "cron_calls": _count_tool(tool_sequence, "scheduled job"),
         "image_vision_calls": _count_tool(tool_sequence, "image", "vision"),
         "tts_calls": _count_tool(tool_sequence, "tts", "text_to_speech"),
         "skill_events": _count_tool(tool_sequence, "skill") + len(re.findall(r"\bskill", lower)),

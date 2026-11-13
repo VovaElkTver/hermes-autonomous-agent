@@ -336,7 +336,7 @@ class TestMultiplexProfileScope:
 
 @pytest.mark.asyncio
 async def test_oversized_cron_output_reaches_twilio_in_1600_char_chunks():
-    """The router hands SMS the full cron payload and send() splits it under Twilio's 1600-char
+    """The router hands SMS the full scheduled payload and send() splits it under Twilio's 1600-char
     cap (a larger Body is rejected with 21617, which used to fail the whole delivery)."""
     from gateway.config import GatewayConfig
     from gateway.delivery import DeliveryRouter

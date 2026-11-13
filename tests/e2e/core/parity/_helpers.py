@@ -462,10 +462,10 @@ def terminate(proc: subprocess.Popen, timeout: float = 30.0) -> int | None:
 def stop_profile_gateway(ph: ParityHome, timeout: float = STOP_TIMEOUT) -> bool:
     """The normal stop for the profile's ``gateway run`` daemon: ``hermes gateway stop``.
 
-    ``hermes -z``, ``hermes chat -q``, ``hermes acp`` and ``hermes cron run`` are clients of the
+    ``hermes -z``, ``hermes chat -q``, ``hermes acp`` and ``hermes scheduled run`` are clients of the
     unified gateway runtime: their first connect spawns the profile's daemon (``ensure_gateway_runtime``
     → ``spawn_unmanaged_gateway``), the daemon owns the agent — and with it the MCP server tree — and it
-    keeps serving after the client exits (cron, messaging, the next client). So the surface's
+    keeps serving after the client exits (scheduled, messaging, the next client). So the surface's
     "normal shutdown" is client exit PLUS the operator stop; only after that may the MCP tree be
     judged for orphans. Returns True when the stop command reported a stopped gateway (False when
     none was running, e.g. a client that never reached the daemon).

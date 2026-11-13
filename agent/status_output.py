@@ -17,7 +17,7 @@ logger = logging.getLogger("run_agent")
 def deliver_kept_startup_notices(agent) -> None:
     """Hand *agent*'s turn the notices a migration kept for the home (a gateway start, a CLI resolution, an
     agent's own start, in any process) when someone sees them: the CLI's print sink or a driver's
-    ``notice_callback``. A cron run, subagent, curator, kanban worker or background fork leaves them in the
+    ``notice_callback``. A scheduled run, subagent, curator, kanban worker or background fork leaves them in the
     home for the next such turn: claiming them there would drop them."""
     from agent.side_question_lease import is_unattended_turn
     if getattr(agent, "suppress_status_output", False) or is_unattended_turn(agent):

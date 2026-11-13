@@ -42,12 +42,12 @@ def test_no_scrub_is_byte_preserving_except_explicit_extra():
 
 
 def test_e2e_scrubbed_env_resolves_bare_hermes_under_minimal_parent_path(monkeypatch, tmp_path):
-    """Regression for #92998/#93082: a gateway launched by systemd/cron with a
-    minimal PATH (no hermes console-script dir) must still hand cron job
+    """Regression for #92998/#93082: a gateway launched by systemd/scheduled with a
+    minimal PATH (no hermes console-script dir) must still hand scheduled job
     children an env whose PATH resolves bare ``hermes``.
 
     Exercises the REAL factory and the REAL bin-dir resolver — no mocks of the
-    helpers. cron/scheduler._run_job_script builds its child env via exactly
+    helpers. scheduled/scheduler._run_job_script builds its child env via exactly
     this call (``build_subprocess_env()`` with scrub on).
     """
     import shutil
@@ -67,7 +67,7 @@ def test_e2e_scrubbed_env_resolves_bare_hermes_under_minimal_parent_path(monkeyp
     monkeypatch.setenv("PATH", minimal_path)
     assert shutil.which("hermes", path=minimal_path) is None
 
-    env = build_subprocess_env(scrub_secrets=True)  # cron _run_job_script path
+    env = build_subprocess_env(scrub_secrets=True)  # scheduled _run_job_script path
 
     resolved = shutil.which("hermes", path=env.get("PATH", ""))
     assert resolved is not None, (

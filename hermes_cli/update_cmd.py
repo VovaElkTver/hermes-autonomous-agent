@@ -1499,7 +1499,7 @@ def _resolve_update_options(args, gateway_mode: bool) -> _UpdateOptions:
     # branch's history; only meaningful with parked_branch_strategy "update_in_place".
     # See #89507.
     switch_branch = bool(getattr(args, "switch_branch", False))
-    # --no-gateway-restart (cron inside the gateway's own cgroup): update code
+    # --no-gateway-restart (scheduled inside the gateway's own cgroup): update code
     # and dependencies but defer the fleet restart so the updater is not killed
     # by its own restart. The pending-restart marker is kept for catch-up.
     no_gateway_restart = bool(getattr(args, "no_gateway_restart", False))
@@ -1809,7 +1809,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
     _pre_update_plan = _begin_update_receipt_and_plan(args)
 
     # Backup before any git/file mutation; the snapshot id (None if disabled/failed) feeds
-    # the post-update cron-jobs safety net. A deliberate opt-out is recorded as a skip with its
+    # the post-update scheduled-jobs safety net. A deliberate opt-out is recorded as a skip with its
     # reason, not as a failed step (see _record_pre_update_backup_outcome).
     pre_update_snapshot_id = _m()._run_pre_update_backup(args)
     _record_pre_update_backup_outcome(args, pre_update_snapshot_id)

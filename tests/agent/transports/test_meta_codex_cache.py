@@ -64,7 +64,7 @@ class TestMetaRetention:
         )
         pck = kw.get("prompt_cache_key", "")
         assert pck.startswith("pck_")
-        # stable across different cron fire timestamps (same scope)
+        # stable across different scheduled fire timestamps (same scope)
         kw2 = transport.build_kwargs(
             model="muse-spark-1.2",
             messages=messages,

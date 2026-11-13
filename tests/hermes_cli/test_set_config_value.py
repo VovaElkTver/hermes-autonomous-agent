@@ -371,7 +371,7 @@ class TestListNavigation:
 
 
 # ---------------------------------------------------------------------------
-# Unpinned-cron notice on a global model change (#59031, #44585)
+# Unpinned-scheduled notice on a global model change (#59031, #44585)
 # ---------------------------------------------------------------------------
 
 

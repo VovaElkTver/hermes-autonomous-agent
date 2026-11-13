@@ -1,7 +1,7 @@
 """Discord channel links are accepted wherever a channel id is (#115216).
 
 Copy Link sits next to Copy Channel ID in Discord's context menu; a pasted link used to reach
-``int()`` inside the adapter and every home-channel / cron delivery died as a generic send failure.
+``int()`` inside the adapter and every home-channel / scheduled delivery died as a generic send failure.
 """
 import asyncio
 from types import SimpleNamespace
@@ -34,7 +34,7 @@ def test_discord_home_link_loads_as_channel_id(tmp_path, monkeypatch, source):
 
 
 def test_resolve_channel_accepts_a_pasted_link_for_explicit_targets():
-    """Cron ``deliver: discord:<link>`` bypasses HomeChannel, so the adapter's resolver — the
+    """Scheduled ``deliver: discord:<link>`` bypasses HomeChannel, so the adapter's resolver — the
     chokepoint every outbound target passes through — must accept the link too."""
     adapter = object.__new__(DiscordAdapter)
     channel = SimpleNamespace(id=456)

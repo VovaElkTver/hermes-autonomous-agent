@@ -21,8 +21,8 @@ class TestServedProfilesStatus:
             importlib.reload(status)
 
 
-def test_cron_profile_homes_serve_every_live_profile(tmp_path, monkeypatch):
-    """The helper wired into in-process cron returns default + every live named profile;
+def test_scheduled_profile_homes_serve_every_live_profile(tmp_path, monkeypatch):
+    """The helper wired into in-process scheduled returns default + every live named profile;
     a tombstoned profile dir is skipped."""
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     default_home = tmp_path / ".hermes"
@@ -42,7 +42,7 @@ def test_cron_profile_homes_serve_every_live_profile(tmp_path, monkeypatch):
 
 def test_cron_tick_homes_include_active_named_host(tmp_path, monkeypatch):
     """A named-profile host running the multiplexer ticks its own store exactly once:
-    it is part of the served set, and cron must not union it a second time."""
+    it is part of the served set, and scheduled must not union it a second time."""
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     default_home = tmp_path / ".hermes"
     for name in ("host", "worker"):
@@ -54,9 +54,9 @@ def test_cron_tick_homes_include_active_named_host(tmp_path, monkeypatch):
 
     cfg = GatewayConfig(multiplex_profiles=True)
     adapter_names = [name for name, _home in gateway_run._multiplex_profile_homes(cfg)]
-    cron_homes = gateway_run._cron_tick_profile_homes(cfg)
-    cron_names = [name for name, _home in cron_homes]
-    cron_by_name = dict(cron_homes)
+    scheduled_homes = gateway_run._scheduled_tick_profile_homes(cfg)
+    cron_names = [name for name, _home in scheduled_homes]
+    cron_by_name = dict(scheduled_homes)
 
     assert adapter_names == ["default", "host", "worker"]
     assert cron_names == ["default", "host", "worker"]

@@ -1,7 +1,7 @@
 """Board identity follows the profile a kanban call runs FOR, never the generic ``"worker"``.
 
 ``kanban_comment`` / ``kanban_create`` used to read ``os.environ["HERMES_PROFILE"]`` and fall back to
-``"worker"``. A multiplexed per-profile cron tick binds the profile as a ``HERMES_HOME`` override and
+``"worker"``. A multiplexed per-profile scheduled tick binds the profile as a ``HERMES_HOME`` override and
 never mirrors it into ``os.environ``, so every card comment a served profile's turn wrote was
 authored ``"worker"`` (#119859). ``hermes_cli.profiles.current_profile_name`` is the one resolver:
 the bound override first, the dispatcher's ``HERMES_PROFILE`` pin only outside an override, the

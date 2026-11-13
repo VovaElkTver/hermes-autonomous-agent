@@ -322,10 +322,10 @@ def request_elicitation_consent(message: str, description: str, *,
     # api_server is an unattended *platform* for the dangerous-command gate, but a live ``/v1/runs`` run
     # registers an approval notify callback and answers via ``POST /v1/runs/{id}/approval``
     # (gateway/platforms/api_server_runs.py), so its per-call MCP consent takes the gateway path too.
-    # A run without a callback still fails closed below; cron and ``-q`` workers stay excluded.
+    # A run without a callback still fails closed below; scheduled and ``-q`` workers stay excluded.
     api_run_context = (
         _ctx._get_session_platform() == "api_server"
-        and not _ctx._is_cron_approval_context()
+        and not _ctx._is_scheduled_approval_context()
         and not _ctx._is_single_query_approval_context()
     )
     if _ctx._is_gateway_approval_context() or api_run_context:
@@ -349,7 +349,7 @@ def request_elicitation_consent(message: str, description: str, *,
             return "cancel"  # nobody answered (timeout / prompt withdrawn) — not a user refusal
         return _remembered_consent(session_key, decision.get("choice"), remember_key, "decline")
 
-    # Nobody can answer a -q, cron or unattended-platform worker. A `hermes chat -q` turn still has the CLI's
+    # Nobody can answer a -q, scheduled or unattended-platform worker. A `hermes chat -q` turn still has the CLI's
     # panel callback registered, which would wait the full approval timeout before failing closed.
     if _ctx._no_user_can_answer():
         logger.info("Elicitation consent (%s) declined: no user can answer in this session", surface)

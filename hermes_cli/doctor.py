@@ -175,7 +175,7 @@ def _print_summary(should_fix: bool, total: Finding) -> None:
 def run_doctor(args):
     """Run diagnostic checks."""
     should_fix = getattr(args, 'fix', False)
-    # Doctor runs from the interactive CLI, so CLI-gated tool checks (e.g. cronjob) see the same context.
+    # Doctor runs from the interactive CLI, so CLI-gated tool checks (e.g. scheduled job) see the same context.
     os.environ.setdefault("HERMES_INTERACTIVE", "1")
     if getattr(args, 'ack', None):
         return _ack_advisory(args.ack)

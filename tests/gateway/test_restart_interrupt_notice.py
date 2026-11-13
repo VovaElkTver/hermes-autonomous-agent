@@ -309,7 +309,7 @@ def test_restart_after_a_pending_redirect_still_gets_the_restart_notice():
 
 @pytest.mark.parametrize('cause', ['Gateway restarting', 'Gateway shutting down'])
 @pytest.mark.parametrize('row', [
-    {'principal_id': 'cron-owner', 'payload': {'text': 'job'}},
+    {'principal_id': 'scheduled-owner', 'payload': {'text': 'job'}},
     {'principal_id': 'automation:agent:main:telegram:dm:x', 'payload': {'text': 'done'}},
     {'principal_id': 'person', 'payload': {'text': 'hook', 'native_text_v1': {'webhook_delivery': {}}}},
 ])
@@ -393,7 +393,7 @@ def test_a_user_stop_writes_no_transcript_notice(tmp_path, cause):
 
 def test_automation_turn_transcript_notice_is_the_neutral_copy(tmp_path):
     from agent.turn_failure_copy import AUTOMATION_INTERRUPTED_NOTICE
-    db, *_ = _settle_on_real_store(tmp_path, 'Gateway restarting', principal='cron-owner')
+    db, *_ = _settle_on_real_store(tmp_path, 'Gateway restarting', principal='scheduled-owner')
     with db:
         assert _notices(db) == [AUTOMATION_INTERRUPTED_NOTICE]
 
@@ -438,7 +438,7 @@ def _core_closed_turn(tmp_path, monkeypatch, *, principal='person', earlier_fail
     return db, authority, live, ref, row, result
 
 
-@pytest.mark.parametrize('principal', ['person', 'cron-owner'])
+@pytest.mark.parametrize('principal', ['person', 'scheduled-owner'])
 def test_restart_notice_replaces_the_core_failed_turn_boundary_of_the_same_turn(tmp_path, monkeypatch, principal):
     """#134889 GW-21 review (GW-A): the agent's own closer already ended this turn with
     "Send it again"; settlement replaces that boundary with the restart notice in its own write,

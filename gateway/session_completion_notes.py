@@ -9,7 +9,7 @@ outcome, note or turn, covers the whole batch. When that admission comes up for 
 viewer attached (the authority's own subscriber records) the executor records it in the session's
 history, where the next turn sees it, and settles the admission without a model call. Queue order, restart survival and
 exactly-once are the admission contract's. With a viewer attached it runs as the turn it always was,
-except a local cron result, which is always a note; messaging, Kanban, ``/loop`` and heartbeat wakes
+except a local scheduled result, which is always a note; messaging, Kanban, ``/loop`` and heartbeat wakes
 never reach here.
 """
 import json
@@ -18,8 +18,8 @@ from functools import partial
 # ``_completion_delivery_identity`` kinds: an async delegation's result, a background process's exit
 # and its watch-pattern notices.
 _NOTED_PRODUCERS = frozenset({'async_delegation', 'completion', 'watch_match', 'watch_disabled'})
-# A cron result for a local chat (``session_cron.deliver_to_local_chat``) is finished text: a note
-# with or without a viewer, since a turn over it would only spend a model call (#143547 CRON-11).
+# A scheduled result for a local chat (``session_cron.deliver_to_local_chat``) is finished text: a note
+# with or without a viewer, since a turn over it would only spend a model call (#143547 SCHEDULED-11).
 _ALWAYS_NOTED = frozenset({'cron'})
 
 

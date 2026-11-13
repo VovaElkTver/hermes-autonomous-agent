@@ -1,4 +1,4 @@
-"""Contracts: system / process / slash-command / rollback / cron / browser / config RPCs
+"""Contracts: system / process / slash-command / rollback / scheduled / browser / config RPCs
 (handlers in ``tui_gateway/methods_tools.py``, browser helpers in ``methods_browser.py``).
 
 Several results here are pass-throughs of dicts another module owns (``tools/process_registry.py``,
@@ -440,7 +440,7 @@ method("rollback.diff", params=RollbackDiffParams, result=RollbackDiffResult,
        doc="Diff between a checkpoint and the working tree, with an ANSI rendering sized to the TUI.")
 
 
-# ── cron.manage ───────────────────────────────────────────────────────────────────────────────
+# ── scheduled.manage ───────────────────────────────────────────────────────────────────────────────
 
 
 class CronAction(WireEnum):
@@ -451,7 +451,7 @@ class CronAction(WireEnum):
     resume = "resume"
 
 
-class CronManageParams(Params):
+class ScheduledManageParams(Params):
     action: CronAction = CronAction.list
     name: str | None = None
     include_disabled: bool | str | None = None
@@ -507,8 +507,8 @@ class CronRemovedJob(Result):
     schedule: str | None = None
 
 
-class CronManageResult(_Open):
-    """Pass-through of ``tools/cronjob_tools.py::cronjob`` JSON: ``list`` → ``jobs``/``count``
+class ScheduledManageResult(_Open):
+    """Pass-through of ``tools/cronjob_tools.py::scheduled job`` JSON: ``list`` → ``jobs``/``count``
     (+ ``scoped`` when profile-scoped); ``add`` → the created job's summary + ``job``; ``remove`` →
     ``removed_job``; ``pause``/``resume`` → ``job``. A tool-level failure lands in ``error``."""
 
@@ -533,8 +533,8 @@ class CronManageResult(_Open):
     removed_job: CronRemovedJob | None = None
 
 
-method("cron.manage", params=CronManageParams, result=CronManageResult,
-       doc="List/add/remove/pause/resume cron jobs in the (optionally profile-scoped) cron store.")
+method("scheduled.manage", params=ScheduledManageParams, result=ScheduledManageResult,
+       doc="List/add/remove/pause/resume scheduled jobs in the (optionally profile-scoped) scheduled store.")
 
 
 # ── browser.manage ────────────────────────────────────────────────────────────────────────────

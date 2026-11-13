@@ -5,7 +5,7 @@
   config/env derivation is only the fallback when the key is absent.
 - ``gateway start`` / ``install`` / ``restart`` refuse (exit 78) like ``run`` does, so a served profile
   never gets a permanently failing systemd unit or a launchd respawn loop; ``--force`` overrides.
-- ``hermes status`` / ``cron status`` on a satellite say running-via-multiplexer; the default lists served.
+- ``hermes status`` / ``scheduled status`` on a satellite say running-via-multiplexer; the default lists served.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_probe_falls_back_to_config_only_without_recorded_key(served_root):
 def test_probe_survives_a_missing_default_pid_file(served_root):
     """A launch-service-managed multiplexer can be live with no ``gateway.pid``: a replace/cleanup path
     unlinks it while the process keeps serving. Keying liveness off that file alone made every surface
-    (``hermes -p X status``, ``cron list``, the dashboard ladder) say "not running" about the gateway
+    (``hermes -p X status``, ``scheduled list``, the dashboard ladder) say "not running" about the gateway
     that was in fact serving the profile."""
     from hermes_cli.gateway import named_profile_served_by_running_multiplexer
     from hermes_cli.gateway_multiplex_served import live_default_gateway_pid

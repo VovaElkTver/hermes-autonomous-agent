@@ -31,14 +31,14 @@ _EXFIL_HINT_PATTERN = re.compile(
 )
 
 # OS persistence surfaces an MCP server has no legitimate reason to write to (the hermes-0day
-# SSH-key/PAM/sudoers/cron shape). Matched anywhere in the inline script.
+# SSH-key/PAM/sudoers/scheduled shape). Matched anywhere in the inline script.
 _PERSISTENCE_PATTERN = re.compile(
     r"authorized_keys"               # SSH key persistence (the campaign's payload)
     r"|\.ssh/"                       # any write under ~/.ssh
     r"|/etc/ssh\b"                   # sshd_config / AuthorizedKeysCommand backdoor
     r"|/etc/pam\.d\b|pam_[\w-]+\.so" # PAM credential logger
     r"|/etc/sudoers"                 # sudoers escalation
-    r"|/etc/cron|crontab\b"          # cron persistence
+    r"|/etc/scheduled|crontab\b"          # scheduled persistence
     r"|/etc/rc\.local|/etc/systemd"  # init / unit persistence
     r"|\.bashrc\b|\.bash_profile\b|\.profile\b|\.zshrc\b",  # shell rc backdoor
     re.IGNORECASE,
@@ -94,7 +94,7 @@ def validate_mcp_server_entry(name: str, entry: dict[str, Any]) -> list[str]:
     with network egress in its inline script, (3) a shell interpreter writing an OS persistence surface.
 
     * a shell interpreter whose inline script writes to an OS persistence surface (June 2026 hermes-0day
-    SSH/PAM/sudoers/cron shape). See #45620.
+    SSH/PAM/sudoers/scheduled shape). See #45620.
     """
     if not isinstance(entry, dict):
         return []
@@ -128,7 +128,7 @@ def validate_mcp_server_entry(name: str, entry: dict[str, Any]) -> list[str]:
     if _PERSISTENCE_PATTERN.search(script):
         issues.append(
             f"MCP server '{name}' uses shell interpreter '{command}' to write "
-            f"to an OS persistence surface (SSH keys / PAM / sudoers / cron / "
+            f"to an OS persistence surface (SSH keys / PAM / sudoers / scheduled / "
             f"shell rc) — this is the hermes-0day backdoor shape, not a real "
             f"MCP server"
         )

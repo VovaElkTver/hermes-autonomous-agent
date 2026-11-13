@@ -444,7 +444,7 @@ def _bound_openai_codex_stale_timeout(stale_timeout: float, est_tokens: int) -> 
     so healthy gateway-scale requests aren't aborted mid-prefill, then clamp to the flat
     HERMES_CODEX_HARD_TIMEOUT_SECONDS ceiling (#64507, default 1500s — above the max
     floor, a backstop for a request that emits SOME events then wedges; 0 disables).
-    Shared by the worker watchdogs and the inline cron path (#69734)."""
+    Shared by the worker watchdogs and the inline scheduled path (#69734)."""
     floor = openai_codex_stale_timeout_floor(est_tokens)
     if floor:
         stale_timeout = max(stale_timeout, floor)
@@ -797,11 +797,11 @@ def _dispatch_nonstreaming_api_request(agent, api_kwargs: dict, *, make_client):
 def should_use_direct_api_call(agent) -> bool:
     """Whether an OpenAI-wire request should skip the interrupt worker.
 
-    Gateway cron turns (#62151) and delegated children (#60203) run inside nested
+    Gateway scheduled turns (#62151) and delegated children (#60203) run inside nested
     thread pools that wedge before the socket opens when the request is pushed onto
     yet another daemon worker. Running inline drops the deepest layer; interrupts
     still work because the inline path registers ``agent._active_request_abort``,
-    which ``interrupt()`` invokes cross-thread (#72227). Cron also inlines Codex
+    which ``interrupt()`` invokes cross-thread (#72227). Scheduled also inlines Codex
     Responses (#69734): both Codex paths (non-stream, and streaming via
     ``_stream_codex_passthrough`` -> ``_interruptible_api_call``) reach
     ``direct_api_call``, whose client comes from ``make_client`` so the inline stale
@@ -834,7 +834,7 @@ _DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS = 15.0
 
 def _resolve_direct_stale_timeout(agent, api_kwargs: dict) -> float:
     """Stale budget for the inline call via ``agent._compute_non_stream_stale_timeout``,
-    plus the same openai-codex floor/hard cap the worker path applies (inline cron Codex,
+    plus the same openai-codex floor/hard cap the worker path applies (inline scheduled Codex,
     #69734). A non-numeric result (stub agent) leaves the watchdog disarmed; a resolver
     that *raises* propagates — swallowing into ``inf`` would reinstate the hang."""
     resolver = getattr(agent, "_compute_non_stream_stale_timeout", None)
@@ -979,7 +979,7 @@ class _InlineRequest:
 
 
 def direct_api_call(agent, api_kwargs: dict):
-    """Run a non-streaming LLM call inline on the conversation thread (cron turns,
+    """Run a non-streaming LLM call inline on the conversation thread (scheduled turns,
     delegated children — see ``should_use_direct_api_call``): no interrupt worker,
     so the nested-pool deadlock cannot occur. An activity heartbeat keeps
     ``last_activity_ts`` advancing (else the stall monitor interrupts a healthy
@@ -1263,7 +1263,7 @@ def interruptible_api_call(agent, api_kwargs: dict):
     per-request client (interrupts close only that one); a stale-call detector
     kills the connection and raises so the main retry loop can back off / rotate
     credentials / fall back."""
-    # Nested-pool contexts (cron, delegated children) wedge on a worker thread
+    # Nested-pool contexts (scheduled, delegated children) wedge on a worker thread
     # (#62151): run inline. See should_use_direct_api_call.
     if should_use_direct_api_call(agent):
         return direct_api_call(agent, api_kwargs)
@@ -1842,7 +1842,7 @@ def _fallback_api_mode_resolved(agent, fb_provider: str, fb_model: str, fb_base_
         from hermes_cli.providers import nous_api_mode
         return nous_api_mode(fb_model)
     if _is_anthropic_wire_url(fb_base_url):
-        # Named custom providers (cron-anthropic) resolve base_url from config; the hint pass never saw it.
+        # Named custom providers (scheduled-anthropic) resolve base_url from config; the hint pass never saw it.
         return "anthropic_messages"
     if agent._is_azure_openai_url(fb_base_url):
         return "chat_completions"  # Azure serves gpt-5.x on /chat/completions — no Responses API.
@@ -2215,7 +2215,7 @@ def _codex_summary_attempt(agent, api_messages: list, api_request_id: str):
         codex_kwargs.pop("parallel_tool_calls", None)
         # Route through the same seam as normal Codex turns: a direct _run_codex_stream
         # bypasses the stale/TTFB watchdogs, interrupt handling and client cleanup, so an
-        # unattended cron summary could wedge forever (#70943).
+        # unattended scheduled summary could wedge forever (#70943).
         return _summary_text(agent, agent._interruptible_api_call(codex_kwargs))
     return _attempt
 
@@ -3028,7 +3028,7 @@ class _StreamingCall(StreamingWaitMonitor):
         self._writer_token = self._attempt_request_client = self._attempt_stream_response = None
         from agent.chat_completion_helpers_relay import RelayChatAccumulator
         relay_response = RelayChatAccumulator()
-        # The raw channels, not the callback-delivered text: cron, subagents and callback-less
+        # The raw channels, not the callback-delivered text: scheduled, subagents and callback-less
         # gateway turns register no stream callback, so nothing else sees a loop mid-stream.
         content_watch, reasoning_watch = RunawayStreamWatch(), RunawayStreamWatch()
         # Own watch: the display takes one reasoning representation per chunk, but the plain
@@ -3915,7 +3915,7 @@ class _StreamingCall(StreamingWaitMonitor):
         """Resolve the stale timeout, run the request (worker thread or inline),
         drive the heartbeat/stale/interrupt monitor, then translate the outcome."""
         self._resolve_stale_timeout()
-        # Delegated children and cron turns run the request INLINE (a worker inside
+        # Delegated children and scheduled turns run the request INLINE (a worker inside
         # their nested pools wedges before the socket opens) but must still STREAM
         # (edge proxies kill silent POSTs). Only the poll loop moves to a monitor
         # thread, which never issues a request, so the no-worker deadlock fix holds.
@@ -3961,7 +3961,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
     """Streaming variant of _interruptible_api_call: fires the delta callbacks per
     text token (tool-call turns suppress them) and returns a SimpleNamespace in
     the non-streaming response shape. codex_responses delegates to the already-
-    streaming codex runner; cron turns and delegated children run inline."""
+    streaming codex runner; scheduled turns and delegated children run inline."""
     if agent._interrupt_requested:
         raise InterruptedError("Agent interrupted before streaming API call")
     if agent.api_mode == "codex_responses":

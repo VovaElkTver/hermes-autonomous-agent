@@ -243,7 +243,7 @@ def _get_endpoint_metadata_cache_path() -> Path:
 
 def _endpoint_disk_cache_get(normalized: str) -> Optional[dict[str, dict[str, Any]]]:
     """Fresh cross-process memo of a remote ``/models`` probe (same TTL as in-memory): one-shot
-    runs (``hermes -q``, cron) start cold and Nous bypasses the persistent context cache, so
+    runs (``hermes -q``, scheduled) start cold and Nous bypasses the persistent context cache, so
     without this every launch paid the live probe. Local endpoints are never memoized."""
     models = _ttl_memo_get(_get_endpoint_metadata_cache_path(), normalized, _ENDPOINT_MODEL_CACHE_TTL, ts_key="at", value_key="models")
     return models if isinstance(models, dict) else None
@@ -273,7 +273,7 @@ def _warn_context_length_fallback(model: str, base_url: str) -> None:
                        "Set model.context_length in config.yaml to override.", model, base_url or "default", f"{DEFAULT_FALLBACK_CONTEXT:,}")
 
 
-# Sessions, model switches and cron jobs reject models below this (too little working memory).
+# Sessions, model switches and scheduled jobs reject models below this (too little working memory).
 MINIMUM_CONTEXT_LENGTH = 64_000
 # In-process (model, base_url) -> (result, monotonic_ts) memo for local probes: one
 # startup resolves the same model several times (banner, /model, compressor). Never persisted.

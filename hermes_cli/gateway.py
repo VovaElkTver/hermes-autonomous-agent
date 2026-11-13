@@ -41,7 +41,7 @@ from gateway.restart import (
     GATEWAY_FATAL_CONFIG_EXIT_CODE,
     GATEWAY_SERVICE_RESTART_EXIT_CODE,
     is_gateway_supervisor_process,
-    parse_cron_drain_timeout,
+    parse_scheduled_drain_timeout,
     parse_restart_after_turn_timeout,
     parse_restart_drain_timeout,
     resolve_restart_exit_wait_budget,
@@ -3199,7 +3199,7 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
         _append_node_dir_for_service(path_entries)
 
     # TimeoutStopSec must cover the full stop budget (scheduled-work drain + cleanup) or systemd SIGKILLs mid-drain.
-    restart_timeout = resolve_systemd_timeout_stop_sec(_get_restart_drain_timeout(), _get_periodic_drain_timeout())
+    restart_timeout = resolve_systemd_timeout_stop_sec(_get_restart_drain_timeout(), _get_scheduled_drain_timeout())
 
     if system:
         username, group_name, home_dir, uid = _system_service_identity(run_as_user)
@@ -3522,12 +3522,15 @@ def _agent_timeout_setting(env_var: str, key: str, parse) -> float:
     return parse(None)
 
 
-def _get_periodic_drain_timeout() -> float:
-    """Return the configured scheduled-work and api_server (/v1) drain floor in seconds.
+def _get_scheduled_drain_timeout() -> float:
+    """Return the configured scheduled-run and api_server (/v1) drain floor in seconds.
 
     See #82161.
     """
-    return _agent_timeout_setting("HERMES_CRON_DRAIN_TIMEOUT", "cron_drain_timeout", parse_cron_drain_timeout)
+    # transitional HERMES_CRON_DRAIN_TIMEOUT fallback, drop after fleet redeploy
+    env_var = ("HERMES_SCHEDULED_DRAIN_TIMEOUT" if os.getenv("HERMES_SCHEDULED_DRAIN_TIMEOUT")
+               else "HERMES_CRON_DRAIN_TIMEOUT")
+    return _agent_timeout_setting(env_var, "scheduled_drain_timeout", parse_scheduled_drain_timeout)
 
 
 def _get_restart_exit_wait_budget() -> float:
@@ -3537,7 +3540,7 @@ def _get_restart_exit_wait_budget() -> float:
         _agent_timeout_setting(
             "HERMES_RESTART_AFTER_TURN_TIMEOUT", "restart_after_turn_timeout", parse_restart_after_turn_timeout
         ),
-        _get_periodic_drain_timeout(),
+        _get_scheduled_drain_timeout(),
     )
 
 

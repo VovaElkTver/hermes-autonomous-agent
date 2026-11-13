@@ -387,7 +387,7 @@ async def test_start_gateway_replace_clears_marker_on_permission_denied(
 async def test_runner_degrades_gracefully_when_all_adapters_missing(monkeypatch, tmp_path, caplog):
     """When all enabled platforms have no adapter (missing library or credentials),
     the gateway should NOT return failure — it should warn and continue running for
-    cron job execution, matching the behaviour of 'no platforms enabled' (#5196).
+    scheduled job execution, matching the behaviour of 'no platforms enabled' (#5196).
 
     In fleet deployments the same config.yaml is shared across nodes that may only
     have credentials for a subset of platforms.  Requiring perfect credentials on
@@ -412,11 +412,11 @@ async def test_runner_degrades_gracefully_when_all_adapters_missing(monkeypatch,
     with caplog.at_level(logging.WARNING):
         ok = await runner.start()
 
-    # Must NOT return False — gateway should keep running for cron.
+    # Must NOT return False — gateway should keep running for scheduled.
     assert ok is True
     assert runner.should_exit_cleanly is False
     assert runner.adapters == {}
-    # Cron still runs; missing enabled platforms are flagged and queued for the reconnect watcher.
+    # Scheduled still runs; missing enabled platforms are flagged and queued for the reconnect watcher.
     state = read_runtime_status()
     assert state["gateway_state"] == "running"
     assert set(runner._failed_platforms) == {Platform.TELEGRAM, Platform.DISCORD}

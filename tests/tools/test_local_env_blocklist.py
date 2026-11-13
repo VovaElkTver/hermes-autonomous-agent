@@ -1046,7 +1046,7 @@ class TestNativeEnvironmentContracts:
         Independent audit of every real launcher producer (Electron
         ``apps/desktop/electron/main.ts``,
         ``gateway/run.py::_ensure_windows_gateway_venv_imports``,
-        ``cron/scheduler.py::_windows_cron_python_invocation``,
+        ``scheduled/scheduler.py::_windows_cron_python_invocation``,
         ``tui_gateway/host_supervisor.py``) shows they all inject the exact
         repo root and/or the venv site-packages — none injects
         ``<repo>/tools`` or another direct child as an independent
@@ -1301,7 +1301,7 @@ class TestPythonhomeSanitized:
     """PYTHONHOME must not leak from the Hermes runtime into subprocesses.
 
     The gateway inherits/sets PYTHONHOME in its process environment; a child
-    interpreter (system Python, another venv, cron no_agent scripts) that
+    interpreter (system Python, another venv, scheduled no_agent scripts) that
     inherits it redirects its stdlib search to the Hermes venv and crashes
     with version-mismatch errors before importing anything (#75018).
     """
@@ -1314,7 +1314,7 @@ class TestPythonhomeSanitized:
     ])
     def test_builders_strip_pythonhome(self, builder):
         """The gateway's inherited PYTHONHOME must not reach any subprocess
-        builder -- terminal, background/PTY, cron no_agent scripts, and
+        builder -- terminal, background/PTY, scheduled no_agent scripts, and
         execute_code children (#75018).
         """
         from tools.environments import local as local_mod

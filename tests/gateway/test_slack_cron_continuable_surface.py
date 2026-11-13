@@ -2,9 +2,9 @@
 Tests for the Slack ``cron_continuable_surface`` extra key and its pairing warning.
 
 ``cron_continuable_surface: in_channel`` (paired with ``reply_in_thread: false``)
-lets a continuable cron job deliver FLAT into a channel — no dedicated thread —
+lets a continuable scheduled job deliver FLAT into a channel — no dedicated thread —
 so a plain channel reply continues the job via the shared-channel session
-``(slack, channel_id, None)``. See specs/cron-inchannel-continuable decisions
+``(slack, channel_id, None)``. See specs/scheduled-inchannel-continuable decisions
 D1/D4/D5/D6.
 
 - ``_continuable_surface_mode`` resolves the key: default ``"thread"``, coerces

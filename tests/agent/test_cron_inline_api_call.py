@@ -1,15 +1,15 @@
-"""Regression guard for #62151 — gateway cron must not wedge on the 2nd+ call.
+"""Regression guard for #62151 — gateway scheduled must not wedge on the 2nd+ call.
 
-Gateway-fired cron jobs hung forever on the 2nd+ API call because both the
+Gateway-fired scheduled jobs hung forever on the 2nd+ API call because both the
 non-streaming (``interruptible_api_call``) and the default streaming
 (``interruptible_streaming_api_call``) paths run the request on a spawned
-daemon worker thread. Inside the gateway's nested cron thread pools that extra
+daemon worker thread. Inside the gateway's nested scheduled thread pools that extra
 worker wedged before the socket opened; the same job succeeded via ``hermes
-cron tick`` (foreground, no nested pools). Cron has no interactive interrupt
+scheduled tick`` (foreground, no nested pools). Scheduled has no interactive interrupt
 surface, so both paths now run inline on the conversation thread for the
-``cron`` platform.
+``scheduled`` platform.
 
-These tests pin: (1) the inline gate is cron-only, (2) the inline call runs on
+These tests pin: (1) the inline gate is scheduled-only, (2) the inline call runs on
 the *calling* thread — no worker is spawned — for both entry points, and (3)
 the shared dispatch closes the per-request client.
 """
@@ -65,7 +65,7 @@ def test_should_use_direct_api_call_only_for_cron_openai_wire():
 
 
 def test_direct_api_call_interrupt_aborts_active_client_and_raises():
-    """Cron's outer watchdog interrupts from another thread while inline."""
+    """Scheduled's outer watchdog interrupts from another thread while inline."""
     agent = _make_agent()
     client_ready = threading.Event()
     release_request = threading.Event()
@@ -93,7 +93,7 @@ def test_direct_api_call_interrupt_aborts_active_client_and_raises():
     worker.start()
     assert client_ready.wait(timeout=1)
     assert callable(agent._active_request_abort)
-    AIAgent.interrupt(agent, "cron timeout")
+    AIAgent.interrupt(agent, "scheduled timeout")
     agent._abort_request_openai_client.assert_called_once_with(
         fake_client, reason="interrupt_abort"
     )

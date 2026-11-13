@@ -5,7 +5,7 @@ Regression coverage for the bug where a terminal subprocess could observe a
 ``HERMES_SESSION_*`` vars).
 
 Root cause: the session vars have a process-global ``os.environ`` mirror (written
-last-writer-wins as a CLI/cron fallback, never cleared), while the
+last-writer-wins as a CLI/scheduled fallback, never cleared), while the
 concurrency-safe source of truth is a task-local ``ContextVar``. The subprocess
 env was built from ``os.environ`` and only *overrode* the session vars when the
 ContextVar was set+truthy. When the subprocess was spawned from a thread/context
@@ -14,7 +14,7 @@ override no-op'd and the stale, foreign ``os.environ`` value leaked into the
 child — so e.g. ``bug_thread.py whoami`` read another session's thread id.
 
 The fix: once the session-context machinery is engaged in this process (any
-concurrent host — gateway, ACP, API server, TUI, cron — has called
+concurrent host — gateway, ACP, API server, TUI, scheduled — has called
 ``set_session_vars``), the session vars are ContextVar-authoritative. The
 subprocess-env bridge resolves each ``HERMES_SESSION_*`` from the ContextVar and,
 when it is ``_UNSET``, STRIPS the var from the child env rather than inheriting

@@ -34,7 +34,7 @@ class TestUserConfigMerge:
         home.mkdir()
         cfg_path = home / "config.yaml"
         legacy = {
-            "approvals": {"mode": "manual", "timeout": 60, "cron_mode": "deny"},
+            "approvals": {"mode": "manual", "timeout": 60, "scheduled_mode": "deny"},
         }
         cfg_path.write_text(yaml.safe_dump(legacy))
 

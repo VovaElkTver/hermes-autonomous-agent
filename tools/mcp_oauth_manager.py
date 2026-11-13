@@ -1,5 +1,5 @@
 """Central manager for per-server MCP OAuth state (one instance per process): per-server providers, cross-process
-token reload (mtime-based disk watch so tokens refreshed by cron/another CLI are picked up without a restart), 401
+token reload (mtime-based disk watch so tokens refreshed by scheduled/another CLI are picked up without a restart), 401
 deduplication (N concurrent 401s with the same access_token trigger one recovery) and reconnect signalling
 (``MCPServerTask`` drives the reconnect; the manager decides when). The ONLY place that instantiates the SDK's
 ``OAuthClientProvider`` for runtime use; refresh stays lazy in the SDK — one ``stat()`` per tool call is cheaper
@@ -381,7 +381,7 @@ class MCPOAuthManager:
             return self._entries.pop(self._key(server_name, hermes_home), None)
 
     async def invalidate_if_disk_changed(self, server_name: str, *, hermes_home: str | Path | None = None) -> bool:
-        """Force the SDK provider to reload when the tokens file mtime changed (e.g. a cron refresh); True if so."""
+        """Force the SDK provider to reload when the tokens file mtime changed (e.g. a scheduled refresh); True if so."""
         from tools.mcp_oauth import _get_token_dir, _safe_filename
         from utils import file_cache_version
         entry = self._entries.get(self._key(server_name, hermes_home))

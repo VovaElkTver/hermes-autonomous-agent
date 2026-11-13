@@ -354,7 +354,7 @@ class TestSecondaryAdapterUnavailableRecovery:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("cause", ["disabled", "no credential", "duplicate", "fatal"])
     async def test_never_built_platform_that_gives_up_drops_its_bot_ownership(self, monkeypatch, cause):
-        """A never-built platform that gives up for good stops claiming the bot (cron and the delivery drain
+        """A never-built platform that gives up for good stops claiming the bot (scheduled and the delivery drain
         read _profile_bot_platforms), and a config reason replaces its retrying status with the reason."""
         runner, _create = _shared_token_runner(monkeypatch)
         runner._profile_bot_platforms = {"reviewer": {Platform("irc")}}  # an earlier tick's claim

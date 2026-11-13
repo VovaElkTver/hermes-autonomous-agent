@@ -1,7 +1,7 @@
 """Session recovery must recognise every session-id shape this repo really mints.
 
 ``hermes sessions recover`` classifies schema-less lost_and_found rows by the id cell. Ids that
-surfaces DERIVE (cron, /bg, rooms, API server, ACP) instead of minting via ``new_session_id`` were
+surfaces DERIVE (scheduled, /bg, rooms, API server, ACP) instead of minting via ``new_session_id`` were
 dropped, and as a ``parent_session_id`` one of them vetoed layout inference for the whole table.
 """
 

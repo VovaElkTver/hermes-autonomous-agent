@@ -80,7 +80,7 @@ def _make_hermes_tree(root: Path) -> None:
     (root / "skins").mkdir(exist_ok=True)
     (root / "skins" / "cyber.yaml").write_text("name: cyber\n")
 
-    # Cron
+    # Scheduled
     (root / "cron").mkdir(exist_ok=True)
     (root / "cron" / "jobs.json").write_text("[]")
 
@@ -486,7 +486,7 @@ class TestImport:
 
     def test_import_auto_installs_gateway_service(self, tmp_path, monkeypatch):
         """After a restore, run_import brings the gateway service up without
-        prompting — restored cron jobs and bot tokens must not sit dormant
+        prompting — restored scheduled jobs and bot tokens must not sit dormant
         (the install-then-import dead-gateway bug)."""
         import hermes_cli.gateway as gateway_mod
 
@@ -768,7 +768,7 @@ class TestImport:
         ).read_text() == live_state
 
     def test_preserves_runtime_pid_and_process_files(self, tmp_path, monkeypatch):
-        """gateway.pid / cron.pid / gateway.lock / processes.json from a backup
+        """gateway.pid / scheduled.pid / gateway.lock / processes.json from a backup
         reference the source machine's process namespace and must never be
         written over the target's."""
         hermes_home = tmp_path / ".hermes"
@@ -784,7 +784,7 @@ class TestImport:
         self._make_backup_zip(zip_path, {
             "config.yaml": "model: test\n",
             "gateway.pid": "9999",
-            "cron.pid": "8888",
+            "scheduled.pid": "8888",
             "gateway.lock": "7777",
             "processes.json": '{"stale": true}',
         })
@@ -799,7 +799,7 @@ class TestImport:
         assert (hermes_home / "processes.json").read_text() == '{"live": true}'
         # No foreign runtime file is installed. Maintenance creates a local lock
         # inode which must remain after release, or concurrent openers can split ownership.
-        assert not (hermes_home / "cron.pid").exists()
+        assert not (hermes_home / "scheduled.pid").exists()
         lock = json.loads((hermes_home / "gateway.lock").read_text())
         from gateway.runtime_ownership import canonical_home  # the identity the lock stores (normcase)
         assert lock["hermes_home"] == str(canonical_home(hermes_home))
@@ -945,7 +945,7 @@ class TestBackupEdgeCases:
 
     def test_incomplete_archive_is_kept_but_reported_as_failure(self, tmp_path, monkeypatch, capsys):
         """A file that cannot be read is skipped, the zip still lands, and the CLI exits 1: a
-        cron/systemd timer must never see a partial archive as success (#101096)."""
+        scheduled/systemd timer must never see a partial archive as success (#101096)."""
         hermes_home = tmp_path / ".hermes"
         hermes_home.mkdir()
         _make_hermes_tree(hermes_home)
@@ -2085,12 +2085,12 @@ class TestPreMigrationBackup:
 
 
 # ---------------------------------------------------------------------------
-# Cron jobs auto-restore after silent migration loss (issue #34600)
+# Scheduled jobs auto-restore after silent migration loss (issue #34600)
 # ---------------------------------------------------------------------------
 
 class TestRestoreCronJobsIfEmptied:
-    """`hermes update` config migration can leave cron/jobs.json valid-but-empty,
-    silently dropping every scheduled job. `restore_cron_jobs_if_emptied` is the
+    """`hermes update` config migration can leave scheduled/jobs.json valid-but-empty,
+    silently dropping every scheduled job. `restore_scheduled_jobs_if_emptied` is the
     post-migration safety net that restores from the pre-update snapshot."""
 
     @staticmethod
@@ -2103,7 +2103,7 @@ class TestRestoreCronJobsIfEmptied:
         return create_quick_snapshot(label=label, hermes_home=hermes_home, keep=5)
 
     def test_restores_when_emptied_after_migration(self, tmp_path):
-        from hermes_cli.backup import restore_cron_jobs_if_emptied
+        from hermes_cli.backup import restore_scheduled_jobs_if_emptied
         hermes_home = tmp_path / ".hermes"
         jobs_path = hermes_home / "cron" / "jobs.json"
         # Pre-update: 3 real jobs.
@@ -2114,7 +2114,7 @@ class TestRestoreCronJobsIfEmptied:
         # Migration silently empties the file (valid JSON, zero jobs).
         jobs_path.write_text(json.dumps({"jobs": []}))
 
-        result = restore_cron_jobs_if_emptied(snap_id, hermes_home=hermes_home)
+        result = restore_scheduled_jobs_if_emptied(snap_id, hermes_home=hermes_home)
         assert result is not None
         assert result["restored"] is True
         assert result["job_count"] == 3
@@ -2127,8 +2127,8 @@ class TestRestoreCronJobsIfEmptied:
 
     def test_restores_when_partial_job_loss(self, tmp_path):
         """Desktop scheduler overwrites jobs.json with its own small set,
-        losing tool-created crons while keeping desktop-tracked ones."""
-        from hermes_cli.backup import restore_cron_jobs_if_emptied
+        losing tool-created scheduled runs while keeping desktop-tracked ones."""
+        from hermes_cli.backup import restore_scheduled_jobs_if_emptied
         hermes_home = tmp_path / ".hermes"
         jobs_path = hermes_home / "cron" / "jobs.json"
         # Pre-update: 19 jobs (18 tool-created + 1 desktop watchdog).
@@ -2142,7 +2142,7 @@ class TestRestoreCronJobsIfEmptied:
         # Desktop scheduler overwrites with only its own 1 job.
         jobs_path.write_text(json.dumps({"jobs": [{"id": "desktop-watchdog"}]}))
 
-        result = restore_cron_jobs_if_emptied(snap_id, hermes_home=hermes_home)
+        result = restore_scheduled_jobs_if_emptied(snap_id, hermes_home=hermes_home)
         assert result is not None
         assert result["restored"] is True
         assert result["job_count"] == 19
@@ -2153,7 +2153,7 @@ class TestRestoreCronJobsIfEmptied:
 
 
 # ---------------------------------------------------------------------------
-# Cron agent-job prompt field degradation across update (issue #82990)
+# Scheduled agent-job prompt field degradation across update (issue #82990)
 # ---------------------------------------------------------------------------
 
 class TestRestoreCronPromptFieldsIfDegraded:
@@ -2440,7 +2440,7 @@ class TestRestoreConfigModelSettingsIfRewritten:
 
     def test_noop_on_unreadable_live_config(self, tmp_path):
         """An unparseable live config is a different failure the user must see;
-        the safety net leaves it alone (mirrors the cron net's posture)."""
+        the safety net leaves it alone (mirrors the scheduled net's posture)."""
         from hermes_cli.backup import restore_config_model_settings_if_rewritten
 
         hermes_home = tmp_path / ".hermes"

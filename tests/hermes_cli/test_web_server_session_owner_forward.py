@@ -219,7 +219,7 @@ async def test_selected_profile_ticket_is_minted_on_that_profiles_own_socket(tmp
     work = tmp_path / 'launch' / 'profiles' / 'work'
     work.mkdir(parents=True)
     monkeypatch.setenv('HERMES_HOME', str(launch))
-    monkeypatch.setattr('hermes_cli.web_server_cron._cron_profile_home', lambda name: (name, work))
+    monkeypatch.setattr('hermes_cli.web_server_profile_homes._profile_home', lambda name: (name, work))
     endpoint = GatewayEndpoint(profile_id=str(work), instance_id='i-work', authority_epoch=1,
                                runtime_protocol=1, api_origin='http://127.0.0.1:1', supervisor='none',
                                capabilities=frozenset({'session-authority-v1'}))
@@ -252,7 +252,7 @@ async def test_a_multiplexed_profile_keeps_the_multiplexers_socket(tmp_path, mon
     root = tmp_path / 'root'
     work = root / 'profiles' / 'work'
     work.mkdir(parents=True)
-    monkeypatch.setattr('hermes_cli.web_server_cron._cron_profile_home', lambda name: (name, work))
+    monkeypatch.setattr('hermes_cli.web_server_profile_homes._profile_home', lambda name: (name, work))
     endpoint = GatewayEndpoint(profile_id=str(work), instance_id='i-root', authority_epoch=1,
                                runtime_protocol=1, api_origin='http://127.0.0.1:1', supervisor='none',
                                capabilities=frozenset({'session-authority-v1'}), control_home=str(root))

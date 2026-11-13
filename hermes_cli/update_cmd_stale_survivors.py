@@ -2,7 +2,7 @@
 
 ``_verify_fleet_after_update`` compares every live gateway's stamped ``code_sha`` against the
 fresh checkout. A ``stale`` row once only failed the update (exit 1) and left the process
-running pre-update modules: its cron ticker then yields every tick to the "fresh gateway" it
+running pre-update modules: its scheduled ticker then yields every tick to the "fresh gateway" it
 assumes exists, and nothing ever restarts it (#117275). A proven-stale survivor is now handed to
 the same drain-first ``request_restart`` path (SIGUSR1) the restart phase uses — a supervised
 gateway respawns on the new code, a bare ``gateway run`` stops and is listed for a manual restart.

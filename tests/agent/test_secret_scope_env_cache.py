@@ -1,6 +1,6 @@
 """The per-path ``load_env_file()`` memo in ``agent.secret_scope``.
 
-``build_profile_secret_scope()`` sits on the gateway's hot paths (every turn, cron fire, MCP/browser
+``build_profile_secret_scope()`` sits on the gateway's hot paths (every turn, scheduled fire, MCP/browser
 adoption, housekeeping drain) and used to re-read and re-parse the profile ``.env`` on each call.
 A stale credential map is a worse failure than a slow one, so the contract under test is: parse once
 while the file is unchanged, hand every caller its own dict, and see every real change on disk.

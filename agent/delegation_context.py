@@ -1,8 +1,8 @@
 """Context-local state for delegate_task child execution.
 
 A Hermes process may itself be a Kanban dispatcher worker with HERMES_KANBAN_* in
-os.environ. In-process delegate_task children and cron jobs fired via
-``cronjob(action="run")`` are NOT dispatcher-owned, so identity gates must fail
+os.environ. In-process delegate_task children and scheduled jobs fired via
+``scheduled job(action="run")`` are NOT dispatcher-owned, so identity gates must fail
 closed for them without mutating the process-global environment.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from contextvars import ContextVar, Token
 from typing import Iterator, Mapping, MutableMapping, overload
 
 _DELEGATED_CHILD_CONTEXT: ContextVar[bool] = ContextVar("hermes_delegated_child_context", default=False)
-# Any in-process execution that is NOT the dispatcher-owned worker (cron jobs). Kept separate
+# Any in-process execution that is NOT the dispatcher-owned worker (scheduled jobs). Kept separate
 # so delegate_task-specific behaviour (subprocess env scrubbing, its error strings) is unchanged.
 _NON_DISPATCHER_OWNED_CONTEXT: ContextVar[bool] = ContextVar("hermes_non_dispatcher_owned_context", default=False)
 
@@ -58,7 +58,7 @@ def exit_non_dispatcher_owned_context(token: Token[bool]) -> None:
 @contextmanager
 def non_dispatcher_owned_context() -> Iterator[None]:
     """Mark in-process execution that does NOT own the dispatcher's Kanban task; without it
-    a cron agent run inside a worker is misread as that worker (kanban toolset force-added,
+    a scheduled agent run inside a worker is misread as that worker (kanban toolset force-added,
     ``kanban_complete`` defaulting to its task). ContextVar-scoped rather than clearing
     os.environ, which the worker's claim heartbeat and concurrent readers share."""
     token = enter_non_dispatcher_owned_context()
@@ -96,7 +96,7 @@ def explicit_board_intent_is_pinned() -> bool:
 def owned_kanban_task() -> str:
     """The board task this execution OWNS: ``HERMES_KANBAN_TASK`` for the dispatcher-owned
     worker, ``""`` otherwise. Tool access is not worker identity — a profile can expose the
-    kanban toolset interactively, and children/cron runs inherit the env var — so every
+    kanban toolset interactively, and children/scheduled runs inherit the env var — so every
     reader that turns the task id into worker behaviour (guidance, stop nudge, terminal
     outcomes) goes through this one helper."""
     if not is_dispatcher_owned_worker_context():

@@ -38,7 +38,7 @@ def catalog(monkeypatch):
     entries = [
         _entry("app", title="Fx App", platforms=[here],
                description="Drives Fx. Disclosure: the tools change Fx settings; nothing leaves loopback. Needs Fx 2."),
-        _entry("dashed", description="Pane. Disclosure \u2014 reads the cron file under HERMES_HOME."),
+        _entry("dashed", description="Pane. Disclosure \u2014 reads the scheduled file under HERMES_HOME."),
         _entry("broken", title="Broken"),
         _entry("elsewhere", platforms=[other]),
     ]
@@ -71,7 +71,7 @@ def test_row_shape_state_and_disclosure(catalog):
     assert rows["app"] == {"name": "app", "title": "Fx App", "state": "missing_app", "sentence": "needs Fx App",
                            "disclosure": "the tools change Fx settings; nothing leaves loopback."}
     assert rows["dashed"]["title"] == "dashed"
-    assert rows["dashed"]["disclosure"] == "reads the cron file under HERMES_HOME."
+    assert rows["dashed"]["disclosure"] == "reads the scheduled file under HERMES_HOME."
     assert rows["dashed"]["state"] == "unknown"  # a manifest without a declared app
     assert rows["broken"]["state"] == "unknown" and rows["broken"]["sentence"] == ""  # manifest unreadable
     assert rows["broken"]["disclosure"] == ""

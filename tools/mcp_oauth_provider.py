@@ -564,7 +564,7 @@ def google_offline_access_params(context: Any) -> dict[str, str]:
     one only when the authorization request carries ``access_type=offline`` — its idiom where OIDC
     servers use the ``offline_access`` scope that MCP discovery would advertise — so without the
     parameter the grant ends with the short-lived access token and every later reconnect (a gateway
-    process, cron) fails back to an interactive login it cannot perform (#117510). Empty for every
+    process, scheduled) fails back to an interactive login it cannot perform (#117510). Empty for every
     other issuer, whose requests keep the SDK-built parameters untouched."""
     from urllib.parse import urlsplit
     issuer = _metadata_issuer(context)

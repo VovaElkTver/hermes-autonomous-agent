@@ -1,6 +1,6 @@
 """The core-tool-deferral worker's host sandbox (evals/core_tool_deferral/sandbox.py).
 
-A past live run let agents install real nightly cron jobs and write scripts into the
+A past live run let agents install real nightly scheduled jobs and write scripts into the
 operator's real ~/.hermes. The contract: after isolate_host, a child shell's crontab and
 HOME both resolve inside the run dir.
 """

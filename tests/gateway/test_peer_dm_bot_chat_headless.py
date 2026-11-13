@@ -187,7 +187,7 @@ async def test_peer_create_if_missing_after_the_api_row_moved_finds_the_local_ch
 
 @pytest.mark.asyncio
 async def test_local_bot_relay_delivery_moves_an_api_bot_chat_aside(headless):
-    # MSG-21 on the local door: ``bot_relay.deliver`` / a cron delivery found the API row by title
+    # MSG-21 on the local door: ``bot_relay.deliver`` / a scheduled delivery found the API row by title
     # and failed adoption with ``not_found``, permanently.
     from pathlib import Path
     from gateway.session_authorities import served_profile_name

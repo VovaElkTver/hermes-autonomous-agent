@@ -38,7 +38,7 @@ class CapabilityDescriptor:
     # (from_json drops unknown keys, so newer connectors are safe against older gateways).
     # Connector can supply surrounding channel/group CONTEXT for an addressed turn.
     supports_context: bool = False
-    # Platform can host a FLAT continuable cron surface (native Slack's
+    # Platform can host a FLAT continuable scheduled surface (native Slack's
     # ``cron_continuable_surface: in_channel``); the scheduler fails safe to
     # thread mode when False (D6 gate).
     supports_inchannel_continuable: bool = False

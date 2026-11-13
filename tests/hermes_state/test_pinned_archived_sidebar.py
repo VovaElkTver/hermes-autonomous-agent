@@ -76,8 +76,8 @@ def test_sidebar_query_returns_pinned_archived_session(db):
 
 def test_pinned_backfill_still_obeys_other_filters(db):
     """Dropping the archived constraint must not drop source exclusion."""
-    _seed(db, "cron-pin", source="cron", pinned=True, archived=True)
-    assert "cron-pin" not in _sidebar_ids(db, exclude_sources=["cron"])
+    _seed(db, "scheduled-pin", source="cron", pinned=True, archived=True)
+    assert "scheduled-pin" not in _sidebar_ids(db, exclude_sources=["cron"])
 
 
 def test_stale_sweep_does_not_archive_pinned_session(db):

@@ -391,9 +391,9 @@ def _active_profile_line(agent: Any) -> str:
         return (
             "Active Hermes profile: default. Other profiles (if any) live "
             "under " + _root_str + "/profiles/<name>/. Each profile has its own "
-            "skills/, plugins/, cron/, and memories/ that affect a different "
+            "skills/, plugins/, scheduled/, and memories/ that affect a different "
             "session than this one. Do not modify another profile's "
-            "skills/plugins/cron/memories unless the user explicitly directs "
+            "skills/plugins/scheduled/memories unless the user explicitly directs "
             "you to."
         )
     # A non-default name is only returned when the resolved home is ALREADY
@@ -409,9 +409,9 @@ def _active_profile_line(agent: Any) -> str:
         f"Active Hermes profile: {active_profile}. This session reads "
         f"and writes {profile_home}/. The default "
         f"profile's data lives at {default_root}/skills/, {default_root}/plugins/, "
-        f"{default_root}/cron/, {default_root}/memories/ — those belong to a "
+        f"{default_root}/scheduled/, {default_root}/memories/ — those belong to a "
         f"different session run from a different shell. Do NOT modify "
-        f"another profile's skills/plugins/cron/memories unless the user "
+        f"another profile's skills/plugins/scheduled/memories unless the user "
         f"explicitly directs you to."
     )
 
@@ -443,16 +443,16 @@ def _default_platform_hint(platform_key: str, tool_names: Any = ()) -> str:
 
 
 def _cron_delivery_hint(agent: Any) -> str:
-    """The destination channel's hint (default + its ``platform_hints`` override) for a cron agent.
+    """The destination channel's hint (default + its ``platform_hints`` override) for a scheduled agent.
 
-    A cron agent runs as platform ``cron`` but its final response lands on the job's ``deliver``
+    A scheduled agent runs as platform ``scheduled`` but its final response lands on the job's ``deliver``
     channel, so without this the model never learns that MEDIA: tags become Slack/Telegram
     attachments or that tables do not render there — and a user's ``platform_hints.slack.append``
     never reached scheduled jobs at all. The scheduler publishes the primary auto-deliver target
     into the session ContextVar before the agent runs (same seam ``send_message`` routes by).
     """
     from gateway.session_context import get_session_env
-    deliver_key = get_session_env("HERMES_CRON_AUTO_DELIVER_PLATFORM", "").lower().strip()
+    deliver_key = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", "").lower().strip()
     if not deliver_key or deliver_key == "cron":
         return ""
     hint = _resolve_platform_hint(
@@ -462,7 +462,7 @@ def _cron_delivery_hint(agent: Any) -> str:
 
 def platform_hint(agent: Any) -> str:
     """Built-in/plugin platform hint + Telegram rich-messages opt-in + config
-    override + desktop TUI clarifier; cron agents also carry their delivery channel's hint."""
+    override + desktop TUI clarifier; scheduled agents also carry their delivery channel's hint."""
     platform_key = (agent.platform or "").lower().strip()
     _effective_hint = _resolve_platform_hint(
         agent, platform_key, _default_platform_hint(platform_key, getattr(agent, "valid_tool_names", ())))
@@ -561,7 +561,7 @@ def _memory_parts(agent: Any) -> list[str]:
 
 
 def _identity_parts(agent: Any, ctx_len: Optional[int]) -> tuple[list[str], bool]:
-    """SOUL.md (primary identity; cron keeps the persona while skipping cwd
+    """SOUL.md (primary identity; scheduled keeps the persona while skipping cwd
     instructions, scoped to the agent's OWN home) or the default identity.
     Returns ``(parts, soul_loaded)``."""
     wants_soul = agent.load_soul_identity or not agent.skip_context_files

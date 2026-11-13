@@ -606,7 +606,7 @@ class GatewayConfig:
     # compatibility with external tooling and downgrade safety; set gateway.write_sessions_json: false in
     # config.yaml to stop producing the file.
     write_sessions_json: bool = True
-    always_log_local: bool = True  # Always save cron outputs to local files
+    always_log_local: bool = True  # Always save scheduled outputs to local files
     # Drop outbound "silence narration" (*(silent)*, 🔇, a bare ".") that ping-pongs in bot-to-bot
     # channels; a substrate guard that survives prompt drift.
     filter_silence_narration: bool = True
@@ -634,7 +634,7 @@ class GatewayConfig:
     # (off-loop write + two-witness probe), so raising it would only delay recovery.
     # On by default; set gateway.loop_watchdog: false in config.yaml to disable. Telegram/Discord reconnect
     # doing synchronous socket I/O during a network blip — so a short block does not force exit code 75 and
-    # trigger a restart churn that stalls cron dispatch (recurring fleet incidents on 2026-08-17, kanban
+    # trigger a restart churn that stalls scheduled dispatch (recurring fleet incidents on 2026-08-17, kanban
     # t_0f76430f/t_70483f23). A genuine wedge (event loop frozen for the full tolerance window) still
     # escalates to a supervised restart. See #69089.
     loop_watchdog: bool = True

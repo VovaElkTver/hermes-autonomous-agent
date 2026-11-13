@@ -28,10 +28,10 @@ def _set_interactive_stdin(monkeypatch, *, is_tty: bool = True) -> None:
 
 @pytest.mark.asyncio
 async def test_external_refresh_picked_up_without_restart(tmp_path, monkeypatch):
-    """Simulate Cthulhu's cron workflow end-to-end.
+    """Simulate Cthulhu's scheduled workflow end-to-end.
 
     1. A running Hermes session has OAuth tokens loaded in memory.
-    2. An external process (cron) writes fresh tokens to disk.
+    2. An external process (scheduled) writes fresh tokens to disk.
     3. On the next auth flow, the manager's disk-watch invalidates the
        in-memory state so the SDK re-reads from storage.
     4. ``provider.context.current_tokens`` now reflects the new tokens
@@ -82,7 +82,7 @@ async def test_external_refresh_picked_up_without_restart(tmp_path, monkeypatch)
     assert provider._initialized is True
     assert await mgr.invalidate_if_disk_changed("srv") is False  # unchanged file
 
-    # EXTERNAL PROCESS: cron rewrites the tokens file with fresh creds.
+    # EXTERNAL PROCESS: scheduled rewrites the tokens file with fresh creds.
     # The old refresh_token has been consumed by this external exchange.
     future_mtime = time.time() + 1
     tokens_file.write_text(json.dumps({

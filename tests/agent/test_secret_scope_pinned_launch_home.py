@@ -8,7 +8,7 @@ a multiplexing gateway/dashboard, since neither calls the pin itself. Two contra
   pin holds — a host's env mirror exists so override-less readers see the served profile, and an
   env-only home switch (``profiles._cleanup_gateway_service``) must not resolve to the launch home.
 * Deactivation releases only the pin activation itself created: an embedding host's explicit pin
-  survives the transient toggles in ``gateway_migrate._multiplex_read_mode`` and cron workers.
+  survives the transient toggles in ``gateway_migrate._multiplex_read_mode`` and scheduled workers.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def test_multiplex_activation_pins_the_launch_home_but_env_readers_still_follow_
 
 
 def test_an_explicit_host_pin_survives_a_transient_multiplex_toggle(homes, monkeypatch):
-    """#119242 contract: the embedding host pins once; ``_multiplex_read_mode`` / a cron worker
+    """#119242 contract: the embedding host pins once; ``_multiplex_read_mode`` / a scheduled worker
     flipping the mode True→False in the same process must not drop it."""
     launch, served = homes
     hermes_constants.pin_process_hermes_home(launch)

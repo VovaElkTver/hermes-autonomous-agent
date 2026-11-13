@@ -59,7 +59,7 @@ def test_custom_hermes_home_inside_a_checkout_uses_a_sibling_store(
 def test_checkout_detection_does_not_depend_on_cwd(tmp_path, monkeypatch, profiles):
     """HERMES_HOME inside a checkout must be detected even when cwd is elsewhere.
 
-    Regression for the cwd-anchored bypass: cron/service-manager invocations
+    Regression for the cwd-anchored bypass: scheduled/service-manager invocations
     run from outside the checkout, and the original heuristic walked
     ``Path.cwd()`` — letting the export land inside the source tree again.
     """

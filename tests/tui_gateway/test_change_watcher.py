@@ -1,5 +1,5 @@
 """The generalized change watcher (#73618): cheap on-disk signatures →
-``pet.changed`` / ``cron.changed`` / ``sessions.changed`` global broadcasts.
+``pet.changed`` / ``scheduled.changed`` / ``sessions.changed`` global broadcasts.
 
 Behavior contracts, exercised against a real temp HERMES_HOME (no mocks on the
 filesystem path): first sighting seeds silently, a moved signature broadcasts
@@ -69,7 +69,7 @@ def test_cron_jobs_file_move_broadcasts_cron_changed(watcher_home):
     (home / "cron" / "jobs.json").write_text("[]")
     server._broadcast_watched_changes(now=10.0)
 
-    assert ("cron.changed", {}) in events
+    assert ("scheduled.changed", {}) in events
 
 
 def test_state_db_move_broadcasts_sessions_changed(watcher_home):
@@ -474,13 +474,13 @@ def test_broken_probe_never_kills_the_pass(watcher_home, monkeypatch):
 
     monkeypatch.setitem(
         server._CHANGE_WATCHES,
-        "cron.changed",
+        "scheduled.changed",
         (1.0, lambda: (_ for _ in ()).throw(RuntimeError("boom")), dict),
     )
     _write_session_change(home / "state.db", "created")
     server._broadcast_watched_changes(now=10.0)
 
-    # The broken cron probe is skipped; sessions still broadcasts.
+    # The broken scheduled probe is skipped; sessions still broadcasts.
     assert ("sessions.changed", {}) in events
 
 

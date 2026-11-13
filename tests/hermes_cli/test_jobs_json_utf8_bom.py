@@ -1,23 +1,23 @@
 """UTF-8 BOM tolerance for independent jobs.json readers (dump/status).
 
-cron/jobs.load_jobs is covered in tests/cron/test_jobs.py. dump and status
+scheduled/jobs.load_jobs is covered in tests/scheduled/test_jobs.py. dump and status
 each open jobs.json themselves — keep them on the same utf-8-sig dialect.
 """
 
 from types import SimpleNamespace
 
 
-def test_dump_cron_summary_accepts_utf8_bom(tmp_path):
-    from hermes_cli.dump import _cron_summary
+def test_dump_scheduled_summary_accepts_utf8_bom(tmp_path):
+    from hermes_cli.dump import _scheduled_summary
 
-    cron = tmp_path / "cron"
-    cron.mkdir()
-    (cron / "jobs.json").write_bytes(
+    scheduled = tmp_path / "cron"
+    scheduled.mkdir()
+    (scheduled / "jobs.json").write_bytes(
         b'\xef\xbb\xbf{"jobs": [{"id": "j1", "enabled": true},'
         b' {"id": "j2", "enabled": false}]}'
     )
 
-    assert _cron_summary(tmp_path) == "1 active / 2 total"
+    assert _scheduled_summary(tmp_path) == "1 active / 2 total"
 
 
 
@@ -28,9 +28,9 @@ def test_status_scheduled_jobs_accepts_utf8_bom(monkeypatch, capsys, tmp_path):
     import hermes_cli.auth as auth_mod
     import hermes_cli.gateway as gateway_mod
 
-    cron = tmp_path / "cron"
-    cron.mkdir()
-    (cron / "jobs.json").write_bytes(
+    scheduled = tmp_path / "cron"
+    scheduled.mkdir()
+    (scheduled / "jobs.json").write_bytes(
         b'\xef\xbb\xbf{"jobs": [{"id": "j1", "enabled": true},'
         b' {"id": "j2", "enabled": true}]}'
     )

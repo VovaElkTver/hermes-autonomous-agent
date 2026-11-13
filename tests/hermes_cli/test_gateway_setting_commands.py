@@ -45,8 +45,8 @@ def test_refine_and_review_run_on_the_gateway_sessions_agent(monkeypatch, capsys
 
 
 def test_cron_writes_run_on_the_gateway_not_in_the_cli(monkeypatch, capsys):
-    """T1 (#134889): /cron add|pause|remove go to the gateway's handler (one writer to the profile's
-    cron store), with no answer deadline (a /cron run lasts as long as its job); nothing writes here."""
+    """T1 (#134889): /scheduled add|pause|remove go to the gateway's handler (one writer to the profile's
+    scheduled store), with no answer deadline (a /scheduled run lasts as long as its job); nothing writes here."""
     calls = []
 
     class _UntilConn(_Conn):
@@ -56,16 +56,16 @@ def test_cron_writes_run_on_the_gateway_not_in_the_cli(monkeypatch, capsys):
     monkeypatch.setattr("hermes_cli.gateway_side.connection_for", lambda cli: _UntilConn())
 
     def local_write(**_k):
-        raise AssertionError("the CLI process must not write the cron store")
-    monkeypatch.setattr("tools.cronjob_tools.cronjob", local_write)
+        raise AssertionError("the CLI process must not write the scheduled store")
+    monkeypatch.setattr("tools.cronjob_tools.scheduled job", local_write)
     cli = SimpleNamespace(session_id="local-s", _gateway_command_wait=None)
-    assert gateway_setting_commands.run(cli, "cron", "/cron pause probe") is True
-    assert calls == [("slash.exec", {"session_id": "local-s", "command": "cron pause probe"}, False)]
+    assert gateway_setting_commands.run(cli, "cron", "/scheduled pause probe") is True
+    assert calls == [("slash.exec", {"session_id": "local-s", "command": "scheduled pause probe"}, False)]
     assert "Paused job: probe" in capsys.readouterr().out and cli._gateway_command_wait is None
 
 
 def test_ctrl_c_during_a_cron_wait_prints_the_stopped_line_and_propagates(monkeypatch, capsys):
-    """Ctrl+C while /cron waits on the gateway (a /cron run lasts as long as its job): the same stopped line
+    """Ctrl+C while /scheduled waits on the gateway (a /scheduled run lasts as long as its job): the same stopped line
     as a plugin command, the wait handle cleared, and the interrupt still reaches the CLI."""
     import pytest
 
@@ -75,24 +75,24 @@ def test_ctrl_c_during_a_cron_wait_prints_the_stopped_line_and_propagates(monkey
     monkeypatch.setattr("hermes_cli.gateway_side.connection_for", lambda cli: _InterruptedConn())
     cli = SimpleNamespace(session_id="local-s", _gateway_command_wait=None)
     with pytest.raises(KeyboardInterrupt):
-        gateway_setting_commands.run(cli, "cron", "/cron run probe")
+        gateway_setting_commands.run(cli, "cron", "/scheduled run probe")
     assert "/cron: stopped waiting" in capsys.readouterr().out and cli._gateway_command_wait is None
 
 
 def test_cron_reads_keep_the_answer_deadline(monkeypatch, capsys):
-    """Only a /cron write waits with no deadline (a /cron run lasts as long as its job): bare /cron and
-    /cron list answer on the session's connection with its deadline, as /fast does, so a frozen gateway
+    """Only a /scheduled write waits with no deadline (a /scheduled run lasts as long as its job): bare /scheduled and
+    /scheduled list answer on the session's connection with its deadline, as /fast does, so a frozen gateway
     gives up instead of hanging until Ctrl+C."""
     class _BoundedConn(_Conn):
         def call_until(self, method, wake, **params):
-            raise AssertionError("a /cron read must keep the answer deadline")
+            raise AssertionError("a /scheduled read must keep the answer deadline")
     conn = _BoundedConn()
     monkeypatch.setattr("hermes_cli.gateway_side.connection_for", lambda cli: conn)
     cli = SimpleNamespace(session_id="local-s", _gateway_command_wait=None)
-    for typed in ("/cron", "/cron list", "/cron LIST -a", '/cron add "every 2h'):
+    for typed in ("/scheduled", "/scheduled list", "/scheduled LIST -a", '/scheduled add "every 2h'):
         assert gateway_setting_commands.run(cli, "cron", typed) is True
     assert [params["command"] for _m, params in conn.calls] == [
-        "cron", "cron list", "cron LIST -a", 'cron add "every 2h']
+        "cron", "scheduled list", "scheduled LIST -a", 'scheduled add "every 2h']
 
 
 def test_toolsets_is_the_gateway_sessions_report_printed_as_is(monkeypatch, capsys):

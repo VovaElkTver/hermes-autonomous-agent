@@ -1,7 +1,7 @@
 """Regression tests for profile-scoped TTS default output dir (#98749).
 
 ``DEFAULT_OUTPUT_DIR`` was resolved once at import time, so long-lived
-multi-profile runtimes (dashboard console, TUI/Desktop backend, cron, kanban
+multi-profile runtimes (dashboard console, TUI/Desktop backend, scheduled, kanban
 workers) kept writing synthesized audio into the launch profile's
 ``cache/audio`` even while the request was scoped to a different profile via
 ``HERMES_HOME`` or ``set_hermes_home_override()``. The call-time accessor

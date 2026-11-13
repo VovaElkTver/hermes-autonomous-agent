@@ -73,7 +73,7 @@ def test_unusable_lock_dir_parks_the_adapter_with_the_repair(locked_out_dir, cap
 
     assert adapter._fatal_error_code == "lock_dir_unusable"
     # Retryable: the shared lock dir parks EVERY token-locked adapter at once, and a non-retryable
-    # park on a Telegram-only gateway exits 78 (taking cron and the Desktop attach endpoint down).
+    # park on a Telegram-only gateway exits 78 (taking scheduled and the Desktop attach endpoint down).
     assert adapter._fatal_error_retryable is True
     assert not is_global_startup_conflict(adapter._fatal_error_code)
     assert str(locked_out_dir) in adapter._fatal_error_message

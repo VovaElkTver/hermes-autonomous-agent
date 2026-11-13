@@ -601,7 +601,7 @@ class TestPluginLoading:
         assert not any(key.endswith("chronos") for key in mgr._plugins)
 
     def test_user_cron_plugin_auto_coerced_to_exclusive(self, tmp_path, monkeypatch):
-        """A user-installed cron provider (no ``kind:``) routes to ``plugins.cron_providers`` like a
+        """A user-installed scheduled provider (no ``kind:``) routes to ``plugins.cron_providers`` like a
         memory provider does, instead of being imported by the general manager (#62951)."""
         hermes_home = tmp_path / "hermes_test"
         plugin_dir = hermes_home / "plugins" / "mycron"
@@ -958,7 +958,7 @@ class TestDeliveryParity:
     Salvaged from PR #64188 (@Bartok9): module-level invoke_hook /
     invoke_middleware / has_hook / has_middleware lazily run discovery so
     surfaces that never imported model_tools (dashboards, TUI slash workers,
-    query mode, cron) still deliver plugin callbacks.
+    query mode, scheduled) still deliver plugin callbacks.
     """
 
     def _fresh_manager(self, monkeypatch, register_body):
@@ -1033,7 +1033,7 @@ class TestDeliveryParity:
         ``_run_execution_chain``, which used to read ``get_plugin_manager()._middleware``
         directly — no lazy discovery — so a registered fail-closed policy gate was silently
         skipped (fail-open) on surfaces that never ran discovery at startup (query mode
-        ``chat -q``, cron delivery, dashboard, TUI slash workers). The chain must route
+        ``chat -q``, scheduled delivery, dashboard, TUI slash workers). The chain must route
         through ``_delivery_manager()`` like every other delivery entry point (#64178).
         """
         fired = []

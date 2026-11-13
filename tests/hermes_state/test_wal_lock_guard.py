@@ -41,7 +41,7 @@ def test_holder_survives_stray_close_then_sibling_closes(tmp_path, monkeypatch):
         sibling = SessionDB(db_path=db.db_path)
         sibling.append_message("s", role="user", content="tab")
         sibling.close()
-        # ...and a foreign process (cron worker / one-shot CLI shape) closing.
+        # ...and a foreign process (scheduled worker / one-shot CLI shape) closing.
         _foreign_open_close(db.db_path)
         assert wal.exists() and wal.stat().st_ino == wal_inode, "a sibling close unlinked the live WAL"
         db.append_message("s", role="user", content="after")  # would raise DeletedWalGenerationError

@@ -129,7 +129,7 @@ def _ic_codex_method(agent, name: str):
 
 
 def _ic_abort_active_request(agent, reason: str, failure_log: str) -> None:
-    """Shut the registered in-flight request's sockets (cron turns register their client here)."""
+    """Shut the registered in-flight request's sockets (scheduled turns register their client here)."""
     abort = getattr(agent, "_active_request_abort", None)
     if callable(abort):
         try:
@@ -242,7 +242,7 @@ class InterruptControlMixin:
             except Exception:
                 logger.debug("Failed to interrupt Codex app-server turn", exc_info=True)
 
-        # Cron turns request on the conversation thread (no nested interrupt-worker deadlock); their client
+        # Scheduled turns request on the conversation thread (no nested interrupt-worker deadlock); their client
         # is registered here so this cross-thread interrupt can still shut the sockets.
         _ic_abort_active_request(self, "interrupt_abort", "Failed to abort active inline request")
         # Scope the tool interrupt to this agent's execution thread so other in-process agents are unaffected.

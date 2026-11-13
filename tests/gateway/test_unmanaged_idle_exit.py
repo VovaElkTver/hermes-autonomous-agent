@@ -1,6 +1,6 @@
 """An auto-started (``--idle-exit``) gateway exits once idle; anything it serves keeps it up.
 
-Real SQLite ledger rows, a real cron store and real asyncio; the runner is a stand-in exposing
+Real SQLite ledger rows, a real scheduled store and real asyncio; the runner is a stand-in exposing
 only what the idle predicate reads.
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _runner(tmp_path, monkeypatch, *, window=0.2):
         session_runtime_descriptor={"state": "ready", "capabilities": ["x"]}, _exit_reason=None,
         _active_work_count=lambda: 0, _scale_to_zero_has_live_background_work=lambda: False, stop=stop)
     monkeypatch.setattr(run_idle_exit, "idle_exit_seconds", lambda r: window)
-    monkeypatch.setattr("gateway.run._cron_tick_profile_homes", lambda config: [("default", home)])
+    monkeypatch.setattr("gateway.run._scheduled_tick_profile_homes", lambda config: [("default", home)])
     monkeypatch.setattr(run_idle_exit, "_kanban_busy", lambda: None)
     monkeypatch.setattr(run_idle_exit, "_store_gates_busy", lambda homes: None)
     run_idle_exit.note_client_activity(runner)
@@ -81,11 +81,11 @@ async def test_queued_work_clients_adapters_and_cron_each_keep_it_up(tmp_path, m
         runner.config.platforms[Platform.TELEGRAM] = SimpleNamespace(enabled=True)
         assert "messaging" in run_idle_exit.busy_reason(runner, window=0.2)
         runner.config.platforms.clear()
-        from cron.jobs import create_job, use_cron_store
+        from scheduled.jobs import create_job, use_cron_store
         with use_cron_store(home):
             create_job("ping", "every 1h", name="j")
-        assert "cron jobs scheduled" in run_idle_exit.busy_reason(runner, window=0.2)
-        monkeypatch.setattr("cron.jobs.load_jobs", lambda: (_ for _ in ()).throw(OSError("unreadable")))
+        assert "scheduled jobs scheduled" in run_idle_exit.busy_reason(runner, window=0.2)
+        monkeypatch.setattr("scheduled.jobs.load_jobs", lambda: (_ for _ in ()).throw(OSError("unreadable")))
         assert "idle probe failed" in run_idle_exit.busy_reason(runner, window=0.2)
     finally:
         db.close()

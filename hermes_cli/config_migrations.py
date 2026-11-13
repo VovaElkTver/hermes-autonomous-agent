@@ -759,6 +759,28 @@ def _migrate_to_54(results: dict[str, Any], quiet: bool) -> None:
         _commit(config, results, quiet, None, "  ✓ Pruned retired plugin toolset stamp")
 
 
+def _migrate_to_55(results: dict[str, Any], quiet: bool) -> None:
+    # 54 → 55: de-scheduled vocabulary — the two surviving scheduler-era key names move to their
+    # "scheduled" spellings; values carry over verbatim.
+    config = read_raw_config()
+    touched = []
+    agent = _dict_at(config, "agent")
+    if "cron_drain_timeout" in agent:
+        agent.setdefault("scheduled_drain_timeout", agent.pop("cron_drain_timeout"))
+        config["agent"] = agent
+        touched.append("agent.cron_drain_timeout → agent.scheduled_drain_timeout")
+    approvals = _dict_at(config, "approvals")
+    if "cron_mode" in approvals:
+        approvals.setdefault("scheduled_mode", approvals.pop("cron_mode"))
+        config["approvals"] = approvals
+        touched.append("approvals.cron_mode → approvals.scheduled_mode")
+    if touched:
+        results["config_added"].append("; ".join(touched))
+        _commit(config, results, quiet, None,
+                "  ✓ Renamed agent.cron_drain_timeout → scheduled_drain_timeout and "
+                "approvals.cron_mode → scheduled_mode")
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (12, _migrate_to_12),
     (13, _migrate_to_13),
@@ -845,9 +867,9 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
         match=lambda cur: cur is not None,
         added="removed cron.model_drift_guard",
         message=(
-            "  ✓ Removed cron.model_drift_guard — unpinned cron jobs now keep running on the "
+            "  ✓ Removed cron.model_drift_guard — unpinned jobs now keep running on the "
             "model/provider they were created under when the global default changes, instead "
-            "of being skipped. Pin a job or set cron.model to move it."))),
+            "of being skipped. Pin a job or set the model to move it."))),
     # 42 → 43: gateway.multiplex_profile_allowlist is gone. A multiplexing default gateway serves
     # every live profile under profiles/; a profile that must not be served is archived or deleted.
     (43, functools.partial(
@@ -894,14 +916,14 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (50, _migrate_to_50),
     # 50 → 51: cron.bot_chat_delivery_timeout_seconds is gone with the local `hermes chat`
     # fallback lane it bounded. Bot Chat deliveries are admitted to the running gateway and
-    # settle on its durable receipt; there is no cron-side turn left to time out.
+    # settle on its durable receipt; there is no scheduled-side turn left to time out.
     (51, functools.partial(
         _rewrite_key, section="cron", key="bot_chat_delivery_timeout_seconds", new=None,
         match=lambda _cur: True,
         added="removed cron.bot_chat_delivery_timeout_seconds",
         message=(
             "  ✓ Removed cron.bot_chat_delivery_timeout_seconds — bot-chat deliveries are now "
-            "admitted to the target profile's running gateway and tracked by receipt, so cron no "
+            "admitted to the target profile's running gateway and tracked by receipt, so scheduled no "
             "longer runs (or times out) a Bot Chat turn of its own."),
         extra_guard=lambda raw: "bot_chat_delivery_timeout_seconds" in raw)),
     # 51 -> 52: browser.backend + browser.extension_control dropped, AGENT_BROWSER_* .env settings ->
@@ -915,6 +937,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
         message="  ✓ Lowered agent.clarify_timeout from 3600 to 90 seconds (unanswered questions no longer hold the chat for an hour)")),
     # 53 -> 54 (fork): the write-approval gate is retired — memory/skill writes are direct; drop the keys.
     (54, _migrate_to_54),
+    (55, _migrate_to_55),
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or
@@ -926,11 +949,11 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
 #: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose
 #: provenance the config stamp says nothing about.
-LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 54})
+LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 54, 55})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at
 #: or past their version does not prove they ran: unreleased builds of the gateway-runtime branch
-#: put their retired-cron-key step at 44, 45, 46, 47 and 50 before it landed at 51, so a home one
+#: put their retired-scheduled-key step at 44, 45, 46, 47 and 50 before it landed at 51, so a home one
 #: of them stamped skipped main's step of that number. Only a step triggered by a key NO runtime
 #: reads qualifies (re-running it is a no-op once the key is gone, and it never overrides a value
 #: something consumes). The value-based steps such a home also skipped (44 curator defaults, 45

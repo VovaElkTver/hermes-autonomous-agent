@@ -5,7 +5,7 @@ off the profile's own gateway.pid, so a satellite profile served by the default
 multiplexer showed "not running" even though the multiplexer was its live
 inbound process. All three now consult the same
 ``named_profile_served_by_running_multiplexer()`` lookup the start guard and
-cron liveness use.
+scheduled liveness use.
 """
 
 from __future__ import annotations

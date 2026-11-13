@@ -1036,7 +1036,7 @@ def _spy_fleet_restart(monkeypatch):
 
 
 def test_up_to_date_update_leaves_current_fleet_alone(monkeypatch, tmp_path, capsys):
-    """Every live gateway already serves the checkout code: `hermes update` (cron, a second
+    """Every live gateway already serves the checkout code: `hermes update` (scheduled, a second
     profile) must not drain and restart the shared multiplexer again, and must still discharge
     the obligation it armed and finish clean."""
     args = _update_args()

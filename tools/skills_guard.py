@@ -302,7 +302,7 @@ THREAT_PATTERNS = [
     (r'shutil\.rmtree\s*\(\s*[\"\'/]', "python_rmtree", "high", "destructive", "Python rmtree on absolute or root-relative path"),
     (r'truncate\s+-s\s*0\s+/', "truncate_system", "critical", "destructive", "truncates system file to zero bytes"),
     # ── Persistence ──
-    (r'\bcrontab\b', "persistence_cron", "medium", "persistence", "modifies cron jobs"),
+    (r'\bcrontab\b', "persistence_cron", "medium", "persistence", "modifies scheduled jobs"),
     # ``profile`` is split out and anchored: ``.zshrc`` after a dot is always the file, but
     # ``.profile`` is also how every language spells attribute access (``self.profile``,
     # ``data?.profile``, ``func().profile``), which flooded scans of ordinary code. Requiring

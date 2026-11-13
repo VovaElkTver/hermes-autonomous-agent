@@ -65,7 +65,7 @@ def register(ctx) -> None:
         is_connected=_is_connected, required_env=["SIGNAL_HTTP_URL", "SIGNAL_ACCOUNT"],
         config_connected_fn=config_connected_extra("http_url"),
         install_hint="Signal: runtime requirements not met", setup_fn=interactive_setup,
-        cron_deliver_env_var="SIGNAL_HOME_CHANNEL",
+        scheduled_deliver_env_var="SIGNAL_HOME_CHANNEL",
         # Out-of-process sends speak raw JSON-RPC and bypass SignalAdapter.send()'s chunking, so
         # send_message splits at the adapter's limit through this field.
         standalone_sender_fn=standalone_send, max_message_length=MAX_MESSAGE_LENGTH,

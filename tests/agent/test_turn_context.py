@@ -727,9 +727,9 @@ def test_prologue_titles_the_surfaces_a_person_reads(platform):
     assert _title_turn(platform).called
 
 
-@pytest.mark.parametrize("platform", ["cron", "CRON", "subagent"])
+@pytest.mark.parametrize("platform", ["cron", "SCHEDULED", "subagent"])
 def test_prologue_does_not_title_machine_driven_runs(platform):
-    """Cron names its own session after the job, and nobody opens a subagent's.
+    """Scheduled names its own session after the job, and nobody opens a subagent's.
 
     Both would otherwise pay a side-LLM call per run for a name that is either
     overwritten or never read.

@@ -282,7 +282,7 @@ async def execute_admission(authority, ref, row):
         return noted
     from gateway.session_policy import policy_for_source
     policy = policy_for_source(authority.runner, authority.sessions[ref.session_id].source)
-    # The trusted cron-producer source ('cron') was excised with the cron package;
+    # The trusted scheduled-producer source ('cron') was excised with the scheduled package;
     # policy_for_source can no longer yield it.
     local_policy = policy
     from gateway.session_managed_worker import managed_policy, admit_managed

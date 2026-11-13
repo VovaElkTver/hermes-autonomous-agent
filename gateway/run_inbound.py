@@ -981,7 +981,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         event.text = _init_prompt
         return False, None
 
-    # /blueprint went with the cron package; its handler slot is gone with it.
+    # /blueprint went with the scheduled package; its handler slot is gone with it.
     async def _hm_cmd_undo(self, event, source, _quick_key):
         _undo_n = 1
         _undo_raw = event.get_command_args().strip()

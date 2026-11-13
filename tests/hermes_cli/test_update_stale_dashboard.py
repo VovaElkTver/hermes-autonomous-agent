@@ -374,7 +374,7 @@ class TestSupervisedBackendRestart:
     @pytest.mark.parametrize("main_pid, restarted", [("991", False), ("4321", True)],
                              ids=["foreign-unit-cgroup", "unit-main-process"])
     def test_only_the_unit_whose_main_process_is_the_backend_is_restarted(self, main_pid, restarted):
-        """A dashboard started by hand from a shell inside some unit (CI runner agent, cron, tmux,
+        """A dashboard started by hand from a shell inside some unit (CI runner agent, scheduled, tmux,
         the gateway's terminal tool) sits in that unit's cgroup. Only a unit whose MainPID IS the
         backend supervises it; any other unit is not restarted and the backend is respawned from
         its argv instead."""

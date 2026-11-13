@@ -351,7 +351,7 @@ def _route_slots(home: Path) -> list[dict]:
     overlay (``read_yaml_layers``): ``model``, the fallback chain (``get_fallback_chain``: legacy
     ``fallback_model`` merged), each ``auxiliary.<task>``, ``delegation`` and its fallback chain, every
     delegation backend route (:func:`_delegation_backend_routes`) and its chain, every MoA preset's reference
-    models and aggregator (``normalize_moa_config``), the cron-wide ``cron.model_provider``, each cron job's pin
+    models and aggregator (``normalize_moa_config``), the legacy home-wide ``cron.model_provider``, each job's model pin
     and the user's own ``providers:`` / ``custom_providers:`` endpoints (``get_compatible_custom_providers``)."""
     from gateway import config_loader
     from hermes_cli.config_providers import get_compatible_custom_providers
@@ -370,7 +370,7 @@ def _route_slots(home: Path) -> list[dict]:
     def with_chain(slot: dict) -> list[dict]:
         return [slot, *get_fallback_chain({"fallback_providers": slot.get("fallback_providers")})]
     delegation = block(cfg.get("delegation"))
-    # Former ``cron.scheduler_preflight.cron_default_provider``: the cron-wide default
+    # Former ``cron.scheduler_preflight.cron_default_provider``: the home-wide default
     # provider still routes config resolution for installed profiles.
     cron_cfg = cfg.get("cron") if isinstance(cfg, dict) else None
     cron_default_provider = str(cron_cfg.get("model_provider") or "").strip() if isinstance(cron_cfg, dict) else ""

@@ -6,7 +6,7 @@ from agent.secret_scope import set_multiplex_active
 
 
 def test_secondary_worker_env_drops_launch_terminal_policy_and_env_settings(tmp_path, monkeypatch):
-    """Same contract as the cron and kanban dispatchers: a worker for served profile X gets the
+    """Same contract as the scheduled and kanban dispatchers: a worker for served profile X gets the
     env a standalone ``hermes -p X`` gateway would build — X's HERMES_HOME and X's ``.env`` over a
     base without the launch profile's ``TERMINAL_*`` policy or launch-only ``.env`` settings."""
     from gateway.session_managed_worker import _worker_env

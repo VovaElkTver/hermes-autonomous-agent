@@ -84,7 +84,7 @@ async def test_an_a2a_context_resumed_after_a_sweep_keeps_its_new_session(a2a):
 
 
 def test_an_ordinary_swept_session_still_ages_out(owner):
-    """Housekeeping on a cron-heavy store: an id no door derives keeps an expiring marker."""
+    """Housekeeping on a scheduled-heavy store: an id no door derives keeps an expiring marker."""
     from hermes_state_mutation_retirement import RETIRED_PREFIX
     owner.db.create_session('cron_job_run_1', source='cron')
     _sweep(SimpleNamespace(db=owner.db, sessions={}), 'cron_job_run_1')

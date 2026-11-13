@@ -263,7 +263,7 @@ def _ra():
 def _is_interpreter_shutdown_submit_error(exc: RuntimeError) -> bool:
     """Shutdown-race predicate; ``tools.interpreter_shutdown`` knows both CPython message variants.
 
-    Delegates so all sites (cron delivery, conversation-loop retry, tool submission) recognize both CPython
+    Delegates so all sites (scheduled delivery, conversation-loop retry, tool submission) recognize both CPython
     shutdown-message variants instead of each matching its own substring (the bug class behind
     #55924/#58720).
     """

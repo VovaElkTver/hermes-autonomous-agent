@@ -18,7 +18,7 @@ CLOSES = {
     "drained": "INFO gateway.run: Restart deferred wait complete — active work drained; proceeding to stop()",
     "cap": "WARNING gateway.run: Restart after-turn wait timed out after 120s with 1 still active; proceeding",
     "excluded": "WARNING gateway.run: Restart deferred wait: 1 excluded work unit(s) remain (1 wedged, 0 restart-safe "
-                "external cron); proceeding to stop()/drain",
+                "external scheduled); proceeding to stop()/drain",
 }
 
 

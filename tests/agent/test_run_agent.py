@@ -2761,9 +2761,9 @@ class TestHandleMaxIterations:
         """Max-iteration Codex summaries must retain request watchdogs.
 
         A direct ``_run_codex_stream`` call bypasses the absolute stale timeout,
-        interrupt handling, and request-local client cleanup. In unattended cron
+        interrupt handling, and request-local client cleanup. In unattended scheduled
         sessions that turns a wedged summary stream into a job that never returns
-        to cron's completion/error delivery lifecycle (#70943).
+        to scheduled's completion/error delivery lifecycle (#70943).
         """
         agent.api_mode = "codex_responses"
         agent.provider = "xai-oauth"
@@ -2950,7 +2950,7 @@ class TestHandleMaxIterations:
         The sanitizer preferred ``call_id`` only, so it treated the valid
         result as orphaned, dropped it, and injected a bogus
         '[Result unavailable ...]' stub — silently eating a real tool result
-        (e.g. mnemosyne_recall / cronjob list). The result must survive intact.
+        (e.g. mnemosyne_recall / scheduled job list). The result must survive intact.
         (#55626)"""
         messages = [
             {
@@ -3475,7 +3475,7 @@ class TestRunConversation:
             patch.object(agent, "_cleanup_task_resources"),
         ):
             result = agent.run_conversation("answer me")
-        # Empty after retries keeps the pre-existing status (not a failed turn: cron stays silent,
+        # Empty after retries keeps the pre-existing status (not a failed turn: scheduled stays silent,
         # the transcript keeps the text) and only gains the descriptor code for Desktop/TUI.
         assert result["failed"] is False and result["completed"] is True
         assert result["failure_reason"] == "empty_response"
@@ -3507,7 +3507,7 @@ class TestRunConversation:
             patch.object(agent, "_cleanup_task_resources"),
         ):
             result = agent.run_conversation("answer me")
-        # Empty after retries keeps the pre-existing status (not a failed turn: cron stays silent,
+        # Empty after retries keeps the pre-existing status (not a failed turn: scheduled stays silent,
         # the transcript keeps the text) and only gains the descriptor code for Desktop/TUI.
         assert result["failed"] is False and result["completed"] is True
         assert result["failure_reason"] == "empty_response"
@@ -3538,7 +3538,7 @@ class TestRunConversation:
             patch.object(agent, "_cleanup_task_resources"),
         ):
             result = agent.run_conversation("answer me")
-        # Empty after retries keeps the pre-existing status (not a failed turn: cron stays silent,
+        # Empty after retries keeps the pre-existing status (not a failed turn: scheduled stays silent,
         # the transcript keeps the text) and only gains the descriptor code for Desktop/TUI.
         assert result["failed"] is False and result["completed"] is True
         assert result["failure_reason"] == "empty_response"
@@ -3680,7 +3680,7 @@ class TestRunConversation:
             patch.object(agent, "_try_activate_fallback", side_effect=_mock_fallback),
         ):
             result = agent.run_conversation("answer me")
-        # Empty after retries keeps the pre-existing status (not a failed turn: cron stays silent,
+        # Empty after retries keeps the pre-existing status (not a failed turn: scheduled stays silent,
         # the transcript keeps the text) and only gains the descriptor code for Desktop/TUI.
         assert result["failed"] is False and result["completed"] is True
         assert result["failure_reason"] == "empty_response"

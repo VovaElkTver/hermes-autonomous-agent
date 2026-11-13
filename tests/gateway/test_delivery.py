@@ -119,7 +119,7 @@ async def test_relay_fronted_target_delivers_without_prior_inbound_chat_state(tm
     result = await router._deliver_to_platform(
         DeliveryTarget(platform=Platform.SLACK, chat_id="D123"),
         content,
-        metadata={"job_id": "cron-1", "user_id": "stale-user"},
+        metadata={"job_id": "scheduled-1", "user_id": "stale-user"},
     )
 
     assert getattr(result, "success", False) is True
@@ -127,9 +127,9 @@ async def test_relay_fronted_target_delivers_without_prior_inbound_chat_state(tm
     action, wire_platform = transport.sent[0]
     assert wire_platform == "slack"
     assert action["chat_id"] == "D123"
-    assert action["metadata"] == {"job_id": "cron-1", "user_id": "U123"}
+    assert action["metadata"] == {"job_id": "scheduled-1", "user_id": "U123"}
     assert action["content"] == content
-    saved_files = list(tmp_path.glob("cron/output/cron-1_*.txt"))
+    saved_files = list(tmp_path.glob("scheduled/output/scheduled-1_*.txt"))
     if len(content) > 4000:
         assert len(saved_files) == 1
         assert saved_files[0].read_text(encoding="utf-8") == content
@@ -292,7 +292,7 @@ class FailingAdapter:
 
 
 # ---------------------------------------------------------------------------
-# Cron output truncation / adapter-aware chunking (issue #50126)
+# Scheduled output truncation / adapter-aware chunking (issue #50126)
 # ---------------------------------------------------------------------------
 
 class ChunkingAdapter:
@@ -334,7 +334,7 @@ async def test_long_output_truncated_for_non_chunking_adapter(tmp_path, monkeypa
     assert "truncated" in delivered.lower()
     assert "full output saved to" in delivered
     # Full output was saved to disk
-    saved_files = list(tmp_path.glob("cron/output/job1_*.txt"))
+    saved_files = list(tmp_path.glob("scheduled/output/job1_*.txt"))
     assert len(saved_files) == 1
     assert saved_files[0].read_text() == long_content
 
@@ -367,7 +367,7 @@ _NON_ASCII_OVERSIZED = ("数据备份完成 🎉 résumé — " * 250)
 
 @pytest.mark.asyncio
 async def test_oversized_non_ascii_output_is_delivered_on_windows_codepage(tmp_path, monkeypatch):
-    """Oversized cron output containing emoji/CJK must still be delivered.
+    """Oversized scheduled output containing emoji/CJK must still be delivered.
 
     Without an explicit utf-8 encoding the full-output save raises
     UnicodeEncodeError on a Windows code page, aborting the whole
@@ -442,7 +442,7 @@ async def test_relay_fronted_telegram_target_receives_payload_above_its_own_limi
     result = await router._deliver_to_platform(
         DeliveryTarget(platform=Platform.TELEGRAM, chat_id="12345"),
         content,
-        metadata={"job_id": "cron-2", "user_id": "stale-user"},
+        metadata={"job_id": "scheduled-2", "user_id": "stale-user"},
     )
 
     assert getattr(result, "success", False) is True
@@ -450,6 +450,6 @@ async def test_relay_fronted_telegram_target_receives_payload_above_its_own_limi
     assert wire_platform == "telegram"
     assert action["content"] == content
     assert len(action["content"]) > 4096
-    saved_files = list(tmp_path.glob("cron/output/cron-2_*.txt"))
+    saved_files = list(tmp_path.glob("scheduled/output/scheduled-2_*.txt"))
     assert len(saved_files) == 1
     assert saved_files[0].read_text(encoding="utf-8") == content

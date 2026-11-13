@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 # Launch policy travels in session.create, not into daemon-wide defaults. That includes the Kanban
 # board `hermes --tui` pins at launch (_pin_kanban_board_env): a daemon started from here would
-# otherwise resolve every later chat's, Desktop window's and cron job's board to this terminal's
+# otherwise resolve every later chat's, Desktop window's and scheduled job's board to this terminal's
 # launch-time board instead of the profile's `kanban/current`.
 CLIENT_LAUNCH_ENV = (
     "HERMES_MODEL", "HERMES_INFERENCE_MODEL", "HERMES_TUI_PROVIDER", "HERMES_INFERENCE_PROVIDER",

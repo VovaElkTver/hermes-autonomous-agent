@@ -31,7 +31,7 @@ _USER_AGENT = "hermes-agent/debug-share"
 _MAX_LOG_BYTES = 512_000  # per log file for upload (paste.rs caps at ~1 MB)
 _AUTO_DELETE_SECONDS = 21600  # 6 hours
 
-# Pending-deletion tracking: the gateway cron ticker calls ``_sweep_expired_pastes`` hourly and
+# Pending-deletion tracking: the gateway scheduled ticker calls ``_sweep_expired_pastes`` hourly and
 # ``hermes debug`` sweeps on entry (CLI-only users). Replaced a fork-and-sleep subprocess that
 # leaked ~20 MB per share.
 

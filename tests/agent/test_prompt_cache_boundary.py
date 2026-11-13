@@ -1,6 +1,6 @@
 """Builder-declared stable-prefix cache boundaries (#81867).
 
-Webhook/cron skill invocations concatenate a large static scaffold with a
+Webhook/scheduled skill invocations concatenate a large static scaffold with a
 small volatile tail into one user string; without a declared boundary the
 whole message is cached as one atomic block and a changed ticket ID or
 timestamp forces a full cache rewrite. These tests cover the registry, the
@@ -105,7 +105,7 @@ class TestRegistry:
         assert find_stable_prefix("anything") is None
 
     def test_lookup_refreshes_the_entry_lru_position(self):
-        """A cron scaffold fired every minute must survive a burst of one-off
+        """A scheduled scaffold fired every minute must survive a burst of one-off
         invocations; without the refresh it silently drops back to
         whole-message caching while still being the hottest prefix."""
         from agent import prompt_cache_boundary
@@ -359,7 +359,7 @@ class TestRealBuilders:
 
 class TestCronBuilder:
     def _prompts(self, jobs):
-        from cron.scheduler import _build_job_prompt
+        from scheduled.scheduler import _build_job_prompt
 
         with patch(
             "agent.skill_bundles.resolve_bundle_command_key", return_value=None

@@ -87,7 +87,7 @@ def _accepts_require_checkpoint(fn: Callable[..., Any]) -> bool:
 # -- Provider egress scrubbing -----------------------------------------------
 
 def _scrub(text: str) -> str:
-    """The shared egress scrub. Like chat-platform and cron delivery it holds even when
+    """The shared egress scrub. Like chat-platform and scheduled delivery it holds even when
     ``security.redact_secrets`` is off (that setting governs local logs, not what leaves the agent)
     and fails closed."""
     return redact_for_egress(text)

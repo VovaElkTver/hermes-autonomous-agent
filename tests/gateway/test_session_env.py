@@ -94,7 +94,7 @@ def test_shared_source_uses_current_event_author_for_live_actor_context():
         assert shared_source.user_id is None
         assert get_session_env("HERMES_SESSION_ACTOR_ID") == "current-author"
         assert get_session_env("HERMES_SESSION_ACTOR_NAME") == "Current Author"
-        # The route stays the shared, sender-less one (kanban/cron/send_message rebuild it).
+        # The route stays the shared, sender-less one (kanban/scheduled/send_message rebuild it).
         assert get_session_env("HERMES_SESSION_USER_ID") == ""
     finally:
         runner._clear_session_env(tokens)
@@ -265,37 +265,37 @@ async def test_run_in_executor_with_context_preserves_session_env(monkeypatch):
 
 
 def test_cron_session_contextvar_preserves_legacy_env_fallback(monkeypatch):
-    """Unset cron ContextVar keeps old env-only cron callers working."""
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    """Unset scheduled ContextVar keeps old env-only scheduled callers working."""
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
 
-    assert get_session_env("HERMES_CRON_SESSION") == "1"
+    assert get_session_env("HERMES_SCHEDULED_SESSION") == "1"
 
 
 def test_cron_session_explicit_blank_masks_leaked_env(monkeypatch):
-    """Non-cron session bindings must override a stale process cron env flag."""
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    """Non-scheduled session bindings must override a stale process scheduled env flag."""
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
 
-    tokens = set_session_vars(platform="api_server", cron_session="")
+    tokens = set_session_vars(platform="api_server", scheduled_session="")
     try:
-        assert get_session_env("HERMES_CRON_SESSION") == ""
+        assert get_session_env("HERMES_SCHEDULED_SESSION") == ""
     finally:
         clear_session_vars(tokens)
 
-    assert get_session_env("HERMES_CRON_SESSION") == ""
+    assert get_session_env("HERMES_SCHEDULED_SESSION") == ""
 
 
 def test_cron_session_set_clear_and_reset_tristate(monkeypatch):
-    """Cron marker supports _UNSET fallback, 1 cron, and  explicit clear."""
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    """Scheduled marker supports _UNSET fallback, 1 scheduled, and  explicit clear."""
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
 
-    tokens = set_session_vars(cron_session="1")
-    assert get_session_env("HERMES_CRON_SESSION") == "1"
+    tokens = set_session_vars(scheduled_session="1")
+    assert get_session_env("HERMES_SCHEDULED_SESSION") == "1"
 
     clear_session_vars(tokens)
-    assert get_session_env("HERMES_CRON_SESSION") == ""
+    assert get_session_env("HERMES_SCHEDULED_SESSION") == ""
 
     reset_session_vars()
-    assert get_session_env("HERMES_CRON_SESSION") == "1"
+    assert get_session_env("HERMES_SCHEDULED_SESSION") == "1"
 
 
 @pytest.mark.asyncio
@@ -391,3 +391,20 @@ async def test_plugin_slash_command_receives_calling_session(monkeypatch):
 
     assert (handled, result) == (True, "ok")
     assert seen == [("details", source, "20261018_live", key, "telegram", "20261018_live")]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_session_env_reads_legacy_name_during_transition(monkeypatch):
+    """Transitional: pre-rename fleet exports only HERMES_CRON_SESSION; the new name reads it,
+    and an explicit new-name value (even empty) masks the legacy variable."""
+    tokens = set_session_vars()
+    try:
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
+        monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+        assert get_session_env("HERMES_SCHEDULED_SESSION") == "1"
+        monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "")
+        assert get_session_env("HERMES_SCHEDULED_SESSION") == ""
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION")
+        assert get_session_env("HERMES_SCHEDULED_SESSION") == "1"
+    finally:
+        clear_session_vars(tokens)

@@ -29,10 +29,10 @@ FOREIGN_PAGES = (
 
 
 async def _write_statuses(client: httpx.AsyncClient, headers: dict) -> tuple[int, int, int]:
-    """Status codes of a POST (socket ticket), a PUT (config) and a DELETE (cron job) sent with *headers*."""
+    """Status codes of a POST (socket ticket), a PUT (config) and a DELETE (scheduled job) sent with *headers*."""
     ticket = await client.post("/api/webapp/socket-ticket?socket=gateway", headers=headers)
     config = await client.put("/api/config", headers=headers, json=SKIN)
-    job = await client.delete("/api/cron/jobs/no-such-job", headers=headers)
+    job = await client.delete("/api/scheduled/jobs/no-such-job", headers=headers)
     return ticket.status_code, config.status_code, job.status_code
 
 

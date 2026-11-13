@@ -8,7 +8,7 @@ With no gateway, prune stays the local command it always was (holder scan, ``--f
 """
 from __future__ import annotations
 
-#: A cron-heavy store prunes tens of thousands of rows in one transaction; the owner shields the
+#: A scheduled-heavy store prunes tens of thousands of rows in one transaction; the owner shields the
 #: write, so a short client budget would only misreport a prune that still commits.
 PRUNE_RPC_TIMEOUT = 600
 

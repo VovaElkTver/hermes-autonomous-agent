@@ -164,7 +164,7 @@ def get_activity_callback() -> Callable[[str], None] | None:
 
     Public accessor for callers outside this module that need to capture the calling thread's callback
     before handing work to another thread (the callback is thread-local, so a freshly spawned thread cannot
-    read it back) — e.g. the manual cron-run heartbeat (#76502).
+    read it back) — e.g. the manual scheduled-run heartbeat (#76502).
     """
     return getattr(_activity_callback_local, "callback", None)
 

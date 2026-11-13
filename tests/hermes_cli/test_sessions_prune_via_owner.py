@@ -57,7 +57,7 @@ def owned_store(monkeypatch, tmp_path):
     child = _mutate(db, epoch, owner, 'reset')['target_session_id']  # ends `owner`, keeps it as the FIFO owner
     db.append_message(child, 'user', 'kept turn')
     _aged(db, owner, 200)
-    for sid, source, days in (('old-cli', 'cli', 200), ('old-cron', 'cron', 200), ('fresh-cli', 'cli', 1)):
+    for sid, source, days in (('old-cli', 'cli', 200), ('old-scheduled', 'cron', 200), ('fresh-cli', 'cli', 1)):
         db.create_session(sid, source)
         db.append_message(sid, 'user', sid)
         _aged(db, sid, days)
@@ -114,12 +114,12 @@ def test_prune_under_the_live_owner_is_applied_by_the_owner_not_refused(owned_st
     assert 'Refusing' not in out and 'Pruned 2 session(s).' in out, out
     db = store.db
     # --older-than honoured; the retained reset child's logical owner and its history survive.
-    assert db.get_session('old-cli') is None and db.get_session('old-cron') is None
+    assert db.get_session('old-cli') is None and db.get_session('old-scheduled') is None
     assert db.get_session('fresh-cli') is not None and db.get_session(store.owner) is not None
     assert [m['content'] for m in db.get_messages(store.child)] == ['kept turn']
     # The CLI never opened a writer; the owner retired the deleted ids from its own memory too.
     assert opened == [True], opened
-    assert 'old-cli' not in store.authority.sessions and set(store.retired) == {'old-cli', 'old-cron'}
+    assert 'old-cli' not in store.authority.sessions and set(store.retired) == {'old-cli', 'old-scheduled'}
 
 
 @pytest.mark.asyncio

@@ -441,7 +441,7 @@ def _modification_allowed(rel: str) -> bool:
     config.yaml is rewritten by config migration: additive, by design.
     state.db is a live SQLite file — its size moves whenever rows are written,
     so its real contract is the row-count check below, not byte equality.
-    The cron ticker stamps its own liveness on a schedule of its own, inside the
+    The scheduled ticker stamps its own liveness on a schedule of its own, inside the
     verified window or not: they are never user state. On a cold home they show up
     as ordinary additions (tolerated); once the ticker exists, the same file moves.
     gateway_state.json is the running gateway's own record (pid, start time,
@@ -452,7 +452,7 @@ def _modification_allowed(rel: str) -> bool:
     if name in ("config.yaml", "state.db") or name.endswith(".db") or rel == "gateway_state.json":
         return True
     parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
-    is_cron = parent == "cron" or parent.endswith("/cron")
+    is_cron = parent == "cron" or parent.endswith("/scheduled")
     return is_cron and name in ("ticker_heartbeat", "ticker_last_success")
 
 
@@ -461,7 +461,7 @@ def _volatile_sidecar(rel: str) -> bool:
 
     A WAL/shm pair exists only while a connection is open. A snapshot taken with one
     live sees them; they disappear when it closes, and the report then says the
-    upgrade DELETED user state (observed: cron/executions.db-shm and -wal). The
+    upgrade DELETED user state (observed: scheduled/executions.db-shm and -wal). The
     database itself stays judged -- state.db by row counts -- so real loss still fails.
     Lock files (``*.lock``, ``.lock``) are the same kind of hardware: the running gateway
     holds its own (and, serving every profile, each profile's gateway.lock).

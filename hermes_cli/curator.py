@@ -571,19 +571,19 @@ def _cmd_rollback(args) -> int:
         print(f"  reason:      {manifest.get('reason', '?')}")
         print(f"  created_at:  {manifest.get('created_at', '?')}")
         print(f"  skill files: {manifest.get('skill_files', '?')}")
-        cron = manifest.get("cron_jobs") or {}
-        if isinstance(cron, dict):
-            if cron.get("backed_up"):
+        scheduled = manifest.get("cron_jobs") or {}
+        if isinstance(scheduled, dict):
+            if scheduled.get("backed_up"):
                 print(
-                    f"  cron jobs:   {cron.get('jobs_count', 0)} "
+                    f"  scheduled jobs:   {scheduled.get('jobs_count', 0)} "
                     f"(will be restored for skill-link fields only)")
             else:
-                print(f"  cron jobs:   not in snapshot ({cron.get('reason', 'not captured')})")
+                print(f"  scheduled jobs:   not in snapshot ({scheduled.get('reason', 'not captured')})")
     print(
         "\nThis will replace the current ~/.hermes/skills/ tree (a safety "
         "snapshot of the current state is taken first so this is undoable). "
-        "Cron jobs that still exist will have their skills/skill fields "
-        "restored from the snapshot; all other cron fields are left alone.")
+        "Scheduled jobs that still exist will have their skills/skill fields "
+        "restored from the snapshot; all other scheduled fields are left alone.")
     if not getattr(args, "yes", False) and not _confirm("Proceed? [y/N] "):
         return 1
     ok, msg, _ = curator_backup.rollback(backup_id=target_path.name)

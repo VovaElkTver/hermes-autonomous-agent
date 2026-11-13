@@ -62,7 +62,7 @@ FAILURE_TOLERANT_TOOL_NAMES = frozenset({
 # this turn: the next retry is a new experiment (edit -> re-run), not a replay.
 PROGRESS_RESET_TOOL_NAMES = frozenset({
     "write_file", "patch", "terminal", "execute_code", "browser_click", "browser_type", "browser_press",
-    "browser_navigate", "process_manage", "process", "delegate_task", "send_message", "cronjob",
+    "browser_navigate", "process_manage", "process", "delegate_task", "send_message", "scheduled job",
     "cronjob_manage", "todo", "todo_list", "memory", "skill_manage",
 })
 
@@ -92,7 +92,7 @@ def is_stall_guard_repeatable(tool_name: str) -> bool:
 
 
 def _is_non_interactive_platform(platform: str | None) -> bool:
-    """True for gateway/cron sessions where tool loops are unattended."""
+    """True for gateway/scheduled sessions where tool loops are unattended."""
     if not isinstance(platform, str) or not platform.strip():
         return False
     return platform.strip().lower() not in _ATTENDED_PLATFORMS
@@ -117,7 +117,7 @@ class LoopCapConfig:
 @dataclass(frozen=True)
 class ToolCallGuardrailConfig:
     """Thresholds for per-turn tool-call loop detection. Warnings never prevent execution; hard
-    stops are opt-in on interactive platforms, default on for unattended gateway/cron platforms."""
+    stops are opt-in on interactive platforms, default on for unattended gateway/scheduled platforms."""
 
     warnings_enabled: bool = True
     hard_stop_enabled: bool = False

@@ -392,7 +392,7 @@ def test_watchdog_prunes_old_heartbeats_keeps_owner(db_connect):
 
 def test_gates_file_written_atomically_reader_degrades(tmp_path, monkeypatch, caplog):
     """Item 10: the snapshot is published by os.replace (a SIGTERM mid-write
-    can never leave the cron reader a torn JSON file); a broken file reads as
+    can never leave the scheduled reader a torn JSON file); a broken file reads as
     degraded None with a log, not an exception."""
     import logging
     from controller import ticker

@@ -1069,7 +1069,7 @@ def test_orchestrator_complete_any_task_allowed(monkeypatch, tmp_path):
 # - Gateway sessions: HERMES_SESSION_PLATFORM + HERMES_SESSION_CHAT_ID set.
 # - TUI sessions: HERMES_SESSION_KEY (or HERMES_SESSION_ID) set, with
 #   the platform/chat_id ContextVars intentionally empty.
-# - CLI / cron / test sessions: no delivery channel -> no subscription.
+# - CLI / scheduled / test sessions: no delivery channel -> no subscription.
 # - Config gate kanban.auto_subscribe_on_create: false -> no subscription
 #   even when the session has a delivery channel.
 # ---------------------------------------------------------------------------
@@ -1168,7 +1168,7 @@ def test_create_subscribes_tui_session_via_session_key(monkeypatch, worker_env):
 
 
 def test_create_does_not_subscribe_in_cli_session(monkeypatch, worker_env):
-    """CLI / cron / test sessions have no persistent delivery channel.
+    """CLI / scheduled / test sessions have no persistent delivery channel.
     _maybe_auto_subscribe returns False and no row is written."""
     from tools import kanban_tools as kt
     monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)

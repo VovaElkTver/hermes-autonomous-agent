@@ -1,4 +1,4 @@
-"""Regression for #42962: a turn another surface (Telegram, cron) appended to a live desktop/TUI session must
+"""Regression for #42962: a turn another surface (Telegram, scheduled) appended to a live desktop/TUI session must
 reach the model on the next local prompt, not only the repainted transcript.
 
 Second half (#81951): the same reconciliation must not hinge on the live record's in-memory ``_row_id``

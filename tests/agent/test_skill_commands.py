@@ -267,7 +267,7 @@ class TestScanSkillCommands:
         assert msg is not None and "Body of b-only." in msg
 
     def test_get_skill_commands_rescans_when_leaving_platform_scope(self, tmp_path, monkeypatch):
-        """Returning to no-platform-scope (CLI / cron / RL) after a gateway
+        """Returning to no-platform-scope (CLI / scheduled / RL) after a gateway
         session must rescan so the unfiltered view is repopulated (#14536).
 
         A long-lived process running both gateway sessions and bare CLI
@@ -294,7 +294,7 @@ class TestScanSkillCommands:
             telegram_commands = dict(get_skill_commands())
             assert "/telegram-only" not in telegram_commands
 
-            # Drop back to no platform scope — bare CLI / cron / RL rollouts.
+            # Drop back to no platform scope — bare CLI / scheduled / RL rollouts.
             monkeypatch.delenv("HERMES_PLATFORM", raising=False)
             bare_commands = dict(get_skill_commands())
 
@@ -550,13 +550,13 @@ class TestBuildPreloadedSkillsPrompt:
 
 class TestDuplicateNamesAgreeAcrossSurfaces:
     def test_every_surface_resolves_duplicates_like_skill_view(self, tmp_path, monkeypatch):
-        """#64392: list, prompt index, slash commands, skill_view, -s preload and cron agree. A same-tier
+        """#64392: list, prompt index, slash commands, skill_view, -s preload and scheduled agree. A same-tier
         duplicate is advertised only by its exact path and every loader names those paths; a cross-tier
         duplicate (same relative path, local + external) loads the local copy everywhere."""
         import json
 
         from agent import prompt_builder as pb, skill_utils
-        from cron.scheduler_prompt import _load_cron_skill_parts
+        from scheduled.scheduler_prompt import _load_cron_skill_parts
         from tools.skills_tool import skill_view, skills_list
         local, ext = tmp_path / "local", tmp_path / "ext"
         _make_skill(local, "dup-demo", category="a", body="BODY A")

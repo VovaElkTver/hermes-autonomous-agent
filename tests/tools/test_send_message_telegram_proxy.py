@@ -1,7 +1,7 @@
 """Regression tests for the standalone Telegram send path's proxy support.
 
 The ``send_message`` tool, when invoked from a process *other than* the
-gateway (agent / TUI / cron), runs ``_send_telegram`` directly instead of
+gateway (agent / TUI / scheduled), runs ``_send_telegram`` directly instead of
 delegating to the in-process gateway adapter. Before the fix that
 accompanies these tests, that standalone path constructed
 ``telegram.Bot(token=...)`` with no proxy, so in regions where
@@ -153,7 +153,7 @@ class TestSendTelegramStandaloneProxy:
 
 def test_send_to_platform_honours_configured_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """``platforms.telegram.extra.base_url`` reaches the standalone Bot through the production
-    dispatch (``_send_to_platform``), so cron / ``hermes send`` / send_message use the same
+    dispatch (``_send_to_platform``), so scheduled / ``hermes send`` / send_message use the same
     self-hosted or compatible Bot API server as the gateway, never api.telegram.org."""
     from gateway.config import Platform, PlatformConfig
     from tools.send_message_tool import _send_to_platform

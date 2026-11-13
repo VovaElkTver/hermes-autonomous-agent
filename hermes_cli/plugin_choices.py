@@ -10,7 +10,7 @@ Each asker is that surface's existing clarify prompt, so no surface grows a new 
 * the in-process classic CLI and the legacy ``hermes serve`` backend: their own clarify picker.
 
 An asker takes ``(question, labels)`` and returns the label the user picked, or None; values are
-mapped back here, so a surface never sees them. With no asker bound (a hook, a cron job, a handler
+mapped back here, so a surface never sees them. With no asker bound (a hook, a scheduled job, a handler
 on an event loop, where blocking would stall the loop that must deliver the answer) the call
 returns None and the handler falls back to its own text usage.
 """

@@ -149,7 +149,7 @@ Subcommands:
   track <path> <category>    Manually add a path to tracking
   forget <path>              Stop tracking a path (does not delete)
 
-Categories: temp | test | research | download | chrome-profile | cron-output | other
+Categories: temp | test | research | download | chrome-profile | scheduled-output | other
 
 All operations are scoped to HERMES_HOME and /tmp/hermes-*.  # no-tmp: ok — legacy scratch scope this plugin cleans up
 Test files are auto-tracked on write_file / terminal and auto-cleaned at session end.

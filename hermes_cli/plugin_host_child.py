@@ -278,7 +278,7 @@ class HostRuntime:
         return {"module": module_name}
 
     def op_load_instance(self, params: dict[str, Any]) -> Any:
-        """Category plugins (memory provider, context engine, cron scheduler): import the directory,
+        """Category plugins (memory provider, context engine, scheduled scheduler): import the directory,
         run ``register(ctx)`` capturing the one ``capture`` registration, else instantiate the first
         subclass of ``base``. Other registrations reach Hermes only when it bound a ctx for them."""
         plugin_key = str(params["plugin_key"])

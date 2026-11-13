@@ -14,7 +14,7 @@ _HOME_CHANNEL_ENV_OVERRIDES = {"email": "EMAIL_HOME_ADDRESS"}
 
 
 def _target_syntax_fn(platform_name: str):
-    """The plugin's declared native target syntax, or None. A fresh CLI/cron process can parse a
+    """The plugin's declared native target syntax, or None. A fresh CLI/scheduled process can parse a
     target before plugin discovery registered the platform, so discover first when the name is
     unknown (idempotent manifest scan; only this platform's adapter is materialized)."""
     from gateway.platform_registry import platform_registry
@@ -53,10 +53,10 @@ def unknown_platform_error(platform_name: str) -> str:
 def resolve_send_target(
     platform_name: str, target_ref: str, *, pass_unresolved_references: bool = False
 ) -> tuple[str | None, str | None, str | None]:
-    """Resolve one send target the same way for every caller (model tool, CLI, cron).
+    """Resolve one send target the same way for every caller (model tool, CLI, scheduled).
     Channel-directory IDs are trusted; plugin parsers are the authority on native syntax. By
     default an unresolvable target is an error the model can act on. ``pass_unresolved_references``
-    (no model in the loop: cron, react/unreact on native ids) hands an unresolvable target on a
+    (no model in the loop: scheduled, react/unreact on native ids) hands an unresolvable target on a
     built-in platform, or a plugin platform without a parser, to the adapter as written; a plugin
     WITH a parser stays strict. The optional validator has the final say over every returned id."""
     from gateway.config import Platform

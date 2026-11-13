@@ -16,7 +16,7 @@ SESSION = "test-unattended-presence"
 def unattended_session(monkeypatch):
     monkeypatch.setattr(approval_mod, "_YOLO_MODE_FROZEN", False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    for var in ("HERMES_CRON_SESSION", "HERMES_GATEWAY_SESSION", "HERMES_INTERACTIVE"):
+    for var in ("HERMES_SCHEDULED_SESSION", "HERMES_GATEWAY_SESSION", "HERMES_INTERACTIVE"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HERMES_EXEC_ASK", "1")
     monkeypatch.setenv("HERMES_SESSION_KEY", SESSION)

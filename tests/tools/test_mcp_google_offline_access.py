@@ -3,7 +3,7 @@
 Google issues refresh tokens only for authorization requests carrying ``access_type=offline`` — its
 idiom where OIDC servers use the ``offline_access`` scope that MCP discovery would advertise — so a
 Google-hosted server (Gmail/Calendar MCP) authorized in a browser dies with the short-lived access
-token: every later reconnect (a gateway process, cron) finds no refresh token and fails back to an
+token: every later reconnect (a gateway process, scheduled) finds no refresh token and fails back to an
 interactive login it cannot perform. The device flow could not even start: the advertised host-only
 authorization server reaches issuer validation as ``str(AnyHttpUrl)`` with a trailing "/", which the
 exact-string check rejects against Google's slash-less document issuer.

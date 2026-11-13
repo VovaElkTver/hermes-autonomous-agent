@@ -137,7 +137,7 @@ class TestObligationId:
         a = dl.compute_obligation_id("sk1", "msg1", "hello")
         assert a == dl.compute_obligation_id("sk1", "msg1", "hello")
         # Different thread (baked into session_key) → different id. This is
-        # the cron-topic collision class from the earlier outbox attempt.
+        # the scheduled-topic collision class from the earlier outbox attempt.
         assert a != dl.compute_obligation_id("sk1:threadB", "msg1", "hello")
         assert a != dl.compute_obligation_id("sk1", "msg2", "hello")
         assert a != dl.compute_obligation_id("sk1", "msg1", "other")

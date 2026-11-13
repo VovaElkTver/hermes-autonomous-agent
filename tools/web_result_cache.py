@@ -183,7 +183,7 @@ def _save_index(index: dict) -> None:
         if len(index) > _INDEX_MAX_ENTRIES:
             newest = sorted(index.items(), key=lambda kv: kv[1].get("fetched_at", 0), reverse=True)
             index = dict(newest[:_INDEX_MAX_ENTRIES])
-        # CLI, gateway, cron, and subagents all write this index; the replace is atomic, so the worst case
+        # CLI, gateway, scheduled, and subagents all write this index; the replace is atomic, so the worst case
         # under concurrent writers is a lost insert, never a truncated index.
         atomic_json_write(path, index, indent=None)
     except Exception as exc:

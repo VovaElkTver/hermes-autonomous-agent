@@ -146,7 +146,7 @@ def _prepare(authority, session_id, mcp_only=False, adopt_only=False):
     generation = authority.db.get_session(session_id)['runtime_generation']
     stored = local_receipt(authority.db, session_id)['policy']
     old = restore_policy(stored)
-    # A bypass launch never reads the profile; cron, Kanban and room routes are not resumed CLI sessions.
+    # A bypass launch never reads the profile; scheduled, Kanban and room routes are not resumed CLI sessions.
     if old.ignore_user_config or old.source not in SURFACES:
         return None
     home = Path(authority.db.db_path).resolve().parent

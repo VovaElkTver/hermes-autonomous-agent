@@ -11,7 +11,7 @@ per attempt (spamming the user's shell AFTER the TUI already exited) and
 retried until the iteration budget or interpreter froze the thread.
 
 Now the loop recognizes the shutdown signal via the shared predicate in
-``tools.interpreter_shutdown`` (same class as cron delivery #55924/#58720
+``tools.interpreter_shutdown`` (same class as scheduled delivery #55924/#58720
 and concurrent tool submission), logs one warning, and abandons the turn —
 no print, no traceback, no retry.
 """

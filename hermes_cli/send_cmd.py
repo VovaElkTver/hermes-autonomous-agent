@@ -269,7 +269,7 @@ def register_send_subparser(subparsers) -> argparse.ArgumentParser:
     hermes_home = get_hermes_home()
     parser = subparsers.add_parser(
         "send",
-        help="Send a message to a configured platform (scripts, cron jobs, CI).",
+        help="Send a message to a configured platform (scripts, scheduled jobs, CI).",
         description=(
             "Pipe text from any shell script to any messaging platform Hermes "
             "is already configured for. Reuses the gateway's platform "

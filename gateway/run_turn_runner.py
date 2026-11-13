@@ -1288,7 +1288,7 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
         # os.environ is process-global, so concurrent gateway sessions (e.g. two Discord threads) would
         # clobber each other's value, and a tool thread whose contextvar is unset would fall back to
         # os.environ and read the wrong session key — misrouting command-approval prompts to the wrong
-        # thread (#24100). The non-gateway surfaces don't depend on this write: CLI and cron bind the
+        # thread (#24100). The non-gateway surfaces don't depend on this write: CLI and scheduled bind the
         # session via contextvars (set_current_session_key / session context), and only the TUI slash-worker
         # *subprocess* exports HERMES_SESSION_KEY (from its own --session-key argv, a separate process) — so
         # removing this in-process gateway write does not affect any of them.

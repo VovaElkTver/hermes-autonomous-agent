@@ -285,7 +285,7 @@ def release_profile_home(runner, home):
 
 
 def _withdraw_profile_home(runner, home):
-    """Drop *home* from the served set every startup consumer reads (adapters, served status, cron
+    """Drop *home* from the served set every startup consumer reads (adapters, served status, scheduled
     ticks, ingress, spool recovery) without releasing its ``gateway.lock``."""
     reserved = getattr(runner.config, '_runtime_profile_homes', None)
     if reserved is not None:
@@ -427,7 +427,7 @@ async def _retire_profile_authority(authority, timeout=None):
         task.cancel()
     if rest:
         await asyncio.gather(*rest, return_exceptions=True)
-    # session_cron owner binding excised with the cron package.
+    # session_cron owner binding excised with the scheduled package.
     # Ownership is released next; until a successor bumps the epoch, A's epoch still fences its
     # writes as current, so a stale connection to A must find it retired instead.
     authority.retired = True

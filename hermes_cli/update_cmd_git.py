@@ -181,7 +181,7 @@ def _assess_parked_branch_switch(git_cmd: list[str], cwd: Path, current_branch: 
     - (True, "") — tree clean and every parked commit is in ``origin/<target>`` (no ``git cherry +``).
     - (True, "unmerged:<n>") — tree clean but commits not in target; switching is safe (checkout keeps
       committed work) but caller must print a LOUD notice. Non-interactive callers (desktop, gateway
-      /update, cron) can't resolve a skip, so a clean checkout must reach target.
+      /update, scheduled) can't resolve a skip, so a clean checkout must reach target.
     - (False, "disabled"|"dirty"|"unverifiable") — caller must NOT touch the branch. Dirty is the
       genuinely unsafe case: uncommitted work riding an autostash across branches.
     A config read failure must not disable the safety checks: fall through with the default."""

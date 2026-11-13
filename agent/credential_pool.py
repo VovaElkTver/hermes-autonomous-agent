@@ -1218,7 +1218,7 @@ class CredentialPool(CredentialPoolAdminMixin, CredentialPoolModelCooldownMixin)
     # ---- cross-process token resync ---------------------------------------
     #
     # OAuth refresh tokens are single-use. When another process (CLI, another
-    # profile, a concurrent cron) rotates a pair, our in-memory entry holds a
+    # profile, a concurrent scheduled) rotates a pair, our in-memory entry holds a
     # consumed refresh token; replaying it yields ``refresh_token_reused`` /
     # ``invalid_grant``. These helpers adopt the fresher pair from wherever the
     # provider's token authority lives, clearing stale exhaustion state.

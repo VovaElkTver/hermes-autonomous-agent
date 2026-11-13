@@ -49,7 +49,7 @@ from gateway.platforms.api_server import (
 
 # ---------------------------------------------------------------------------
 # _redact_api_error_text — guards every outward error site (envelopes, SSE
-# error events, cron-endpoint 500 bodies) that routes raw exception text to
+# error events, scheduled-endpoint 500 bodies) that routes raw exception text to
 # authenticated HTTP clients. #37733
 # ---------------------------------------------------------------------------
 

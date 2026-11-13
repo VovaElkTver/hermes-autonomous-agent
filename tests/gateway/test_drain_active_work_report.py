@@ -65,7 +65,7 @@ def test_a_profile_scoped_active_work_answer_names_its_managed_workers():
     from gateway.run_active_work_verb import _profile_units
 
     worker = SimpleNamespace(closed=threading.Event(), process=SimpleNamespace(pid=4343), worker=(4344, 1.0))
-    authority = SimpleNamespace(_managed_workers={"kanban-t_2": worker}, _cron_cancellations={}, _side_agents={})
+    authority = SimpleNamespace(_managed_workers={"kanban-t_2": worker}, _scheduled_cancellations={}, _side_agents={})
     runner = SimpleNamespace(_served_profile_homes={"coder": "/h/coder"},
                              session_authorities=SimpleNamespace(for_home=lambda home: authority))
     assert _profile_units(runner, "coder", []) == [{"kind": "managed", "session": "kanban-t_2", "pid": 4344}]

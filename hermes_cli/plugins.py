@@ -495,7 +495,7 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
             home = get_hermes_home()
             reset_secret_source_cache(home)
             load_hermes_dotenv(hermes_home=home)
-            # A scope installed for this home was frozen BEFORE these sources existed — a routed cron
+            # A scope installed for this home was frozen BEFORE these sources existed — a routed scheduled
             # fire builds its scope in run_one_job and only then, on its first agent build, discovers
             # plugins; under multiplex semantics the load above is hydrate-only, so fold the values
             # into the installed scope or THIS fire never sees the plugin credential.
@@ -977,7 +977,7 @@ _delivery_join_abandoned = False
 
 def _delivery_manager() -> PluginManager:
     """Active manager, lazily discovering if it never ran — delivery must not depend on WHICH
-    surface imported us (dashboards/TUI/cron never import model_tools: #50776, #64178).
+    surface imported us (dashboards/TUI/scheduled never import model_tools: #50776, #64178).
     ``getattr`` default ``True`` leaves test doubles untouched."""
     global _delivery_join_abandoned
     manager = get_plugin_manager()
@@ -999,7 +999,7 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> list[Any]:
     joined) so we do not reintroduce the #6622 hang. Timed-out or still-running ``pre_tool_call`` callbacks
     fail closed with a block directive; other bounded hooks fail open (skip).
     Ensures plugins are discovered on first invocation so callers in processes that never explicitly call
-    ``discover_plugins()`` (gateway platform events, TUI slash workers, query mode, cron) still fire
+    ``discover_plugins()`` (gateway platform events, TUI slash workers, query mode, scheduled) still fire
     callbacks registered by user plugins (tracking #64178).
     """
     return _delivery_manager().invoke_hook(hook_name, **kwargs)

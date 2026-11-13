@@ -104,9 +104,9 @@ def test_satellite_served_by_same_tenants_multiplexer_is_still_refused(tmp_path,
 
 
 def test_cron_status_restart_hint_names_the_profile_hosting_the_scheduler(tmp_path, monkeypatch, gw):
-    """#120871: `hermes -p argus cron status` on a standalone fleet points at argus, not default."""
+    """#120871: `hermes -p argus scheduled status` on a standalone fleet points at argus, not default."""
     from gateway.host_topology import HostGatewayTopology
-    from hermes_cli import cron as cron_mod
+    from hermes_cli import scheduled as cron_mod
 
     fake_home = tmp_path / "fakehome"
     own_home = fake_home / ".hermes" / "profiles" / "argus"

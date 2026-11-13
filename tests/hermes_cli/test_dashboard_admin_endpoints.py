@@ -1230,7 +1230,7 @@ def test_desktop_lifespan_terminates_managed_gateway_restart(monkeypatch):
     monkeypatch.setenv("HERMES_DESKTOP", "1")
     monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", "desktop-spawn-token")
     monkeypatch.setattr(ws, "_warm_gateway_module", lambda: None)
-    monkeypatch.setattr(ws, "_start_desktop_cron_ticker", lambda *_args: None)
+    monkeypatch.setattr(ws, "_start_desktop_ticker_seam", lambda *_args: None)
     monkeypatch.setitem(_web_server_gateway._ACTION_PROCS, "gateway-restart", _FakeRunningProc())
 
     client, _header = _client()
@@ -1258,7 +1258,7 @@ def test_desktop_lifespan_reaps_orphans_with_a_startup_grace(monkeypatch):
     monkeypatch.setenv("HERMES_DESKTOP", "1")
     monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", "desktop-spawn-token")
     monkeypatch.setattr(ws, "_warm_gateway_module", lambda: None)
-    monkeypatch.setattr(ws, "_start_desktop_cron_ticker", lambda *_args: None)
+    monkeypatch.setattr(ws, "_start_desktop_ticker_seam", lambda *_args: None)
     monkeypatch.setattr("hermes_cli.gateway._reap_unsupervised_gateway_orphans", _fake_reap)
 
     client, _header = _client()

@@ -1,8 +1,8 @@
-"""Cron script jobs on native Windows (``hermes cron create --script`` + ``hermes cron run``).
+"""Scheduled script jobs on native Windows (``hermes scheduled create --script`` + ``hermes scheduled run``).
 
 A no-agent script job runs its script through an interpreter picked by extension and
-delivers stdout as the job result. ``hermes cron run <id>`` executes it synchronously
-through ``cron.scheduler.run_job`` (the ticker's code path) when no gateway owns the store.
+delivers stdout as the job result. ``hermes scheduled run <id>`` executes it synchronously
+through ``scheduled.scheduler.run_job`` (the ticker's code path) when no gateway owns the store.
 
 The ``.sh`` case launches Hermes with the PATH a NATIVE Windows process has (Start menu,
 Scheduled Task, Desktop): Git's ``cmd`` dir only, no ``Git\\bin`` / ``Git\\usr\\bin``, so
@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.platforms("windows"), pytest.mark.integration]
 # key -> (the bug's own failure signature, "#issue reason"); see _pending_fixes.known_failure.
 KNOWN: dict[str, tuple[str, str]] = {
     "sh_script": (r"^bare PATH lookup finds (None|'[^']*(?i:system32|windowsapps)[^']*'); job status",
-                  "#120504 cron .sh scripts resolve bash via bare PATH lookup (WSL stub), not Git Bash"),
+                  "#120504 scheduled .sh scripts resolve bash via bare PATH lookup (WSL stub), not Git Bash"),
 }
 
 _JOB_ID = re.compile(r"Created job: (\S+)")

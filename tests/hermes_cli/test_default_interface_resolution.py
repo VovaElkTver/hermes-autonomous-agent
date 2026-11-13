@@ -12,7 +12,7 @@ default for bare ``hermes`` / ``hermes chat``. Explicit flags always win:
     (unset)              classic REPL
 
 The no-TTY gate exists because ambient TUI preferences must never hijack
-non-interactive invocations: kanban workers / cron / pipelines run
+non-interactive invocations: kanban workers / scheduled / pipelines run
 ``hermes … chat -q`` on a pipe, and the TUI's no-TTY bail-out exits 0
 without doing the work (a kanban worker then dies with "protocol
 violation" on every attempt).

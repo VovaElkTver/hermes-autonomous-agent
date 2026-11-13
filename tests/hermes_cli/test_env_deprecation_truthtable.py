@@ -4,7 +4,7 @@ Behavior contract (pins the fix for the TERMINAL_CWD false-positive class:
 #88829, #89016, #89389, #90299 — four reports in two weeks of the startup
 warning firing when TERMINAL_CWD was merely in the inherited process
 environment, e.g. bridged from ``terminal.cwd`` in config.yaml or set by
-session restoration / cron / the gateway):
+session restoration / scheduled / the gateway):
 
     warn_deprecated_cwd_env_vars() emits the warning IFF the deprecated key
     (TERMINAL_CWD or MESSAGING_CWD) has a genuinely non-empty value inside

@@ -3,7 +3,7 @@
 After sustained Bad Gateway / TimedOut reconnect cycles, the PTB httpx client
 can enter a wedged state where ``bot.send_message()`` returns a valid Message
 but nothing reaches the recipient.  ``_send_path_degraded`` short-circuits
-``send()`` so cron's live-adapter branch falls through to standalone HTTP.
+``send()`` so scheduled's live-adapter branch falls through to standalone HTTP.
 """
 import asyncio
 import time
@@ -26,7 +26,7 @@ def _make_adapter() -> TelegramAdapter:
 @pytest.mark.asyncio
 async def test_send_short_circuits_when_path_degraded():
     """Degraded adapter returns failure WITHOUT calling send_message,
-    so cron's live-adapter branch falls through to standalone HTTP."""
+    so scheduled's live-adapter branch falls through to standalone HTTP."""
     adapter = _make_adapter()
     adapter._send_path_degraded = True
 

@@ -248,7 +248,7 @@ def _is_interpreter_shutdown_error(exc: Exception) -> bool:
         # mid-flight. Retries, credential rotation, and fallbacks are all futile ("cannot schedule new
         # futures..."), and the buffered ⚠️/❌ retry trace spams the shell after the TUI already exited. End
         # the turn with a single log line: no print, no traceback, no debug dump, no retry. Same class as
-        # cron delivery (#55924/#58720) and concurrent tool submission — shared predicate.
+        # scheduled delivery (#55924/#58720) and concurrent tool submission — shared predicate.
         from tools.interpreter_shutdown import interpreter_shutting_down
         return interpreter_shutting_down(exc)
     return False

@@ -94,18 +94,18 @@ def test_skip_memory_memory_tool_handler_works_and_provider_skipped(
 
 
 def test_skip_memory_disabled_toolset_does_not_load_store(monkeypatch, tmp_path):
-    """Cron shape: skip_memory=True, memory named in enabled AND disabled.
+    """Scheduled shape: skip_memory=True, memory named in enabled AND disabled.
 
-    #65429 must not load MEMORY.md just because the default cron toolset
+    #65429 must not load MEMORY.md just because the default scheduled toolset
     still lists memory while the denylist hides the tool.
     """
     home = tmp_path / "hm"
     monkeypatch.setenv("HERMES_HOME", str(home))
     mem_dir = home / "memories"
     mem_dir.mkdir(parents=True)
-    secret = "cron-should-never-see-this-memory"
+    secret = "scheduled-should-never-see-this-memory"
     (mem_dir / "MEMORY.md").write_text(secret + "\n")
-    (mem_dir / "USER.md").write_text("cron-should-never-see-this-profile\n")
+    (mem_dir / "USER.md").write_text("scheduled-should-never-see-this-profile\n")
 
     agent = _make_agent(
         monkeypatch,
@@ -123,4 +123,4 @@ def test_skip_memory_disabled_toolset_does_not_load_store(monkeypatch, tmp_path)
     parts = build_system_prompt_parts(agent)
     blob = " ".join(str(v) for v in parts.values())
     assert secret not in blob
-    assert "cron-should-never-see-this-profile" not in blob
+    assert "scheduled-should-never-see-this-profile" not in blob

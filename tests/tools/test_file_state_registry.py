@@ -187,7 +187,7 @@ class FileStateRegistryUnitTests(unittest.TestCase):
 
     def test_agent_close_forgets_every_task_id_it_ran(self):
         """``AIAgent.close()`` receives the session_id, but file tools key the registry by
-        the per-turn task_id (cron ``cron:<job>:<uuid>``, subagent ``subagent-N-xxxx``).
+        the per-turn task_id (scheduled ``cron:<job>:<uuid>``, subagent ``subagent-N-xxxx``).
         close() must release the file state of every task id the agent ran."""
         p = self._mk()
         file_state.record_read("cron:JOB:run1", p)

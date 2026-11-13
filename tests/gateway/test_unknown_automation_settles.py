@@ -1,7 +1,7 @@
 """GW-10 (#139532): an ``unknown`` admission no person is waiting on settles as interrupted.
 
 A turn lost across an owner restart is fenced ``unknown`` and pauses the session's FIFO until a
-person resolves it, because only they know whether to resend it. An automation delivery (a cron
+person resolves it, because only they know whether to resend it. An automation delivery (a scheduled
 run, a ``local_automation_v1`` completion, a native automation envelope) has nobody to ask: it
 settles ``interrupted`` (never replayed), the transcript gets a notice, and the FIFO moves on.
 Real ``SessionStore`` SQLite, two real owner epochs; no store monkeypatching.

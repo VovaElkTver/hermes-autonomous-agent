@@ -1,4 +1,4 @@
-"""Shared path validation helpers for tool implementations (skills, cron, credential files)."""
+"""Shared path validation helpers for tool implementations (skills, scheduled, credential files)."""
 
 import re
 from pathlib import Path

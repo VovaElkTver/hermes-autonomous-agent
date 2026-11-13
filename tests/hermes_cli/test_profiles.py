@@ -384,7 +384,7 @@ class TestCreateProfile:
             create_profile("lonely", sync_imports=True, no_alias=True)
 
     def test_clone_all_does_not_copy_cron_jobs(self, profile_env):
-        # Cron jobs are scheduled work bound to the source profile + origin channel; a clone
+        # Scheduled jobs are scheduled work bound to the source profile + origin channel; a clone
         # that inherits jobs.json fires every job twice (two gateways, same job ids).
         default_home = profile_env / ".hermes"
         (default_home / "config.yaml").write_text("model: test", encoding="utf-8")

@@ -74,7 +74,7 @@ class TestSmartApproval:
 
         monkeypatch.setenv("HERMES_SESSION_KEY", session_key)
         monkeypatch.setenv("HERMES_EXEC_ASK", "1")
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.setattr(
             approval_context, "_get_approval_config",
             lambda: {"mode": "smart"},
@@ -271,7 +271,7 @@ class TestPipeToShellNameCoverage:
         approval callback carrying the pipe description, not just the pattern scan."""
         from tools.approval import check_all_command_guards
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         prompts = []
 
         def deny(*args, **kwargs):
@@ -875,7 +875,7 @@ class TestWebhookApprovalExclusion:
         """Webhook sessions are not gateway approval contexts."""
         from tools.approval import _is_gateway_approval_context
 
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
 
@@ -886,7 +886,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import _is_gateway_approval_context
         from tools.approval_context import _UNATTENDED_APPROVAL_PLATFORMS
 
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         for platform in _UNATTENDED_APPROVAL_PLATFORMS:
             monkeypatch.setenv("HERMES_SESSION_PLATFORM", platform)
@@ -896,17 +896,17 @@ class TestWebhookApprovalExclusion:
         """Non-webhook gateway sessions (e.g. Telegram) are still gateway contexts."""
         from tools.approval import _is_gateway_approval_context
 
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
 
         assert _is_gateway_approval_context() is True
 
     def test_cron_session_returns_false_regardless_of_platform(self, monkeypatch):
-        """Cron sessions are never gateway approval contexts."""
+        """Scheduled sessions are never gateway approval contexts."""
         from tools.approval import _is_gateway_approval_context
 
-        monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+        monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
 
         assert _is_gateway_approval_context() is False
@@ -915,7 +915,7 @@ class TestWebhookApprovalExclusion:
         """No session platform means not a gateway context."""
         from tools.approval import _is_gateway_approval_context
 
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
 
@@ -940,7 +940,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import check_all_command_guards
 
         self._isolate(monkeypatch)
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
@@ -956,7 +956,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import check_all_command_guards
 
         self._isolate(monkeypatch)
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
@@ -972,7 +972,7 @@ class TestWebhookApprovalExclusion:
         """Non-dangerous commands on unattended platforms are unaffected."""
         from tools.approval import check_all_command_guards
 
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
@@ -986,7 +986,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import check_all_command_guards
 
         self._isolate(monkeypatch)
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
@@ -997,11 +997,11 @@ class TestWebhookApprovalExclusion:
         assert "api_server" in result["message"]
 
     def test_execute_code_denied_on_unattended_platform(self, monkeypatch):
-        """execute_code is denied instantly on unattended platforms (parity with cron)."""
+        """execute_code is denied instantly on unattended platforms (parity with scheduled)."""
         from tools.approval import check_execute_code_guard
 
         self._isolate(monkeypatch)
-        monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
         monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
@@ -1546,16 +1546,16 @@ class TestApprovalTimeoutIsNotConsent:
 
         self._saved_env = {
             k: os.environ.get(k)
-            for k in ("HERMES_GATEWAY_SESSION", "HERMES_CRON_SESSION",
+            for k in ("HERMES_GATEWAY_SESSION", "HERMES_SCHEDULED_SESSION",
                       "HERMES_YOLO_MODE",
                       "HERMES_SESSION_KEY", "HERMES_INTERACTIVE")
         }
         os.environ.pop("HERMES_YOLO_MODE", None)
         os.environ.pop("HERMES_INTERACTIVE", None)
-        # HERMES_CRON_SESSION takes priority over HERMES_GATEWAY_SESSION in
-        # _is_gateway_approval_context(); a leaked value from a parent cron
-        # process would force the cron path and break these gateway tests.
-        os.environ.pop("HERMES_CRON_SESSION", None)
+        # HERMES_SCHEDULED_SESSION takes priority over HERMES_GATEWAY_SESSION in
+        # _is_gateway_approval_context(); a leaked value from a parent scheduled
+        # process would force the scheduled path and break these gateway tests.
+        os.environ.pop("HERMES_SCHEDULED_SESSION", None)
         os.environ["HERMES_GATEWAY_SESSION"] = "1"
         os.environ["HERMES_SESSION_KEY"] = self.SESSION_KEY
 

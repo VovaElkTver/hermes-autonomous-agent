@@ -126,10 +126,10 @@ class TestPrecedence:
 
 
 class TestNonInteractiveInheritance:
-    """#48975: cron/API/ACP inherit trust via TERMINAL_CWD, never prompt."""
+    """#48975: scheduled/API/ACP inherit trust via TERMINAL_CWD, never prompt."""
 
     def test_terminal_cwd_resolves_project(self, project_env, monkeypatch, tmp_path):
-        # Process cwd OUTSIDE the repo (like the cron scheduler), TERMINAL_CWD
+        # Process cwd OUTSIDE the repo (like the scheduled scheduler), TERMINAL_CWD
         # pointing at the per-job workdir inside the trusted repo.
         outside = tmp_path / "elsewhere"
         outside.mkdir()

@@ -125,7 +125,7 @@ def test_media_policy_reads_routed_profile_config_not_env(two_homes, monkeypatch
 
 
 def test_routed_media_policy_bridge_never_writes_the_shared_env(two_homes, monkeypatch):
-    """A routed profile's cron delivery runs the bridge under its override; its policy must not
+    """A routed profile's scheduled delivery runs the bridge under its override; its policy must not
     land in os.environ, where the launch profile's own deliveries and children read it."""
     a, b = two_homes
     from gateway import media_policy

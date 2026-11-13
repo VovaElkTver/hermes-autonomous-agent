@@ -68,7 +68,7 @@ _CHAT_TYPE_PREFIX = {"group": "group: ", "channel": "channel: "}
 @dataclass
 class SessionSource:
     """Where a message originated: routes responses, feeds the system-prompt
-    context block, and records origin for cron delivery."""
+    context block, and records origin for scheduled delivery."""
     platform: Platform
     chat_id: str
     chat_name: Optional[str] = None
@@ -491,7 +491,7 @@ def build_session_context_prompt(context: SessionContext, *, redact_pii: bool = 
         _origin_label = _format_untrusted_prompt_value(src.chat_name or _chat_label(src.chat_id))
         lines.append(f"- `\"origin\"` → Back to this chat ({_origin_label})")
 
-    lines.append(f"- `\"local\"` → Save to local files only ({display_hermes_home()}/cron/output/)")
+    lines.append(f"- `\"local\"` → Save to local files only ({display_hermes_home()}/scheduled/output/)")
     for platform, home in context.home_channels.items():
         home_name = _format_untrusted_prompt_value(home.name)
         lines.append(f"- `\"{platform.value}\"` → Home channel ({home_name})")
@@ -576,7 +576,7 @@ class SessionEntry:
     prompt_pin: Optional[dict[str, Any]] = None
     # Gateway ``/yolo`` bypass for this lane, mirrored from ``tools.approval``'s in-memory set so a restart
     # keeps it. Tri-state: True/False is an explicit toggle (an OFF stays off, even over a ``--yolo`` launch);
-    # None means nobody toggled it (new, branched, reset, migrated, cron entries, and every conversation
+    # None means nobody toggled it (new, branched, reset, migrated, scheduled entries, and every conversation
     # boundary, ``_clear_session_boundary_security_state``), so the session's launch policy applies.
     yolo: Optional[bool] = None
 

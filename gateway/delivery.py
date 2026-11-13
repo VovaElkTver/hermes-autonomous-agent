@@ -1,4 +1,4 @@
-"""Delivery routing for cron job outputs and agent responses, by target: explicit ("telegram:123456789"),
+"""Delivery routing for scheduled job outputs and agent responses, by target: explicit ("telegram:123456789"),
 platform home channel ("telegram"), origin (back to where the job was created), or local (files)."""
 
 import logging
@@ -16,7 +16,7 @@ from .dead_targets import DeadTargetRegistry, classify_dead_error
 
 logger = logging.getLogger(__name__)
 
-# Cap before gateway-level truncation of cron output for non-chunking platform delivery. Telegram's hard
+# Cap before gateway-level truncation of scheduled output for non-chunking platform delivery. Telegram's hard
 # API limit is 4096; the headroom covers the "full output saved to …" footer. Adapters that split long
 # messages natively (splits_long_messages) bypass this entirely.
 MAX_PLATFORM_OUTPUT = 4000
@@ -156,7 +156,7 @@ async def _ensure_named_dm_topic(adapter: Any, chat_id: str, name: str, *, refre
     if ensure_dm_topic is None:
         raise RuntimeError(f"Telegram adapter cannot {verb} named private DM topics")
     # The topic is persisted in the bot owner's config.yaml, not that of the profile delivering
-    # through it (a credentialless satellite's cron job sends via the primary's bot).
+    # through it (a credentialless satellite's scheduled job sends via the primary's bot).
     from hermes_constants import get_routing_process_hermes_home, reset_hermes_home_override, set_hermes_home_override
     owner = getattr(adapter, "_owner_profile", None)  # None = the launch (primary) profile's bot
     if isinstance(owner, str) and owner:
@@ -233,7 +233,7 @@ class DeliveryRouter:
         return {"path": str(output_path), "timestamp": timestamp}
 
     def _save_full_output(self, content: str, job_id: str) -> Path:
-        """Save full cron output to disk and return the file path."""
+        """Save full scheduled output to disk and return the file path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = get_hermes_home() / "cron" / "output" / f"{job_id}_{timestamp}.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,7 +245,7 @@ class DeliveryRouter:
         return bool(getattr(self.config, "filter_silence_narration", True))
 
     def _cap_oversized_output(self, adapter: Any, content: str, job_id: str) -> str:
-        """Audit-save oversized cron output; truncate it for non-chunking adapters. Above MAX_PLATFORM_OUTPUT
+        """Audit-save oversized scheduled output; truncate it for non-chunking adapters. Above MAX_PLATFORM_OUTPUT
         the full output is always written to disk as an audit trail, best-effort — a failed save (full disk,
         permissions) never blocks delivery. Non-chunking adapters then get the content truncated with a
         footer pointing to the saved file; ``splits_long_messages`` adapters receive the full payload."""
@@ -255,18 +255,18 @@ class DeliveryRouter:
         try:
             saved_path = self._save_full_output(content, job_id)
         except OSError as exc:
-            logger.warning("Audit save failed for cron output (%d chars, job=%s): %s — "
+            logger.warning("Audit save failed for scheduled output (%d chars, job=%s): %s — "
                            "delivery proceeds without audit copy", len(content), job_id, exc)
         if getattr(adapter, "splits_long_messages", False):
             if saved_path:
-                logger.info("Cron output preserved for chunking adapter (%d chars) — "
+                logger.info("Scheduled output preserved for chunking adapter (%d chars) — "
                             "full output saved to %s", len(content), saved_path)
             return content
         # The footer needs a valid path: if the best-effort save failed, retry
         # (a failure now is a real delivery problem and propagates).
         saved_path = saved_path or self._save_full_output(content, job_id)
         footer = f"\n\n... [truncated, full output saved to {saved_path}]"
-        logger.info("Cron output truncated (%d chars) — full output: %s", len(content), saved_path)
+        logger.info("Scheduled output truncated (%d chars) — full output: %s", len(content), saved_path)
         return content[:max(0, MAX_PLATFORM_OUTPUT - len(footer))] + footer
 
     async def _deliver_to_platform(self, target: DeliveryTarget, content: str,
@@ -276,7 +276,7 @@ class DeliveryRouter:
         """Deliver content to a messaging platform.
 
         ``transport`` carries an already-authorized transport past resolution:
-        the cron live lane resolved and authorized it per target (including the
+        the scheduled live lane resolved and authorized it per target (including the
         SharedRouteAdapters satellite grant), and re-resolving from the plain
         adapters dict cannot re-derive that grant under satellite config
         (#115656). Omitted (None) preserves resolution for every other caller.
@@ -294,12 +294,12 @@ class DeliveryRouter:
         # before it reaches any adapter — in bot-to-bot channels these mirror back and forth until a model
         # crashes with "no content after all retries"; prompt rules drift across providers, so this single
         # chokepoint covers every platform. Local/file delivery is never filtered (saved silence has no loop
-        # risk). Cron output is an ARTIFACT, not model chatter: a legitimately terse job ("...", a single 🔇)
-        # has no mirror loop, and dropping it while returning success is how a cron gets logged as delivered
-        # with nothing on the wire. Cron sends carry job_id in metadata; everything else is filtered.
+        # risk). Scheduled output is an ARTIFACT, not model chatter: a legitimately terse job ("...", a single 🔇)
+        # has no mirror loop, and dropping it while returning success is how a scheduled gets logged as delivered
+        # with nothing on the wire. Scheduled sends carry job_id in metadata; everything else is filtered.
         # See #77763.
-        is_cron_artifact = "job_id" in (metadata or {})
-        if self._filter_silence_narration_enabled() and not is_cron_artifact and _is_silence_narration(content):
+        is_scheduled_artifact = "job_id" in (metadata or {})
+        if self._filter_silence_narration_enabled() and not is_scheduled_artifact and _is_silence_narration(content):
             logger.warning("Dropped silence-narration outbound to %s (chat=%s): %r",
                            target.platform.value, target.chat_id, content[:40])
             return {"success": True, "filtered": "silence_narration", "delivered": False}

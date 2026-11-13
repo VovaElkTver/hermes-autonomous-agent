@@ -1,6 +1,6 @@
 """Regression: the gateway delivery ledger must close every SQLite connection.
 
-Sibling of the cron execution-ledger leak (#69567 / PR #69594). The ledger used
+Sibling of the scheduled execution-ledger leak (#69567 / PR #69594). The ledger used
 ``with _connect() as conn:`` where ``sqlite3.Connection.__exit__`` commits or
 rolls back but never closes, leaking the db/-wal/-shm file descriptors on every
 call until a long-running gateway exhausts ``RLIMIT_NOFILE``. ``record_obligation``

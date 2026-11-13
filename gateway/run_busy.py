@@ -1243,7 +1243,7 @@ class GatewayBusySessionMixin:
 
     async def _handle_reset_safe_command(self, event: MessageEvent):
         """/reset-safe — quit force (no drain, no save) and boot the SAFE identity:
-        owner transport only; cron, controller pump and MCP discovery stay off."""
+        owner transport only; scheduled, controller pump and MCP discovery stay off."""
         from agent import safe_mode
         self._hard_reboot("safe")
         was = "already safe" if safe_mode.is_safe() else "from full"

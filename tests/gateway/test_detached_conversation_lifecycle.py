@@ -55,23 +55,6 @@ async def test_the_chats_context_exhaustion_reset_moves_the_old_conversation_off
 
 
 @pytest.mark.asyncio
-async def test_what_the_old_conversation_schedules_for_here_names_the_app_not_the_chat(monkeypatch):
-    """F3: a detached turn binds the session variables a Desktop session's turn binds, so a reminder,
-    kanban subscription or send_message origin it creates never names the chat."""
-    from gateway.session import build_session_context
-    from gateway.session_context import get_session_env
-    from tools.cronjob_job_args import _origin_from_env
-    runner, _adapter, authority, _source, _sent, _ran, _gates, _lane, ref_a = await _moved_on(monkeypatch)
-    live = authority.sessions[ref_a.session_id]
-    entry = runner.session_store.get_or_create_session(live.source)
-    with runner._session_env_scope(build_session_context(live.source, runner.config, entry)):
-        env = {name: get_session_env(f'HERMES_SESSION_{name}') for name in ('PLATFORM', 'CHAT_ID', 'KEY')}
-        origin = _origin_from_env()
-    assert env == {'PLATFORM': 'local', 'CHAT_ID': ref_a.session_id, 'KEY': live.route}
-    assert origin is None or origin['platform'] == 'local', origin
-
-
-@pytest.mark.asyncio
 async def test_the_old_conversation_is_live_again_once_the_app_uses_it(monkeypatch):
     """F4: the chat's /new ended A's row; the app's turn reopens it, as an API or local turn reopens
     theirs, so its background results and a rotating compression are not refused as ended."""
@@ -224,23 +207,6 @@ async def test_the_old_conversations_finished_process_withdraws_its_waiting_hear
              if row['request_id'].startswith('["heartbeat"')]
     assert [(row['status'], row['outcome']) for row in ticks] == [('terminal', 'cancelled')]
     gates['slow app turn'].set()
-
-
-@pytest.mark.asyncio
-async def test_a_reminder_the_app_set_on_the_old_conversation_fires_into_it(monkeypatch):
-    """A reminder created from the app on A names A (``platform: local``): its fire is written into A,
-    never refused for a local session A never was, and never sent to the chat."""
-    from pathlib import Path
-    from gateway.session_cron import deliver_to_local_chat
-    _runner, _adapter, authority, _source, sent, _ran, _gates, _lane, ref_a = await _moved_on(monkeypatch)
-    chat_before = len(sent)
-    home = Path(authority.db.db_path).parent
-
-    assert await asyncio.to_thread(deliver_to_local_chat, home, ref_a.session_id, 'reminder from A') is None
-    await async_wait_until(lambda: any('reminder from A' in str(message.get('content'))
-                                       for message in authority.db.get_messages(ref_a.session_id)),
-                           timeout=10, what='the reminder note in A')
-    assert sent[chat_before:] == []
 
 
 @pytest.mark.asyncio

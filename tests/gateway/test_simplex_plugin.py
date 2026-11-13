@@ -287,7 +287,7 @@ async def test_list_channels_returns_none_on_contacts_timeout():
 
 
 # ---------------------------------------------------------------------------
-# 9. Standalone (out-of-process) send for cron
+# 9. Standalone (out-of-process) send for scheduled
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio

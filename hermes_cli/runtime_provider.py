@@ -1,4 +1,4 @@
-"""Shared runtime provider resolution for CLI, gateway, cron, and helpers: the resolution ORDER
+"""Shared runtime provider resolution for CLI, gateway, scheduled, and helpers: the resolution ORDER
 (:func:`resolve_runtime_provider`), api_mode / base_url helpers and the pool / OAuth / explicit paths.
 Custom-provider lookup lives in :mod:`hermes_cli.runtime_provider_custom`; Azure Foundry,
 OpenRouter/bare-custom, Bedrock and external-process builders in
@@ -1096,7 +1096,7 @@ def _raise_for_credentialless_bare_custom(requested_provider: str, runtime: dict
     construction as ``No LLM provider configured``. Keyed on the literal request, not the resolved
     shape: local aliases (``ollama``, ``vllm``) are resolved tolerantly by ``/model`` direct-alias
     switching, which supplies the alias endpoint AFTER this call and must not fail here. Typed
-    ``AuthError`` so every caller's fallback chain (CLI, gateway, TUI, cron) still advances (#17929).
+    ``AuthError`` so every caller's fallback chain (CLI, gateway, TUI, scheduled) still advances (#17929).
     """
     if requested_provider != "custom" or runtime.get("provider") != "custom" or runtime.get("api_key"):
         return

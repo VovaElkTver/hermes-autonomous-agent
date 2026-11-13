@@ -1,7 +1,7 @@
 """Regression tests for #58818.
 
-On restart the gateway must drain an in-flight cron delivery instead of
-dropping it. A cron delivery is a coroutine scheduled onto the gateway event
+On restart the gateway must drain an in-flight scheduled delivery instead of
+dropping it. A scheduled delivery is a coroutine scheduled onto the gateway event
 loop (``safe_schedule_threadsafe``) while the ticker thread blocks on its
 future. The shutdown wait therefore must NOT block the loop with a synchronous
 ``thread.join()`` — doing so deadlocks the delivery (the loop can never run it)
@@ -19,7 +19,7 @@ import gateway.run as gateway_run
 @pytest.mark.asyncio
 async def test_await_thread_exit_lets_loop_scheduled_delivery_complete():
     # Reproduces the drop: the worker schedules a coroutine onto THIS loop and
-    # blocks on its result, exactly like cron/_deliver_result. A blocking join
+    # blocks on its result, exactly like scheduled/_deliver_result. A blocking join
     # would deadlock it; the cooperative wait lets it finish.
     loop = asyncio.get_running_loop()
     delivered = threading.Event()

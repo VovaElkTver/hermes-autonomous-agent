@@ -132,7 +132,7 @@ def _repair_explicit_computer_use_media_paths_inner(response: str, messages: lis
     if not canonical_by_basename:
         return response
 
-    # Lazy: keeps the import cheap for standalone cron processes that may never hit MEDIA:.
+    # Lazy: keeps the import cheap for standalone scheduled processes that may never hit MEDIA:.
     from gateway.platforms.base import BasePlatformAdapter
 
     repaired = response

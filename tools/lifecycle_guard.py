@@ -1,9 +1,9 @@
-"""Gateway lifecycle guard for cron job creation.
+"""Gateway lifecycle guard for scheduled job creation.
 
-A cron job that restarts/stops the gateway from inside the gateway (``hermes gateway restart``,
+A scheduled job that restarts/stops the gateway from inside the gateway (``hermes gateway restart``,
 ``launchctl kickstart ai.hermes.gateway``, ``systemctl restart hermes-gateway``) kills the process,
 the supervisor revives it, auto-resume re-runs the turn: a SIGTERM-respawn loop.
-``cron.jobs.create_job`` rejects such specs on every creation path. Patterns are command-shaped —
+``scheduled.jobs.create_job`` rejects such specs on every creation path. Patterns are command-shaped —
 anchored on concrete command identifiers — so they cannot fire on prose. Defence-in-depth layer.
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class GatewayLifecycleBlocked(ValueError):
-    """Raised when a cron job spec contains a gateway-lifecycle command."""
+    """Raised when a scheduled job spec contains a gateway-lifecycle command."""
 
 
 # Shell-level command shapes that target the gateway lifecycle; each branch is anchored on a
@@ -222,7 +222,7 @@ def contains_host_interpreter_kill(text: str) -> bool:
 # backslash-newline continuation is therefore collapsed to a space before matching (as the shell
 # does) rather than loosening `[^\n]*`.
 # Every branch above uses `[^\n]*` between its verb and the gateway identifier so the match can't span
-# unrelated lines of a longer cron prompt/script, but that also means a real multi-line shell invocation
+# unrelated lines of a longer scheduled prompt/script, but that also means a real multi-line shell invocation
 # split across continuation lines (e.g. `launchctl submit \` / `  -l ai.hermes.gateway-... \` / `  -- ...`,
 # the exact reported shape in #62891) would otherwise slip past. Collapse continuations to a single space
 # before matching, mirroring what the shell itself does, rather than loosening `[^\n]*` and risking false
@@ -553,7 +553,7 @@ def lifecycle_scan_root_within_budget(text: str) -> bool:
 def _budget_exhausted(budget: _LifecycleScanBudget, what: str, depth: int) -> bool:
     logger.warning(
         "lifecycle guard scan budget exhausted (%s at depth %d); "
-        "failing closed — see _MAX_LIFECYCLE_SCAN_* in cron/lifecycle_guard.py",
+        "failing closed — see _MAX_LIFECYCLE_SCAN_* in scheduled/lifecycle_guard.py",
         what, depth,
     )
     budget.refusal = f"the scan budget was exhausted ({what} at depth {depth})"
@@ -838,7 +838,7 @@ def _resolved_or_nothing(candidate: str, cwd: Optional[str]) -> Iterator[Path]:
 
 
 def _resolve_script_path(script_path: str) -> Optional[Path]:
-    """Resolve a cron ``script`` value the way ``cron.scheduler`` does (relative paths live under
+    """Resolve a scheduled ``script`` value the way ``scheduled.scheduler`` does (relative paths live under
     ``<HERMES_HOME>/scripts/``) so the guard scans the file that will actually run."""
     from hermes_constants import get_hermes_home
 
@@ -1076,7 +1076,7 @@ def _sanitize_remote_script_text(
 
 
 def _read_script_for_scanning(script_path: str) -> tuple[str, Optional[str]]:
-    """``(text, refusal)``: read a cron script with the bounded scanner. Non-regular/oversized/live
+    """``(text, refusal)``: read a scheduled script with the bounded scanner. Non-regular/oversized/live
     SQLite inputs fail closed with a NAMED *refusal* (never a lifecycle-shaped verdict); missing or
     unreadable paths stay empty so scheduler validation reports them."""
     resolved = _resolve_script_path(script_path)
@@ -1246,7 +1246,7 @@ def check_gateway_lifecycle(prompt: Optional[str], script: Optional[str] = None)
                 # the guard refuses to open because an evicted placeholder can hang preflight indefinitely
                 # (#88052). Fail closed with the real reason instead of implying a dangerous lifecycle
                 # command.
-                "Blocked: the cron script lives on a cloud-synced path "
+                "Blocked: the scheduled script lives on a cloud-synced path "
                 "(iCloud Drive / ~/Library/CloudStorage). Opening an "
                 "evicted FileProvider placeholder can hang the guard's "
                 "preflight scan indefinitely, so it is refused without "
@@ -1279,13 +1279,13 @@ def check_gateway_lifecycle(prompt: Optional[str], script: Optional[str] = None)
         )
     if unsafe and refusal:
         raise GatewayLifecycleBlocked(
-            f"Blocked: the lifecycle guard could not scan this cron job or referenced script: {refusal}. "
+            f"Blocked: the lifecycle guard could not scan this scheduled job or referenced script: {refusal}. "
             "Nothing in the job is known to contain a gateway lifecycle command, but a script "
             "the job executes must be scannable (a regular text file under 1 MiB) before it can run."
         )
     if unsafe:
         raise GatewayLifecycleBlocked(
-            "Blocked: cron job contains a gateway lifecycle command or persistent "
+            "Blocked: scheduled job contains a gateway lifecycle command or persistent "
             "launchctl submit operation. This is blocked to prevent agent-driven "
             "SIGTERM-respawn loops under launchd/systemd supervision "
             "(#30719). Run `hermes gateway restart` from a shell outside "

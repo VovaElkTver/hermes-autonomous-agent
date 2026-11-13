@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 # failed boot: - `draining`  — written by the drain watcher / scale-to-zero go-dormant path when an
 # in-flight quiesce begins (gateway/run.py). - `degraded`  — written when the gateway comes up with some
 # platforms queued for retry, then "falls through to the normal running state" (gateway/run.py #5196): the
-# process is up, serving cron + whatever platforms connected, and the reconnect watcher takes the rest from
+# process is up, serving scheduled + whatever platforms connected, and the reconnect watcher takes the rest from
 # there. When a gateway is hard-killed *while in one of these states* (a container/VM recreate SIGTERMs it
 # before `_stop_impl` reaches its terminal-state persist), the last value left in gateway_state.json is the
 # transient sub-state. With no explicit `desired_state` to fall back to, treating that literal value as the

@@ -19,7 +19,7 @@ Invariants pinned here:
    in-flight request's sockets.
 
 3. The same atomicity contract holds at the third holder-abort site:
-   ``direct_api_call``'s ``_abort_active_request`` (the cron inline path,
+   ``direct_api_call``'s ``_abort_active_request`` (the scheduled inline path,
    reached cross-thread via ``AIAgent.interrupt()``).
 
 4. ``run_codex_stream``'s finally must poison the reuse slot when
@@ -261,7 +261,7 @@ def test_stale_abort_is_atomic_with_holder_read(monkeypatch):
 
 
 def test_direct_api_call_abort_is_atomic_with_holder_read():
-    """Same atomicity contract for the cron inline path's holder abort.
+    """Same atomicity contract for the scheduled inline path's holder abort.
 
     ``direct_api_call``'s ``_abort_active_request`` (fired cross-thread via
     ``AIAgent.interrupt()`` -> ``_active_request_abort``) must complete

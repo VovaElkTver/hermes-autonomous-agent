@@ -1,22 +1,22 @@
-"""Regression test for #86632: cron's synchronous delegate_task fallback must
+"""Regression test for #86632: scheduled's synchronous delegate_task fallback must
 return after the child completes — the automatic background review must not
 fire inside the delegated child.
 
-Field signature (issue #86632): a cron job's top-level ``delegate_task`` takes
+Field signature (issue #86632): a scheduled job's top-level ``delegate_task`` takes
 the #66617 stateless-channel synchronous fallback, the child finishes its turn
 normally (``Turn ended: reason=text_response``), and the delegation never
-returns to the parent — the heartbeat monitor goes stale and the cron
+returns to the parent — the heartbeat monitor goes stale and the scheduled
 inactivity watchdog kills the job.  Root cause (traced in the issue thread and
 fixed by the ``_delegate_depth`` guard in ``AIAgent._spawn_background_review``):
 the child's turn finalization spawned the automatic memory/skill background
 review fork.  Delegated children must never spawn that fork — it inherits the
 child's (often premium) model, replays the whole conversation, and its spawn
-inside the child's finalize path is the wedge site the cron watchdog kills.
+inside the child's finalize path is the wedge site the scheduled watchdog kills.
 
 This exercises the REAL end-to-end #86632 path: a genuine ``AIAgent`` child
 (mocked LLM client) with the skill-review trigger armed, dispatched through
 ``delegate_task(background=True)`` under a session runtime where async delivery
-is unsupported (cron), forcing the synchronous fallback.
+is unsupported (scheduled), forcing the synchronous fallback.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _mock_response(content="Hello", finish_reason="stop", tool_calls=None):
 
 
 def _make_real_child():
-    """A real AIAgent child, as the cron sync fallback runs one.
+    """A real AIAgent child, as the scheduled sync fallback runs one.
 
     The LLM client is mocked to complete in one call, and the post-turn
     skill-review trigger is armed the way a long child run arms it — so turn
@@ -127,7 +127,7 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
     done: dict = {}
 
     def _call_delegate_task():
-        # Cron declares the channel stateless (#66617): async delivery is
+        # Scheduled declares the channel stateless (#66617): async delivery is
         # unsupported and there is no bound origin session id to wake, so
         # delegate_task must run the batch synchronously.
         with (
@@ -142,7 +142,7 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
         ):
             done["out"] = dt.delegate_task(
                 goal="do trivial work and finish",
-                context="cron regression #86632",
+                context="scheduled regression #86632",
                 background=True,
                 parent_agent=parent,
             )

@@ -32,7 +32,7 @@ from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, SECRET_CACHE_FILES
 from hermes_cli.sizefmt import format_bytes as _format_size
 
 from hermes_cli.backup_restore import (
-    _count_cron_jobs,
+    _count_scheduled_jobs,
     _count_session_rows,
     _default_new_file_mode,
     _detect_prefix,
@@ -129,7 +129,7 @@ _SQLITE_SIDECAR_SUFFIXES = (".db-wal", ".db-shm", ".db-journal")
 _EXCLUDED_SUFFIXES = (".pyc", ".pyo", *_SQLITE_SIDECAR_SUFFIXES)
 
 # File names to skip (runtime state that's meaningless on another machine)
-_EXCLUDED_NAMES = {".backup.lock", "gateway.pid", "cron.pid"}
+_EXCLUDED_NAMES = {".backup.lock", "gateway.pid", "scheduled.pid"}
 
 # The desktop updater's pre-flight drops ``state.db.pre-update-emergency-<ts>.bak`` at the root
 # — a backup artifact like ``backups/``. Prefix-matched because the name carries a timestamp;
@@ -149,7 +149,7 @@ _EXCLUDED_PREFIXES = (
 # disconnected from the Nous portal); PID/lock/registry files reference source PIDs. Mirrors
 # ``container_boot._STALE_RUNTIME_FILES``; import filters too because older backups predate the
 # backup-side exclusions.
-_IMPORT_SKIP_NAMES = {"gateway_state.json", "gateway.pid", "cron.pid", "gateway.lock", "processes.json"}
+_IMPORT_SKIP_NAMES = {"gateway_state.json", "gateway.pid", "scheduled.pid", "gateway.lock", "processes.json"}
 
 try:  # zipfile already imports lzma (free); it is absent only from Pythons built without liblzma
     import lzma
@@ -1104,7 +1104,7 @@ def _revive_gateway_after_import(hermes_root: Path) -> None:
 # directories (recursive); missing entries are skipped. Pairing data lives in platform JSON blobs
 # outside state.db, so it is listed explicitly — ``hermes update`` snapshots this set (#15733).
 _QUICK_STATE_FILES = (
-    "state.db", "config.yaml", ".env", "auth.json", "cron/jobs.json", "cron/executions.db",
+    "state.db", "config.yaml", ".env", "auth.json", "scheduled/jobs.json", "scheduled/executions.db",
     "gateway_state.json", "channel_directory.json", "channel_aliases.json", "processes.json",
     "gateway/discord_message_recovery.db",  # Discord reconnect replay ledger
     # Per-profile user stores, destroyed if the update flow replaces the file and the post-update
@@ -1137,7 +1137,7 @@ def _newest_first(root: Path, keep_entry) -> list[Path]:
 
 
 # Kept in sync with ``_QUICK_STATE_FILES``.
-_LEGACY_JOBS_REL = "cron/jobs.json"
+_LEGACY_JOBS_REL = "scheduled/jobs.json"
 
 
 def _prune_oldest(newest_first: list[Path], keep: int, remove, what: str) -> int:
@@ -1676,13 +1676,13 @@ def _restore_quick_snapshot_exclusive(snapshot_id: str, home: Path) -> bool:
     return restored > 0 and not auth_restore_failed
 
 
-def restore_cron_jobs_if_emptied(
+def restore_scheduled_jobs_if_emptied(
     snapshot_id: str,
     hermes_home: Optional[Path] = None,
 ) -> Optional[dict[str, Any]]:
     """Safety net for silent scheduled-job loss across ``hermes update``.
 
-    Config-version migrations have been observed to leave ``cron/jobs.json``
+    Config-version migrations have been observed to leave ``scheduled/jobs.json``
     valid-but-empty after an update, silently dropping every scheduled job
     (issue #34600). The desktop scheduler can also overwrite the file with its
     own small set of internally-tracked scheduled jobs, causing partial loss (issue
@@ -1690,7 +1690,7 @@ def restore_cron_jobs_if_emptied(
 
     This compares the *current* job count against the pre-update snapshot. If
     the live file now has **fewer** jobs than the snapshot, the snapshot copy
-    of ``cron/jobs.json`` is restored in place.
+    of ``scheduled/jobs.json`` is restored in place.
 
     The check is deliberately conservative — it only ever restores when there
     is unambiguous evidence of loss (snapshot had more jobs than live file),
@@ -1714,14 +1714,14 @@ def restore_cron_jobs_if_emptied(
     home = hermes_home or get_hermes_home()
     live_path = home / _LEGACY_JOBS_REL
 
-    live_count = _count_cron_jobs(live_path)
+    live_count = _count_scheduled_jobs(live_path)
     # ``None`` (missing or unparseable) is intentionally left alone — that's a
     # different failure mode the user should see rather than have papered over.
     if live_count is None:
         return None
 
     snap_path = _quick_snapshot_root(home) / snapshot_id / _LEGACY_JOBS_REL
-    snap_count = _count_cron_jobs(snap_path)
+    snap_count = _count_scheduled_jobs(snap_path)
     if not snap_count:  # None or 0 — nothing worth restoring
         return None
 
@@ -1858,7 +1858,7 @@ def restore_config_model_settings_if_rewritten(
     consumed by the gateway and unattended scheduled jobs too, so a rewrite
     silently changes paid inference behavior machine-wide.
 
-    Mirrors :func:`restore_cron_jobs_if_emptied`: compare the *current*
+    Mirrors :func:`restore_scheduled_jobs_if_emptied`: compare the *current*
     config against the pre-update snapshot taken minutes earlier by this
     same update run, and restore only the protected keys — never the whole
     file — when a value the user had set was changed or dropped. Everything
@@ -1934,7 +1934,7 @@ def restore_config_model_settings_all_profiles(
 ) -> list[dict[str, Any]]:
     """Run the config model-settings safety net for every sibling profile.
 
-    Same contract as :func:`restore_cron_jobs_all_profiles`: each profile's
+    Same contract as :func:`restore_scheduled_jobs_all_profiles`: each profile's
     live ``config.yaml`` is compared against ITS OWN same-generation
     pre-update snapshot. Returns one result dict per restored profile, each
     with a ``profile`` key added. Never raises.
@@ -1965,7 +1965,7 @@ def restore_config_model_settings_all_profiles(
     return restored
 
 
-def restore_cron_jobs_all_profiles(
+def restore_scheduled_jobs_all_profiles(
     profile_snapshots: dict[str, str],
     invoking_home: Optional[Path] = None,
 ) -> list[dict[str, Any]]:
@@ -1973,7 +1973,7 @@ def restore_cron_jobs_all_profiles(
 
     ``profile_snapshots`` is the map returned by
     :func:`create_pre_update_snapshots_all_profiles`. Each profile's live
-    ``cron/jobs.json`` is compared against ITS OWN snapshot — restores are
+    ``scheduled/jobs.json`` is compared against ITS OWN snapshot — restores are
     same-generation by construction (the snapshot was taken minutes ago by
     this update run). Returns one result dict per restored profile, each
     with a ``profile`` key added. Never raises.
@@ -1988,7 +1988,7 @@ def restore_cron_jobs_all_profiles(
         if profile_home is None:
             continue
         try:
-            result = restore_cron_jobs_if_emptied(snap_id, hermes_home=profile_home)
+            result = restore_scheduled_jobs_if_emptied(snap_id, hermes_home=profile_home)
         except Exception as exc:
             logger.debug("Scheduled-job restore check for profile %s failed: %s", name, exc)
             continue

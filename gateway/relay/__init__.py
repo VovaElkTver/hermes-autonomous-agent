@@ -169,7 +169,7 @@ def relay_platform_identities() -> list[tuple[str, str]]:
 def relay_fronted_platforms() -> set[str]:
     """Logical platform names the relay fronts, minus the generic ``relay`` fallback.
     Same env source the live adapter's identity set comes from, so config-time
-    validation (cron delivery preflight) and fire-time routing can never disagree —
+    validation (scheduled delivery preflight) and fire-time routing can never disagree —
     and it needs no live adapter, so a standalone scheduler can use it."""
     if relay_explicitly_disabled():
         return set()

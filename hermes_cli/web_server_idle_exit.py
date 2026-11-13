@@ -108,7 +108,7 @@ def busy_ledger() -> Optional[str]:
     WHICH work it is protecting, instead of an opaque "turn in flight".
 
     Session work lives on ``tui_gateway.server`` (the voice mixin's helper is bound into that
-    namespace). Cron runs live outside that table (``cron.scheduler.get_running_job_ids``, the same
+    namespace). Scheduled runs live outside that table (``scheduled.scheduler.get_running_job_ids``, the same
     ledger the gateway shutdown drain reads): without it a daily job mid-run reported "no turn" and
     the exit killed it (#107485). None keeps the backend alive forever, so the cause is logged once —
     a silent never-exits would be the original bug with a new face."""
@@ -126,7 +126,7 @@ def busy_ledger() -> Optional[str]:
         from tools.async_delegation import active_count
         if active_count():
             return "delegation"
-        # Cron was excised: no scheduler-owned jobs can hold this backend busy.
+        # Scheduled was excised: no scheduler-owned jobs can hold this backend busy.
         return ""
     except Exception:
         if not _probe_failure_logged:

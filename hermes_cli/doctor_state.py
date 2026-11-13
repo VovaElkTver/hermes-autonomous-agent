@@ -476,7 +476,7 @@ def _retired_wal_holders(f: Finding, state_db_path: Path, _DHH: str) -> bool:
     check_warn(f"{_DHH}/state.db: {len(pids)} process(es) still hold a retired WAL generation ({rendered})",
                "(every new session refuses to open until they exit; health/stats probes skipped)")
     f.issues.append(f"state.db retired WAL generation held by {rendered}{host_gateway_note()} — stop the host "
-                    f"gateway, dashboard and cron writers among them ('hermes {profile_cli_selector()}gateway "
+                    f"gateway, dashboard and scheduled writers among them ('hermes {profile_cli_selector()}gateway "
                     "stop' stops the ONE host process serving every profile, quit the Desktop app), do not "
                     "delete the WAL yourself, then rerun 'hermes doctor'")
     return True

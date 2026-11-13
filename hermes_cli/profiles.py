@@ -1228,7 +1228,7 @@ def _clone_all_into(source_dir: Path, profile_dir: Path, canon: str) -> Optional
     if materialized:
         logger.info("profile %s: materialized symlinked %s so the clone never writes through to %s",
                     canon, materialized, source_dir)
-    # Excluded history dirs (sessions/, cron/) must still exist as empty dirs so the clone runs.
+    # Excluded history dirs (sessions/, scheduled/) must still exist as empty dirs so the clone runs.
     for subdir in _PROFILE_DIRS:
         (profile_dir / subdir).mkdir(parents=True, exist_ok=True)
     for stale in _CLONE_ALL_STRIP:
@@ -1382,7 +1382,7 @@ def create_profile(
             shutil.rmtree(profile_dir)
         else:
             # A live marker-less dir is invisible to ``profile list`` but may still hold user
-            # files (skills/, memories/, cron/jobs.json): fail closed and name it, never rmtree.
+            # files (skills/, memories/, scheduled/jobs.json): fail closed and name it, never rmtree.
             raise FileExistsError(
                 f"Cannot create profile '{canon}': {profile_dir} exists but carries no profile identity "
                 "file, so it is not listed as a profile. Move or remove that directory first."

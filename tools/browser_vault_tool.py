@@ -322,7 +322,7 @@ def browser_vault_unlock(backend_name: str) -> str:
     if not can_prompt_here():
         return json.dumps({"success": False, "error_type": "unlock_unavailable",
                            "error": (f"{backend.display_name} is locked and this session cannot prompt for the "
-                                     "master password (headless/cron/API). Unlock it from an interactive Hermes "
+                                     "master password (headless/scheduled/API). Unlock it from an interactive Hermes "
                                      "session or the Desktop app first.")})
     prompt = get_unlock_prompt_callback()
     master = prompt(backend.name, backend.display_name) if prompt else ""
@@ -354,7 +354,7 @@ def browser_vault_save_login(label: str = "", task_id: Optional[str] = None) -> 
     prompt = get_save_login_prompt_callback()
     if prompt is None or not can_prompt_here():
         return json.dumps({"success": False, "error_type": "prompt_unavailable",
-                           "error": (f"This session cannot ask the user for a login (headless/cron/API). Tell them to run "
+                           "error": (f"This session cannot ask the user for a login (headless/scheduled/API). Tell them to run "
                                      f"`hermes vault add` or use Desktop → Settings → Passwords & Logins for {origin}.")})
     host = origin.split("://", 1)[-1]
     site = label.strip() or host
@@ -457,7 +457,7 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
     prompt = get_code_prompt_callback()
     if prompt is None or not can_prompt_here():
         return json.dumps({"success": False, "error_type": "prompt_unavailable",
-                           "error": (f"{site} asks for a one-time code and this session cannot ask the user (headless/cron/API). "
+                           "error": (f"{site} asks for a one-time code and this session cannot ask the user (headless/scheduled/API). "
                                      "Save an authenticator key for this login so codes can be generated automatically.")})
     code = (prompt(site, "") or "").strip().replace(" ", "").replace("-", "")
     if not code:

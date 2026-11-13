@@ -1,6 +1,6 @@
 """disk_cleanup — ephemeral file cleanup library behind the disk-cleanup plugin.
 
-Rules: test files delete at task end (age >= 0); temp after 7 days; cron-output
+Rules: test files delete at task end (age >= 0); temp after 7 days; scheduled-output
 after 14 days; empty dirs under HERMES_HOME always. Prompt-only: research
 (keep 10 newest, > 30 days), chrome-profile > 14 days, any file > 500 MB.
 Scope: strictly HERMES_HOME and /tmp/hermes-*; never ~/.hermes/logs/ or system dirs.
@@ -145,9 +145,9 @@ def _is_protected_dir(p: Path) -> bool:
 
 @functools.lru_cache(maxsize=8)  # keyed by home: a multiplexed process serves several profiles
 def _protected_schedule_paths(home: Path) -> frozenset:
-    """Defense-in-depth for quick(): EXACT legacy scheduler control-plane paths (``cron/``, ``output/`` root,
+    """Defense-in-depth for quick(): EXACT legacy scheduler control-plane paths (``scheduled/``, ``output/`` root,
     ``jobs.json``, ``.tick.lock``) never deleted regardless of stored category (stale tracked.json).
-    Never widen to everything under ``cron/output/``: run artifacts there are disposable; only
+    Never widen to everything under ``scheduled/output/``: run artifacts there are disposable; only
     wholesale deletion of ``output/`` is fatal."""
     return frozenset(str(x) for parent in ("cron", "cronjobs") for base in (home / parent,)
                      for x in (base, base / "output", base / "jobs.json", base / ".tick.lock"))
@@ -259,7 +259,7 @@ def dry_run() -> tuple[list[dict], list[dict]]:
     auto, prompt = [], []
     for item, p, age in _live_items(load_tracked(), datetime.now(UTC)):
         cat = item["category"]
-        # Stale cron-output entries and protected dirs are skipped by quick(); omit them here too.
+        # Stale scheduled-output entries and protected dirs are skipped by quick(); omit them here too.
         if (cat == "cron-output" and guess_category(p) != "cron-output") or _is_protected_dir(p):
             continue
         if _is_auto_delete(cat, age):

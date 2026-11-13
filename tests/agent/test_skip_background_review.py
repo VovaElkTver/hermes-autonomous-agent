@@ -2,7 +2,7 @@
 
 Verifies that AIAgent can be instructed to skip the end-of-turn
 _spawn_background_review fork (~30K tokens / event), which is essential
-on cron sessions that have no human-in-the-loop value from skill/memory
+on scheduled sessions that have no human-in-the-loop value from skill/memory
 review forks.
 """
 from __future__ import annotations

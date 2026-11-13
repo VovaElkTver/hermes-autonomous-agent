@@ -139,7 +139,7 @@ async def test_discord_interaction_routes_through_handle_message(adapter, monkey
     # the connector's capability-vault binding (interactionSessionSource →
     # buildSessionKey: platform "discord", chat_type "group") and the relay
     # text lane. Platform.RELAY / "channel" here forked the session and made
-    # /sethome file the home channel under platforms.relay (invisible to cron).
+    # /sethome file the home channel under platforms.relay (invisible to scheduled).
     assert ev.source.platform == Platform.DISCORD
     assert ev.source.chat_type == "group"
     # Authenticated upstream-trust marker, parity with the relay text lane

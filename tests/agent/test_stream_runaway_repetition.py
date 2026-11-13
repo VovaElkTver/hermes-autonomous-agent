@@ -4,7 +4,7 @@ No output cap reaches an OpenAI-compatible endpoint by design (the server owns i
 default), and the stale-stream detector fires only on silence, so a looping local model kept a
 turn streaming indefinitely. Every repetition check ran after the stream ended, and the
 callback-level attempts read only text a stream callback had accepted. These turns run with no
-callback, the way cron, subagents and non-streaming gateway platforms call the model.
+callback, the way scheduled, subagents and non-streaming gateway platforms call the model.
 
 The loops are the ones reported: a Telegram gateway cycle (#125650), the fullwidth "！！！" echo
 (#94224, the raw repeated characters of #125351) and a local model's status line (#78551).

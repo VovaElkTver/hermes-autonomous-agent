@@ -89,9 +89,9 @@ def test_spend_limit_still_asks_under_yolo_and_refuses_when_nobody_can_answer():
     assert "spend limit" in chat.cards[0]["command"] and "UNTRUSTED" not in chat.cards[0]["command"]
     assert "spend limit is 50 credits" in json.loads(refused)["error"]
 
-    # A cron run under approvals.mode: off: the untrusted write runs unattended, the limit still refuses.
+    # A scheduled run under approvals.mode: off: the untrusted write runs unattended, the limit still refuses.
     (get_hermes_home() / "config.yaml").write_text(json.dumps({"approvals": {"mode": "off"}}))
-    tokens, key = set_session_vars(cron_session="1"), set_current_session_key("cron:job")
+    tokens, key = set_session_vars(scheduled_session="1"), set_current_session_key("cron:job")
     try:
         assert handlers._trust_gate_check("srv", "write") is None
         assert handlers._trust_gate_check("srv", "paid_render") is None

@@ -1,4 +1,4 @@
-"""Startup gate for the Chronos fire webhook (``POST /api/cron/fire``).
+"""Startup gate for the Chronos fire webhook (``POST /api/scheduled/fire``).
 
 A backend that stops the guest on sleep wakes the agent FOR the fire, so the fire reaches the webhook in
 the first second of a cold boot. The api_server adapter listens before the gateway has published any

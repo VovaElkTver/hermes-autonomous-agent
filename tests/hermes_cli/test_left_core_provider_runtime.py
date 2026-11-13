@@ -111,7 +111,7 @@ def test_an_auto_route_following_the_stored_active_provider_installs_it(tmp_path
     "        - name: fast\n          provider: copilot\n          model: gpt-5.4\n",
 ])
 def test_a_route_configured_outside_the_main_model_installs_when_resolved(tmp_path, monkeypatch, installs, config):
-    """A cron run or a routed delegate resolves the provider its config slot names: that is use."""
+    """A scheduled run or a routed delegate resolves the provider its config slot names: that is use."""
     _copilot_home(tmp_path, monkeypatch, config)
     _resolve(requested="copilot")
     assert installs == [("github-copilot", True)]

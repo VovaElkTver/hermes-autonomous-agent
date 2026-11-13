@@ -269,7 +269,7 @@ class TestIRCRequirements:
 
 
 
-# ── _standalone_send (out-of-process cron delivery) ──────────────────────
+# ── _standalone_send (out-of-process scheduled delivery) ──────────────────────
 
 
 class _FakeIRCConnection:
@@ -322,7 +322,7 @@ class TestIRCStandaloneSend:
         from gateway.config import PlatformConfig
 
         monkeypatch.setenv("IRC_SERVER", "irc.test.net")
-        monkeypatch.setenv("IRC_CHANNEL", "#cron")
+        monkeypatch.setenv("IRC_CHANNEL", "#scheduled")
         monkeypatch.setenv("IRC_NICKNAME", "hermesbot")
         monkeypatch.setenv("IRC_USE_TLS", "false")
 
@@ -336,20 +336,20 @@ class TestIRCStandaloneSend:
 
         result = await _standalone_send(
             PlatformConfig(enabled=True, extra={}),
-            "#cron",
-            "hello from cron",
+            "#scheduled",
+            "hello from scheduled",
         )
 
         assert result["success"] is True
         assert "message_id" in result
 
         sent_lines = b"".join(conn.writes).decode("utf-8").splitlines()
-        # NICK uses the cron-suffixed identity to avoid colliding with the
+        # NICK uses the scheduled-suffixed identity to avoid colliding with the
         # long-running gateway adapter that may already hold the nickname.
         assert any(line.startswith("NICK hermesbot-sched") for line in sent_lines)
         assert any(line.startswith("USER hermesbot-sched 0 * :Hermes Agent (scheduled)")
                    for line in sent_lines)
-        assert any(line == "PRIVMSG #cron :hello from cron" for line in sent_lines)
+        assert any(line == "PRIVMSG #scheduled :hello from scheduled" for line in sent_lines)
         assert any(line.startswith("QUIT ") for line in sent_lines)
 
 
@@ -358,7 +358,7 @@ class TestIRCStandaloneSend:
         from gateway.config import PlatformConfig
 
         monkeypatch.setenv("IRC_SERVER", "irc.test.net")
-        monkeypatch.setenv("IRC_CHANNEL", "#cron")
+        monkeypatch.setenv("IRC_CHANNEL", "#scheduled")
         monkeypatch.setenv("IRC_NICKNAME", "hermesbot")
         monkeypatch.setenv("IRC_USE_TLS", "false")
 
@@ -382,7 +382,7 @@ class TestIRCStandaloneSend:
 
         result = await _standalone_send(
             PlatformConfig(enabled=True, extra={}),
-            "#cron",
+            "#scheduled",
             "hi",
         )
 
@@ -402,7 +402,7 @@ class TestIRCStandaloneSend:
 # profile's YAML-to-env bridge output -- a secondary profile with its own
 # (different or absent) IRC config would silently connect to the default
 # profile's server/channel, or (for _env_enablement) get auto-enabled using
-# the default's channel as its cron home_channel -- a real message-
+# the default's channel as its scheduled home_channel -- a real message-
 # misdelivery risk, not just cosmetic. Mirrors the LINE/Buzz/SimpleX fix for
 # #98738.
 

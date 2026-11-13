@@ -31,10 +31,10 @@ _ssh_home_failed_at: dict[str, float] = {}
 
 def _expand_tilde(path: str) -> str:
     """Expand ``~`` using the effective profile home (``get_subprocess_home``) so
-    gateway/cron runs, whose process HOME may differ, agree with interactive CLI sessions.
+    gateway/scheduled runs, whose process HOME may differ, agree with interactive CLI sessions.
 
     This mirrors ``hermes_constants.get_subprocess_home()`` so that ``~`` resolves consistently regardless
-    of whether the tool runs interactively or inside a gateway-driven cron job (#48552).
+    of whether the tool runs interactively or inside a gateway-driven scheduled job (#48552).
     """
     if not path or "~" not in path:
         return path

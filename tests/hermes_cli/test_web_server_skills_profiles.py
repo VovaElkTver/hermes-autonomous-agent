@@ -85,7 +85,7 @@ class TestProfileScopedSkills:
 
     def test_scope_restores_module_globals(self, client, isolated_profiles):
         """The SKILLS_DIR swap is per-request; the module global must be
-        restored even after a scoped call (cron-style locked swap)."""
+        restored even after a scoped call (scheduled-style locked swap)."""
         from tools import skills_tool
 
         before = skills_tool.SKILLS_DIR

@@ -148,7 +148,7 @@ def _count(failure_msg: str, module: str, read: Callable[[Any], Any]) -> int:
 
 
 def _read_background_work_count() -> int:
-    """Live background/subagent work that ``active_agents`` (foreground turns + in-flight cron + API
+    """Live background/subagent work that ``active_agents`` (foreground turns + in-flight scheduled + API
     runs) deliberately does NOT include: backgrounded ``delegate_task`` subagents,
     ``terminal(background=true)`` processes, kanban workers.  TASK-granular: a fan-out batch of N
     contributes N (real concurrent load), unlike the pool's one-slot-per-batch accounting."""
@@ -177,7 +177,7 @@ def _read_runtime_snapshot(config: dict[str, Any]):
     except Exception as exc:
         logger.warning("background-work snapshot unavailable; metric not exported (error_type=%s)", type(exc).__name__)
         logger.debug("background-work snapshot traceback", exc_info=True)
-    # Cron-health telemetry was excised with the cron package (agent.monitoring.cron_health).
+    # Scheduled-health telemetry was excised with the scheduled package (agent.monitoring.cron_health).
     return gateway_snapshot
 
 

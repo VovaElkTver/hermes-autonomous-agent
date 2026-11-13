@@ -6,7 +6,7 @@ launchd exits non-zero there, so the whole restart branch was skipped — with
 no ``else`` and no message. The update printed ``✓ Update complete!`` and
 exited 0 while the gateway was stopped *and* deregistered, which ``KeepAlive``
 cannot recover because the job definition is gone. Messaging adapters and
-cron stayed dark until someone manually ran ``hermes gateway restart``.
+scheduled stayed dark until someone manually ran ``hermes gateway restart``.
 
 ``launchctl list`` is also not a reliable loaded/unloaded classifier: it is
 session-scoped and can exit non-zero while the job is alive in its gui/user

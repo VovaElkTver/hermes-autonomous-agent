@@ -166,7 +166,7 @@ async def test_connector_decline_after_upload_is_a_failed_send_with_one_notice(t
 @pytest.mark.asyncio
 async def test_lost_ack_on_send_media_is_not_reported_as_an_undelivered_attachment(tmp_path: Path):
     """Frame sent, ack lost: the file may be on screen. No "couldn't send" fallback, and no
-    failure the send_message tool or cron would read as "not delivered" and re-send."""
+    failure the send_message tool or scheduled would read as "not delivered" and re-send."""
     adapter, stub, _fake = _adapter()
     stub.next_media_result = {"success": False, "error": "relay outbound timed out", "ambiguous": True}
     f = tmp_path / "report.pdf"

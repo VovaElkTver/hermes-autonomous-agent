@@ -117,7 +117,7 @@ def _tz_issues(config):
 
 
 class TestTimezoneValidation:
-    """An invalid ``timezone`` silently puts the agent clock and every cron
+    """An invalid ``timezone`` silently puts the agent clock and every scheduled
     schedule on server-local time (hermes_time._get_zoneinfo falls back with
     one log warning). validate_config_structure must report it (#111725)."""
 

@@ -39,9 +39,9 @@ def _plugin_count(config: dict[str, Any]) -> int:
     return len(enabled) if isinstance(enabled, list) else 0
 
 
-def _cron_job_count() -> int:
+def _scheduled_job_count() -> int:
     try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs (Windows editors may leave a BOM).
+        # utf-8-sig: same dialect as scheduled/jobs.load_jobs (Windows editors may leave a BOM).
         with open(get_hermes_home() / "cron" / "jobs.json", encoding="utf-8-sig") as handle:
             jobs = json.load(handle).get("jobs", [])
     except (OSError, ValueError, AttributeError):
@@ -134,7 +134,7 @@ def collect_install_snapshot(config: dict[str, Any]) -> dict[str, str]:
         mcp_servers=_mcp_server_count(config),
         plugins=_plugin_count(config),
         skills=_skill_count(),
-        cron_jobs=_cron_job_count(),
+        cron_jobs=_scheduled_job_count(),
         profiles=_profile_count(),
         messaging_platforms=_safe_count(_messaging_platform_count),
         install_age_bucket=install_age_bucket(),

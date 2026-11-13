@@ -381,7 +381,7 @@ def handle_computer_use(args: dict[str, Any], **kwargs) -> Any:
 
 def _request_approval(action: str, args: dict[str, Any]) -> Optional[str]:
     """None if approved, else a JSON error string. The decision (yolo bypass, session/permanent grants, CLI prompt,
-    gateway pending, cron/unattended policy, fail-closed with nobody to ask) is ``tools.approval``'s shared gate,
+    gateway pending, scheduled/unattended policy, fail-closed with nobody to ask) is ``tools.approval``'s shared gate,
     so a computer_use grant is one store entry like any terminal pattern. Scope key ``cua:<action>:<mode>``:
     foreground delivery is a visible focus change, so a background ``session`` grant must NOT cover it (#67052).
     """

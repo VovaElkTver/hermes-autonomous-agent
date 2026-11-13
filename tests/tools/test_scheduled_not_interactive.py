@@ -1,7 +1,7 @@
 """Unattended approval contexts never resolve as interactive (#110932).
 
-A gateway sets HERMES_EXEC_ASK=1 at startup and hands its environ to every external cron
-worker; interactive launches export HERMES_INTERACTIVE=1. Inside cron nobody can answer the
+A gateway sets HERMES_EXEC_ASK=1 at startup and hands its environ to every external scheduled
+worker; interactive launches export HERMES_INTERACTIVE=1. Inside scheduled nobody can answer the
 card, so ``_presence()`` must clear the trio and let the gate resolve from
 ``approvals.cron_mode``. Unattended platforms keep ``is_ask`` only while their session has a
 registered approval notifier: api_server answers via the ``/v1/runs`` approval bridge, which
@@ -19,13 +19,13 @@ def leaked_presence(monkeypatch):
     monkeypatch.setenv("HERMES_INTERACTIVE", "1")
     monkeypatch.setenv("HERMES_EXEC_ASK", "1")
     monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
-    monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+    monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
     monkeypatch.delenv("HERMES_SINGLE_QUERY_SESSION", raising=False)
     monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
 
 
 def test_cron_context_clears_leaked_presence(monkeypatch, leaked_presence):
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
     _, is_cli, is_gateway, is_ask = approval_mod._presence()
     assert (is_cli, is_gateway, is_ask) == (False, False, False)
 

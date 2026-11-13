@@ -72,9 +72,9 @@ def test_deferred_builtins_and_cron_narrowing_are_not_unavailable(monkeypatch):
     # The same tool in a session that turned its toolset off is.
     narrowed = SimpleNamespace(_delegate_depth=0, enabled_toolsets=None, disabled_toolsets=["session_search"])
     assert signals.tool_unavailable_fields(narrowed, "session_search", "unknown_tool", route) is not None
-    # Cron strips clarify on purpose.
-    cron = SimpleNamespace(_delegate_depth=0, platform="cron")
-    assert signals.tool_unavailable_fields(cron, "clarify", "unknown_tool", route) is None
+    # Scheduled strips clarify on purpose.
+    scheduled = SimpleNamespace(_delegate_depth=0, platform="cron")
+    assert signals.tool_unavailable_fields(scheduled, "clarify", "unknown_tool", route) is None
 
 
 def test_turn_validation_reports_disabled_builtin_once_and_unknown_names_never(marks, monkeypatch):

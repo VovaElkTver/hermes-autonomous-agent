@@ -13,10 +13,10 @@ def _mk_profile(home: Path, jobs: int = 0) -> Path:
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text("model: {}\n", encoding="utf-8")
     if jobs:
-        cron = home / "cron"
-        cron.mkdir(exist_ok=True)
+        scheduled = home / "cron"
+        scheduled.mkdir(exist_ok=True)
         payload = {"jobs": [{"id": f"j{i}"} for i in range(jobs)]}
-        (cron / "jobs.json").write_text(json.dumps(payload), encoding="utf-8")
+        (scheduled / "jobs.json").write_text(json.dumps(payload), encoding="utf-8")
     return home
 
 
@@ -108,7 +108,7 @@ class TestPerProfileCronRestore:
         jobs_path = profiles["work"] / "cron" / "jobs.json"
         jobs_path.write_text(json.dumps({"jobs": []}), encoding="utf-8")
 
-        restored = backup.restore_cron_jobs_all_profiles(
+        restored = backup.restore_scheduled_jobs_all_profiles(
             snaps, invoking_home=profiles["default"]
         )
         assert len(restored) == 1
@@ -121,9 +121,9 @@ class TestPerProfileCronRestore:
         snaps = backup.create_pre_update_snapshots_all_profiles(
             invoking_home=profiles["default"], keep=1
         )
-        assert backup.restore_cron_jobs_all_profiles(
+        assert backup.restore_scheduled_jobs_all_profiles(
             snaps, invoking_home=profiles["default"]
         ) == []
 
     def test_empty_map_is_noop(self, profiles):
-        assert backup.restore_cron_jobs_all_profiles({}) == []
+        assert backup.restore_scheduled_jobs_all_profiles({}) == []

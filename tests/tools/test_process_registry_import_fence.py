@@ -1,7 +1,7 @@
 """Importing a tool module must never open the canonical store.
 
 Only the runtime that owns delegation state (gateway authority, interactive agent) may
-restore durable completions, and only explicitly; an ordinary client CLI (``hermes cron
+restore durable completions, and only explicitly; an ordinary client CLI (``hermes scheduled
 run``, ``hermes sessions list``) imports ``tools.process_registry`` transitively and must
 stay a zero-writer against ``state.db``.
 """

@@ -143,7 +143,7 @@ class SubdirectoryHintTracker:
     def __init__(self, working_dir: Optional[str] = None, *, enabled: bool = True):
         # ``enabled=False`` mirrors ``skip_context_files``: a session that opted out of
         # AGENTS.md/CLAUDE.md injection at startup must not get the same files spliced into
-        # tool results later — cron jobs relaying exact stdout leaked them to chat (#9441).
+        # tool results later — scheduled jobs relaying exact stdout leaked them to chat (#9441).
         self.enabled = enabled
         self.working_dir = Path(working_dir or os.getcwd()).resolve()
         # $HOME is not a project (#76902): the packaged Desktop app with no default project

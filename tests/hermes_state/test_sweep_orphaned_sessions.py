@@ -187,7 +187,7 @@ class TestSweepOrphanedSessions:
     def test_explicit_source_scope_spares_gateway_sessions(self, db):
         stale = time.time() - 8 * 3600
         _make_session(
-            db, "stale-cron", source="cron", started_at=stale, message_at=stale
+            db, "stale-scheduled", source="cron", started_at=stale, message_at=stale
         )
         for sid, session_key in (
             ("keyed-telegram", "telegram:chat:1"),
@@ -200,8 +200,8 @@ class TestSweepOrphanedSessions:
 
         assert db.sweep_orphaned_sessions(
             max_idle_seconds=IDLE_S, sources=("cron",)
-        ) == ["stale-cron"]
-        assert db.get_session("stale-cron")["end_reason"] == "startup_orphan_reap"
+        ) == ["stale-scheduled"]
+        assert db.get_session("stale-scheduled")["end_reason"] == "startup_orphan_reap"
         assert db.get_session("keyed-telegram")["ended_at"] is None
         assert db.get_session("unkeyed-telegram")["ended_at"] is None
 
@@ -289,7 +289,7 @@ class TestSweepOrphanedSessions:
         for sid, source in (
             ("orphan", "cli"),
             ("live-turn", "cli"),
-            ("stale-cron", "cron"),
+            ("stale-scheduled", "cron"),
             ("runtime-owned-ui", "tui"),
         ):
             _make_session(db, sid, source=source, started_at=stale, message_at=stale)
@@ -327,7 +327,7 @@ class TestSweepOrphanedSessions:
 
         assert first["pruned"] == 0
         assert db.get_session("orphan")["end_reason"] == "startup_orphan_reap"
-        assert db.get_session("stale-cron")["end_reason"] == "startup_orphan_reap"
+        assert db.get_session("stale-scheduled")["end_reason"] == "startup_orphan_reap"
         assert db.get_session("live-turn")["ended_at"] is None
         assert db.get_session("recent-orphan")["ended_at"] is None
         assert db.get_session("runtime-owned-ui")["ended_at"] is None
@@ -342,11 +342,11 @@ class TestSweepOrphanedSessions:
 
         assert second["pruned"] == 0
         assert db.get_session("orphan") is not None
-        assert db.get_session("stale-cron") is not None
+        assert db.get_session("stale-scheduled") is not None
 
         db._conn.execute(
             "UPDATE sessions SET ended_at = ? WHERE id IN (?, ?)",
-            (stale, "orphan", "stale-cron"),
+            (stale, "orphan", "stale-scheduled"),
         )
         db._conn.commit()
         third = db.maybe_auto_prune_and_vacuum(
@@ -357,7 +357,7 @@ class TestSweepOrphanedSessions:
 
         assert third["pruned"] == 2
         assert db.get_session("orphan") is None
-        assert db.get_session("stale-cron") is None
+        assert db.get_session("stale-scheduled") is None
 
     def test_failed_maintenance_marker_keeps_newly_swept_row_recoverable(
         self, db, monkeypatch
@@ -539,13 +539,13 @@ class TestSweepOrphanedSessions:
     def test_auto_prune_reports_closed_count_and_deletes_after_second_window(
         self, db
     ):
-        """#54189 end-to-end: leaky producers (cron/kanban/subagent) never set
+        """#54189 end-to-end: leaky producers (scheduled/kanban/subagent) never set
         ``ended_at``; pass 1 closes them (reported via ``closed``), pass 2 —
         after a further retention window — deletes them, and a messaging row
         is never touched by either pass."""
         stale = time.time() - 200 * 86400
         for sid, source in (
-            ("cron-0", "cron"),
+            ("scheduled-0", "cron"),
             ("kanban-1", "kanban"),
             ("subagent-2", "subagent"),
             ("telegram-3", "telegram"),
@@ -558,7 +558,7 @@ class TestSweepOrphanedSessions:
         )
         assert first["closed"] == 3
         assert first["pruned"] == 0
-        for sid in ("cron-0", "kanban-1", "subagent-2"):
+        for sid in ("scheduled-0", "kanban-1", "subagent-2"):
             assert db.get_session(sid)["end_reason"] == "startup_orphan_reap"
         assert db.get_session("telegram-3")["ended_at"] is None
 

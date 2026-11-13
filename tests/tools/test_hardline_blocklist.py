@@ -2,7 +2,7 @@
 
 The hardline list is a floor below yolo: a small set of commands so
 catastrophic they should never run via the agent, regardless of --yolo,
-gateway /yolo, approvals.mode=off, or cron approve mode.
+gateway /yolo, approvals.mode=off, or scheduled approve mode.
 
 Inspired by Mercury Agent's permission-hardened blocklist.
 """
@@ -27,7 +27,7 @@ _HARDLINE_BLOCK = [
     # current/parent-dir segments all collapse back to root, so they must
     # hit the hardline floor too (regression: these used to slip through the
     # root pattern's target group and fall to the softer DANGEROUS_PATTERNS
-    # rule, which --yolo / approvals.mode=off / cron approve-mode bypass).
+    # rule, which --yolo / approvals.mode=off / scheduled approve-mode bypass).
     "rm -rf //",
     "rm -rf /.",
     "rm -rf /./",
@@ -512,7 +512,7 @@ def clean_session(monkeypatch):
     monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
-    monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+    monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
     token = set_current_session_key("hardline_test")
     try:
@@ -602,9 +602,9 @@ def test_approvals_mode_off_cannot_bypass_hardline(clean_session, monkeypatch, t
 
 
 def test_cron_approve_mode_cannot_bypass_hardline(clean_session, monkeypatch):
-    """Cron sessions with cron_mode=approve must not bypass hardline."""
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
-    monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "approve")
+    """Scheduled sessions with scheduled_mode=approve must not bypass hardline."""
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
+    monkeypatch.setattr(approval_context, "_get_scheduled_approval_mode", lambda: "approve")
 
     result = check_all_command_guards("rm -rf /", "local")
     assert result["approved"] is False

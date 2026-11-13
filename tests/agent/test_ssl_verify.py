@@ -331,7 +331,7 @@ def test_replaced_install_environment_re_resolves_certifi_in_place(tmp_path, mon
 
 
 def test_rotation_repair_and_warning_happen_once(tmp_path, monkeypatch, caplog, no_ca_env):
-    """A gateway builds a TLS client per turn, per cron run and per model-metadata
+    """A gateway builds a TLS client per turn, per scheduled run and per model-metadata
     fetch: the repair re-executes third-party module code, so it — and the single
     warning an operator needs — must not repeat per client."""
     import logging

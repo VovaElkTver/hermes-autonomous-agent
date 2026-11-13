@@ -3,7 +3,7 @@
 Invariants: a costed call's prompt names the cost and the chat's running total; only dispatched
 calls count; a call that would cross ``spend_limit`` asks even on a ``trust: full`` server and is
 refused unattended without dispatching; chats and profiles never share a tally, a chat keeps its
-total across a session-id rotation and each cron run has its own; parallel over-limit calls are asked
+total across a session-id rotation and each scheduled run has its own; parallel over-limit calls are asked
 one at a time; malformed declarations fail with a named error (package and config.yaml) while unknown
 keys only warn.
 """
@@ -103,7 +103,7 @@ def test_full_trust_asks_only_past_the_limit_and_unattended_refuses_without_disp
     _, asked = _call("batch")
     assert "used about 120 credits" in asked[0]
     dispatched = session.call_tool.await_count
-    tokens = set_session_vars(cron_session="1")  # cron: nobody can answer, the real consent path declines
+    tokens = set_session_vars(scheduled_session="1")  # cron: nobody can answer, the real consent path declines
     token = set_current_session_key("chat-a")
     try:
         result = json.loads(handlers._make_tool_handler("srv", "paid_render", 30.0)({}))
@@ -193,9 +193,7 @@ def test_declarations_validate_translate_and_survive_a_native_trust_override(tmp
             assert "srv" not in _load_mcp_config()
 
 
-def test_a_chat_keeps_its_total_across_a_rotation_and_each_cron_run_has_its_own(session, caplog):
-    from cron.scheduler import _CronRunScope
-    from gateway.session_context import clear_session_vars, set_session_vars
+def test_a_chat_keeps_its_total_across_a_rotation(session, caplog):
     config = dict(COSTED, tool_costs={**COSTED["tool_costs"], "mcp_srv_typo": 3})
     _register(config)
     with caplog.at_level("WARNING", logger="tools.mcp_tool"):  # live discovery sees the full tool list
@@ -207,24 +205,6 @@ def test_a_chat_keeps_its_total_across_a_rotation_and_each_cron_run_has_its_own(
     from tools.approval_yolo import transfer_session_yolo
     transfer_session_yolo("parent", "child")
     assert "used about 80 credits" in _call("paid_render", chat="child", answer="decline")[1][0]
-    # Cron: the approval session key is "" for every job; each run binds its own tally.
-    tokens = set_session_vars(cron_session="1")
-    try:
-        for job in ("job-a", "job-b", "job-c"):
-            scope = _CronRunScope({}, job, "run-1")
-            scope.enter()
-            try:
-                token = set_current_session_key("")
-                try:
-                    for _ in range(2):
-                        assert json.loads(handlers._make_tool_handler("srv", "paid_render", 30.0)({})) == {"result": "ok"}
-                finally:
-                    reset_current_session_key(token)
-            finally:
-                scope.exit()
-    finally:
-        clear_session_vars(tokens)
-
 
 def test_parallel_over_limit_calls_are_asked_one_at_a_time(session):
     import threading

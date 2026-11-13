@@ -9,7 +9,7 @@ local bare origin), then a home built the way users build it, mostly through the
   config sits at the oldest ``_config_version`` HEAD still migrates and ``work``'s one version
   behind, so the update's config migration (active profile + siblings) runs; ``research`` is
   current and must come through byte-for-byte;
-* a custom skill, a user plugin under ``~/.hermes/plugins/``, a cron job made by ``hermes cron``;
+* a custom skill, a user plugin under ``~/.hermes/plugins/``, a scheduled job made by ``hermes scheduled``;
 * two broken profiles next to them (a dangling symlink, a profile whose config.yaml is not YAML);
 * local files the user dropped inside the checkout (an untracked notes file and an extension dir).
 
@@ -17,7 +17,7 @@ Upstream then publishes a new commit and the user runs ``hermes update --yes``. 
 publishes a commit that touches a file the user edited in the checkout (the autostash cannot be
 restored cleanly) while an untracked extension dir sits in the tree (#120179).
 
-Assertions read the persisted state directly (bytes, sqlite rows, the cron store) and the next
+Assertions read the persisted state directly (bytes, sqlite rows, the scheduled store) and the next
 wire request a resumed session sends to the fake provider.
 """
 
@@ -196,7 +196,7 @@ def test_user_state_survives_byte_for_byte(world):
         assert after[name]["db"] == before[name]["db"], f"{name} state.db sessions/messages changed by the update"
     for key in ("custom_skill", "plugin", "cron", "badyaml", "ghost"):
         assert after[key] == before[key], f"{key} changed by the update: {before[key]!r} -> {after[key]!r}"
-    assert before["cron"], "harness: no cron job was seeded"
+    assert before["cron"], "harness: no scheduled job was seeded"
 
 
 def test_outdated_configs_migrate_to_the_current_version_keeping_user_values(world):

@@ -64,7 +64,7 @@ class GatewayDiagnosticEvent(_MonitoringEvent):
 
 @dataclass(slots=True)
 class CronExecutionEvent(_MonitoringEvent):
-    """Content-free durable cron execution lifecycle projection."""
+    """Content-free durable scheduled execution lifecycle projection."""
     EVENT: ClassVar[str] = "cron_execution"
     status: str
     job_key: str

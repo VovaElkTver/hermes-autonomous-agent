@@ -1,6 +1,6 @@
 """Read-only mount of stored history no receipt, route or binding restores (#143547 RT-30b/48/49).
 
-Pre-authority cron runs, subagent transcripts, API rows without a binding, and rows a third-party
+Pre-authority scheduled runs, subagent transcripts, API rows without a binding, and rows a third-party
 WebUI or the foreign-session importer wrote: before #106742 a viewer opened any of them straight
 from ``state.db``. Nothing can run them (no frozen policy, no lane, and adopting a WebUI row as
 writable would legitimise its second writer), so the owner mounts them for reading only. The mount

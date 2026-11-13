@@ -1,7 +1,7 @@
-"""A gateway this updater runs INSIDE (cron update in the gateway tree, #100179) accepted a
+"""A gateway this updater runs INSIDE (scheduled update in the gateway tree, #100179) accepted a
 self-restart request and can only restart after the updater exits — so at fleet-matrix time it is
 still on the pre-update code by construction. It used to render STALE and exit 1 on every nightly
-cron update (#119597). Now the ancestor pid set recorded by the restart phase turns that row into
+scheduled update (#119597). Now the ancestor pid set recorded by the restart phase turns that row into
 ``restart_pending``; every OTHER gateway on the old sha keeps its ``stale`` verdict.
 """
 

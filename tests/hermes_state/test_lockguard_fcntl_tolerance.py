@@ -4,7 +4,7 @@ Regression for #118026: the module gated only on ``ImportError``, so a Windows i
 venv has some other module importable as ``fcntl`` (stock CPython for Windows ships none) hit an
 unguarded ``fcntl.F_RDLCK`` read at import time. ``hermes_state`` imports this module at module
 level, so the ``AttributeError`` killed every importer — ``hermes serve`` (Desktop backend
-"exited before port announcement (1)"), ``hermes doctor``, the gateway, cron — before
+"exited before port announcement (1)"), ``hermes doctor``, the gateway, scheduled — before
 ``supported()`` existed to report the guard as unavailable.
 """
 

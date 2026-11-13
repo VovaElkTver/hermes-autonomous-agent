@@ -44,7 +44,7 @@ def plugin(tmp_path, monkeypatch):
 
 
 def _as_session(session_id, fn):
-    tokens = set_session_vars(session_key=f"k-{session_id}", session_id=session_id, source="cli", cron_session="")
+    tokens = set_session_vars(session_key=f"k-{session_id}", session_id=session_id, source="cli", scheduled_session="")
     try:
         return fn()
     finally:

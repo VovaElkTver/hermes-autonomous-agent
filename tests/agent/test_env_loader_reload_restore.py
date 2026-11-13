@@ -1,6 +1,6 @@
 """load_hermes_dotenv() reloads must not clobber values an external secret source resolved (#74265).
 
-The gateway module import, per-turn reloads and cron fires all call ``load_hermes_dotenv()`` again;
+The gateway module import, per-turn reloads and scheduled fires all call ``load_hermes_dotenv()`` again;
 ``load_dotenv(override=True)`` writes the raw ``.env`` placeholder back and the once-per-home source
 pass no longer re-applies, so without the restore the process authenticates with the placeholder.
 """
@@ -67,7 +67,7 @@ def _make_home(tmp_path: Path, monkeypatch, env_text: str, *, preserve: str = ""
 
 def test_source_secret_survives_second_load_hermes_dotenv(tmp_path, monkeypatch):
     """#74265: a source that overrides .env (Bitwarden's default) resolves the ``__BITWARDEN_MANAGED__``
-    placeholder on load 1; load 2 (gateway import / per-turn reload / cron fire) must keep the
+    placeholder on load 1; load 2 (gateway import / per-turn reload / scheduled fire) must keep the
     resolved value instead of writing the placeholder back."""
     home = _make_home(tmp_path, monkeypatch, "GLM_API_KEY=__BITWARDEN_MANAGED__\n")
     # override_existing=True: the source is authoritative over .env, which is what makes the restore legal.

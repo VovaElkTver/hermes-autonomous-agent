@@ -27,7 +27,7 @@ def cp(tmp_path, monkeypatch):
     fake_home = tmp_path / "hermes-home"
     fake_home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(fake_home))
-    # fresh fake config.yaml + topics.yaml + cron/jobs.json inside the sandbox
+    # fresh fake config.yaml + topics.yaml + scheduled/jobs.json inside the sandbox
     (fake_home / "cron").mkdir()
     (fake_home / "config.yaml").write_text("gate: true\n")
     (fake_home / "topics.yaml").write_text("t: 1\n")

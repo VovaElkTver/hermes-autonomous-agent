@@ -81,7 +81,7 @@ def _realpath_or_self(path: str) -> str:
 
     A relative ``sys.path`` entry is resolved through ``os.getcwd()``, which raises
     ``FileNotFoundError`` once the directory the process started in has been removed
-    (a cron delivery child spawned from a reaped scratch workspace, #102941); the CLI
+    (a scheduled delivery child spawned from a reaped scratch workspace, #102941); the CLI
     then dies before it can parse argv.
     """
     try:

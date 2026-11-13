@@ -39,10 +39,10 @@ def administrator_mode_enabled() -> bool:
     return bool(_cfg("administrator_mode", False))
 
 
-def cron_runtime_enabled() -> bool:
-    """Root-flag gate for everything cron (Вл 09.11: «все наши придумки под отдельным
+def scheduled_runtime_enabled() -> bool:
+    """Root-flag gate for everything scheduled (Вл 09.11: «все наши придумки под отдельным
     корневым конфиг флагом»). In agent-first mode (default ON) the fork carries NO cron:
-    no toolset surface, no ticker thread, no cron REST/webhook surfaces. Flip
+    no toolset surface, no ticker thread, no scheduled REST/webhook surfaces. Flip
     ``autonomous_mode: false`` to get donor upstream behavior wholesale."""
     return not autonomous_mode_enabled()
 

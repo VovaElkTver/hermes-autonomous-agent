@@ -1290,7 +1290,7 @@ class TestFinalFrameAckTimeoutSemantics:
 
 @pytest.mark.asyncio
 async def test_oversized_cron_output_is_sent_as_successive_markdown_replies():
-    """The router hands the full cron payload over and every chunk goes out on the cached reply
+    """The router hands the full scheduled payload over and every chunk goes out on the cached reply
     req_id (groups cannot send proactively), each through the rate-limited per-chat queue,
     instead of the tail being sliced off at 4000 chars."""
     from gateway.config import GatewayConfig

@@ -1,9 +1,9 @@
-"""Blueprints: shareable plain-language automations layered on skills + cron.
+"""Blueprints: shareable plain-language automations layered on skills + scheduled.
 
 A blueprint is NOT a new object type: it is an ordinary skill whose frontmatter declares
 ``metadata.hermes.blueprint`` (``schedule`` required; optional ``deliver`` [default "origin"],
 ``prompt``, ``no_agent``, ``model``, ``provider``, ``enabled_toolsets``), so it rides the whole
-skills-hub pipeline for free. This module only bridges that block to cron ``create_job()``,
+skills-hub pipeline for free. This module only bridges that block to scheduled ``create_job()``,
 plus the inverse (``export_blueprint``) back to a SKILL.md.
 """
 
@@ -123,8 +123,8 @@ def blueprint_spec_for_installed(skill_name: str) -> Optional[BlueprintSpec]:
 
 
 def blueprint_to_job_spec(spec: BlueprintSpec, *, name: Optional[str] = None) -> dict[str, Any]:
-    """Legacy ``cron.jobs.create_job`` kwargs for a spec — the single translation the
-    suggestion path and ``export_blueprint`` round-trips relied on. Cron was excised;
+    """Legacy ``scheduled.jobs.create_job`` kwargs for a spec — the single translation the
+    suggestion path and ``export_blueprint`` round-trips relied on. Scheduled was excised;
     kept because SKILL.md blueprint metadata still carries this shape."""
     return {
         "prompt": spec.prompt, "schedule": spec.schedule, "name": name or f"blueprint:{spec.skill_name}",
@@ -135,9 +135,9 @@ def blueprint_to_job_spec(spec: BlueprintSpec, *, name: Optional[str] = None) ->
 
 
 def register_blueprint_suggestion(spec: BlueprintSpec) -> Optional[dict[str, Any]]:
-    """Register an installed blueprint as a Suggested Cron Job (never auto-scheduled).
+    """Register an installed blueprint as a Suggested Scheduled Job (never auto-scheduled).
 
-    Cron was excised from this branch (no scheduler, no suggestions store), so every
+    Scheduled was excised from this branch (no scheduler, no suggestions store), so every
     installation reports "skipped": None.
     """
     del spec
@@ -145,7 +145,7 @@ def register_blueprint_suggestion(spec: BlueprintSpec) -> Optional[dict[str, Any
 
 
 def export_blueprint(job: dict[str, Any], body: str, *, blueprint_name: Optional[str] = None) -> str:
-    """Inverse of ``create_blueprint_job``: render a cron job as a SKILL.md (with a
+    """Inverse of ``create_blueprint_job``: render a scheduled job as a SKILL.md (with a
     ``metadata.hermes.blueprint`` block) ready for ``hermes skills publish``.
     ``body`` becomes the SKILL.md body; its first line is the description."""
     import hermes_yaml as yaml

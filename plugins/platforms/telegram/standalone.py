@@ -402,7 +402,7 @@ async def standalone_send(pconfig, chat_id, message, *, thread_id=None, media_fi
                           notify=None, **_ignored):
     """``standalone_sender_fn``: the target profile's token (``pconfig.token``, else its scoped
     ``TELEGRAM_BOT_TOKEN``) and ``extra`` (base_url, proxy, fallback IPs, rich_messages, link
-    previews); ``notify`` rings under the ``important`` notification mode (cron.delivery.notify)."""
+    previews); ``notify`` rings under the ``important`` notification mode (scheduled.delivery.notify)."""
     token = getattr(pconfig, "token", None)
     if not token:
         from agent.secret_scope import get_secret  # profile-scoped: never borrow another profile's token

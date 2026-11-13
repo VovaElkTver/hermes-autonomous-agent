@@ -149,7 +149,7 @@ def register(ctx) -> None:
         install_hint="QQBot: aiohttp/httpx missing or QQ_APP_ID/QQ_CLIENT_SECRET not configured",
         setup_fn=setup_qqbot,
         emoji="🐧",
-        cron_deliver_env_var="QQBOT_HOME_CHANNEL",
+        scheduled_deliver_env_var="QQBOT_HOME_CHANNEL",
         standalone_sender_fn=standalone_send,
         # QQ's dm/group policy is YAML-only (no env var); QQ_ALLOW_ALL_USERS is still the opt-in.
         platform_hint=_PLATFORM_HINT,

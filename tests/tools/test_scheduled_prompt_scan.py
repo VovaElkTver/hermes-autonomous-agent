@@ -1,4 +1,4 @@
-"""Regression tests for cron prompt injection scanner bypass.
+"""Regression tests for scheduled prompt injection scanner bypass.
 
 The original regex `ignore\\s+(previous|all|above|prior)\\s+instructions`
 only allowed ONE word between "ignore" and "instructions", so multi-word
@@ -23,12 +23,12 @@ class TestMultiWordInjectionBypass:
         assert _scan_cron_prompt("Run all migrations") == ""
 
 class TestInvisibleUnicodeParity:
-    """#35075: the cron runtime tripwire must use the same invisible-unicode
+    """#35075: the scheduled runtime tripwire must use the same invisible-unicode
     set as the install-time scanner, or an obfuscated directive can slip past
     one gate while being caught by the other."""
 
     def test_cron_set_matches_canonical(self):
-        """Invariant: the cron-local set IS the canonical install-time set."""
+        """Invariant: the scheduled-local set IS the canonical install-time set."""
         from tools.cronjob_prompt_scan import _CRON_INVISIBLE_CHARS
         from tools.threat_patterns import INVISIBLE_CHARS
         assert _CRON_INVISIBLE_CHARS == INVISIBLE_CHARS

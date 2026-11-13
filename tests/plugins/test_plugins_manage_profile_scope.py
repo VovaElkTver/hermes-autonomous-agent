@@ -1,6 +1,6 @@
 """plugins.manage optional ``profile`` param — per-profile plugins scoping.
 
-Mirrors ``cron.manage`` / ``mcp.servers.*``: when a ``profile`` is passed the
+Mirrors ``scheduled.manage`` / ``mcp.servers.*``: when a ``profile`` is passed the
 handler resolves ``get_profile_dir(profile)`` and wraps the action dispatch in
 ``set_hermes_home_override`` / ``reset_hermes_home_override``. Because
 ``_plugins_dir()`` keys off ``get_hermes_home()``, the list action must then

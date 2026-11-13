@@ -172,7 +172,7 @@ async def _handed_off_bot_chat(tmp_path):
 
 @pytest.mark.asyncio
 async def test_a_handed_off_bot_chat_stays_the_bots_chat_while_its_lane_holds_it(tmp_path):
-    """Bot Mode's one canonical chat per profile: a Bot or cron delivery after the restart goes to
+    """Bot Mode's one canonical chat per profile: a Bot or scheduled delivery after the restart goes to
     the handed-off Bot Chat on its lane; it is never renamed aside for a freshly minted one."""
     from gateway.session_authority import initialize_session_authority
     from gateway.session_bot import _target, displaceable_bot_chat

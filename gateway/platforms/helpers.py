@@ -363,7 +363,7 @@ async def send_chunks(chunks: list, send_one) -> Any:
 
     A failure after earlier chunks landed carries the ``partial_overflow`` contract that
     ``BasePlatformAdapter._is_partial_delivery`` reads, so no caller (send retry, plain-text
-    fallback, cron standalone fallback) re-sends the head the recipient already has.
+    fallback, scheduled standalone fallback) re-sends the head the recipient already has.
     """
     from gateway.platforms.base import SendResult
     result = SendResult(success=False, error="nothing to send")

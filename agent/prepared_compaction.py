@@ -211,7 +211,7 @@ def _worker_copy(compressor: Any) -> Any:
 
 
 def _blocked_for_platform(agent: Any, origin: str) -> bool:
-    """A turn-end pass in a session that ends with its turn (a cron run, a delegated child, a one-shot) is never
+    """A turn-end pass in a session that ends with its turn (a scheduled run, a delegated child, a one-shot) is never
     used."""
     if origin != "turn-end":
         return False

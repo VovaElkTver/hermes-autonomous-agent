@@ -169,13 +169,13 @@ async def test_multiplex_profiles_independent_silence_narration_filtering(tmp_pa
     assert res_b == {"success": True}
 
 
-# --- Cron artifacts are exempt ----------------------------------------------
+# --- Scheduled artifacts are exempt ----------------------------------------------
 #
-# The filter exists to stop bot-to-bot mirror loops of *model chatter*. Cron
+# The filter exists to stop bot-to-bot mirror loops of *model chatter*. Scheduled
 # output is an artifact: a job that legitimately emits "..." (a quiet script,
 # a terse digest) has no loop partner, and dropping it while returning
-# {"success": True} produced a cron the scheduler logged as delivered and the
-# user never received (#77763). Cron sends carry job_id in metadata.
+# {"success": True} produced a scheduled the scheduler logged as delivered and the
+# user never received (#77763). Scheduled sends carry job_id in metadata.
 
 
 @pytest.mark.asyncio

@@ -1020,7 +1020,7 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
         enabled_toolsets=enabled_toolsets, disabled_toolsets=disabled_toolsets, quiet_mode=agent.quiet_mode) or [])
     agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools} if agent.tools else set()
     # Kanban guidance is session-static for the dispatcher-owned worker only. Profiles may
-    # expose kanban_show interactively, and children/cron runs inherit the env var, without
+    # expose kanban_show interactively, and children/scheduled runs inherit the env var, without
     # owning a task.
     from agent.delegation_context import owned_kanban_task
     from agent.prompt_builder import KANBAN_GUIDANCE
@@ -1170,7 +1170,7 @@ def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
     # Flush/background agents can still pass enabled_toolsets=["memory"] so the built-in file store exists
     # and the memory tool does not fail with store=None (#65429). A toolset on disabled_toolsets is not a
     # request: a caller that denylists memory while its default toolset still names it must not get
-    # MEMORY.md loaded by an enabled-only check. (Cron agents now run with skip_memory=False and take the
+    # MEMORY.md loaded by an enabled-only check. (Scheduled agents now run with skip_memory=False and take the
     # normal path here.)
     _memory_toolset_requested = (
         "memory" in (agent.enabled_toolsets or [])
@@ -1957,7 +1957,7 @@ def _warn_nonagentic_hermes_model(agent):
             _user_msg = (
                 "⚠ Nous Research Hermes 3 & 4 models are NOT agentic — they "
                 "lack reliable tool-calling for agent workflows (delegation, "
-                "cron, proactive tools). Consider an agentic model instead "
+                "scheduled, proactive tools). Consider an agentic model instead "
                 "(Claude, GPT, Gemini, Qwen-Coder, etc.)."
             )
             agent._emit_warning(_user_msg)

@@ -246,7 +246,7 @@ def _load_segments_config() -> dict[str, Any]:
     max_turns = 0
     try:
         # Never import gateway.run here: its import-time env setup (_HERMES_GATEWAY, HERMES_QUIET,
-        # TERMINAL_CWD := home) rebinds a CLI/TUI/cron host — hung approvals (#87183), `hermes -z`
+        # TERMINAL_CWD := home) rebinds a CLI/TUI/scheduled host — hung approvals (#87183), `hermes -z`
         # running in $HOME without the launch dir's AGENTS.md (#95577). Same reader it delegates to.
         from hermes_cli.config_effective import load_user_config_effective
 

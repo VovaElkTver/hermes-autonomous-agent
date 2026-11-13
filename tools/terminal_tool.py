@@ -105,7 +105,7 @@ def set_approval_callback(cb):
 
 def _current_session_key() -> str:
     """Active gateway/WebUI session key, or "" outside sessions (ContextVar with
-    the ``get_session_env`` os.environ fallback for CLI/cron/tests)."""
+    the ``get_session_env`` os.environ fallback for CLI/scheduled/tests)."""
     from gateway.session_context import get_session_env
 
     return get_session_env("HERMES_SESSION_KEY", "")
@@ -462,8 +462,8 @@ def _docker_session_isolation_enabled() -> bool:
 def _routed_home_task_key(profile_scoped: bool) -> Optional[str]:
     """Key for a session-less task serving a routed (non-launch) profile home, else None.
 
-    A multiplexed host runs every profile's cron jobs without a session key; collapsing them all onto
-    ``"default"`` made profile B's cron tool calls reuse the environment the launch profile's job
+    A multiplexed host runs every profile's scheduled jobs without a session key; collapsing them all onto
+    ``"default"`` made profile B's scheduled tool calls reuse the environment the launch profile's job
     created (its ``.env`` residue, its bridged ``TERMINAL_*``, its shell), so B ran with A's settings.
     Persistent Docker keys the profile name exactly like B's session-bound work, so B keeps ONE
     container instead of a second one per home path.
@@ -484,7 +484,7 @@ def _routed_home_task_key(profile_scoped: bool) -> Optional[str]:
 
 
 def _sessionless_container_key(profile_scoped: bool) -> str:
-    """Container key when no session is bound (CLI, cron, kanban dispatcher workers).
+    """Container key when no session is bound (CLI, scheduled, kanban dispatcher workers).
 
     A routed home override keeps its existing key. Persistent Docker whose
     process home is a named profile reuses ``profile:<name>`` — the same key
@@ -531,7 +531,7 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
        default-profile gateway sessions share ONE container; other backends key
        ``session:<key>`` so switching profiles can't reuse another profile's
        SSHEnvironment on the wrong host.
-    4. No session key (CLI, cron, kanban workers): ``shared:<key>`` when opted in
+    4. No session key (CLI, scheduled, kanban workers): ``shared:<key>`` when opted in
        (else a CLI run of a keyed profile would split from its gateway sessions); a
        routed multiplexed profile keys its own home; persistent Docker on a
        named-profile process reuses ``profile:<name>`` (same sandbox as that
@@ -705,7 +705,7 @@ def _ensure_terminal_env_bridged() -> None:
 
     CLI, gateway and TUI/dashboard PTY launches bridge ``terminal.*`` into env vars
     at startup; processes that skip those paths (``hermes serve``, Desktop
-    in-process agents, desktop cron ticker, ACP) would otherwise fall back to the
+    in-process agents, desktop scheduled ticker, ACP) would otherwise fall back to the
     local backend even when config selects docker — running on the host the user
     meant to sandbox. Explicit keys in the ``terminal`` section override matching
     env values (possibly stale from ``hermes setup``); env values for omitted keys
@@ -1570,7 +1570,7 @@ def terminal_tool(
             # The supervised-gateway identity probe ends in a kernel process query
             # (psutil create_time) that has wedged for the better part of an hour on
             # macOS; ``env.execute`` is already behind ``run_bounded_sync`` but this
-            # chain ran ahead of it, so the tool call never returned and the cron
+            # chain ran ahead of it, so the tool call never returned and the scheduled
             # slot stayed occupied (#111922). Share the command's own deadline. A
             # guard that never rendered a verdict fails CLOSED: these checks apply
             # unconditionally (``force`` cannot bypass them), so the command is

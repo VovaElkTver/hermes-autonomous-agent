@@ -1,5 +1,5 @@
 """Self-referential .env lines (``PATH=/x:${PATH}``) must resolve once per process, not grow on every reload
-(#109902: gateway per-turn and cron per-fire reloads grew PATH until child spawns died with E2BIG)."""
+(#109902: gateway per-turn and scheduled per-fire reloads grew PATH until child spawns died with E2BIG)."""
 
 import os
 
@@ -31,7 +31,7 @@ def test_same_file_reloaded_three_times_leaves_path_unchanged(home):
 
 
 def test_alternating_project_env_and_none_stays_stable(home, tmp_path):
-    """The gateway reloads with a project .env, cron without: both call forms share one process."""
+    """The gateway reloads with a project .env, scheduled without: both call forms share one process."""
     (home / ".env").write_text("PATH=/x:${PATH}\n")
     project_env = tmp_path / "project.env"
     project_env.write_text("UNRELATED=1\n")

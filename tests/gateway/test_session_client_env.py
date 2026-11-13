@@ -72,7 +72,7 @@ async def test_each_session_runs_its_own_clients_ephemeral_prompt(tmp_path, monk
             lambda platform, chat_id: GatewayConfigLoadersMixin._load_ephemeral_system_prompt())
         assert _ephemeral_prompt(owner, second, 'chat') == 'SECOND'
         assert _ephemeral_prompt(owner, bare, 'chat') is None
-        # Messaging/cron (no local policy) and a session whose client sent nothing (Desktop, or one
+        # Messaging/scheduled (no local policy) and a session whose client sent nothing (Desktop, or one
         # created before this change) keep the gateway's own environment.
         assert GatewayConfigLoadersMixin._load_ephemeral_system_prompt() == 'FIRST'
         _, desktop = _create(owner, connection.actor, home, 'd')
@@ -115,7 +115,7 @@ async def test_each_session_resolves_its_own_clients_provider_request(tmp_path, 
             assert resolve_requested_provider() == 'openrouter'
         with policy_scope(bare, authority=owner):
             assert resolve_requested_provider() == 'auto'
-        assert resolve_requested_provider() == 'nous'  # the gateway's own (messaging/cron)
+        assert resolve_requested_provider() == 'nous'  # the gateway's own (messaging/scheduled)
     finally:
         await connection.close()
         owner.db.close()
@@ -337,7 +337,7 @@ async def test_configured_toolchain_names_a_local_client_omitted_never_leak_from
         assert seen(mine) == (['/a'] * 3, '/client/bin', '/configured')
         assert seen(other) == ([None] * 3, '/client/bin', '/configured')
         assert seen(bare) == ([None] * 3, '/daemon/bin', '/configured')
-        assert _make_run_env({})['GEM_HOME'] == '/alpha'  # messaging/cron/Desktop: the gateway's own
+        assert _make_run_env({})['GEM_HOME'] == '/alpha'  # messaging/scheduled/Desktop: the gateway's own
     finally:
         await connection.close()
         owner.db.close()

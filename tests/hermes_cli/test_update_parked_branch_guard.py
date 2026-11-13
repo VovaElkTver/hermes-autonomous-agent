@@ -126,7 +126,7 @@ def test_unmerged_commits_switch_with_kept_notice(repo_pair):
     """Commits on the parked branch not in origin/main: still safe to switch
     (checkout keeps them on the branch) — reason carries the count so the
     caller prints the loud 'kept' notice. Non-interactive callers (desktop
-    update button, gateway /update, cron) depend on this: they cannot
+    update button, gateway /update, scheduled) depend on this: they cannot
     resolve a skip."""
     (repo_pair / "feature.txt").write_text("unmerged work\n", encoding="utf-8")
     _git(repo_pair, "add", "feature.txt")
