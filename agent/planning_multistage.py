@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable, Protocol, TypeVar
 
@@ -207,6 +209,46 @@ REVIEW_PROMPT = (
 
 
 # ---------------------------------------------------------------- runtime adapter seam
+@dataclass(frozen=True)
+class PlannerConfig:
+    """Stage aliases: empty string = inherit the parent's routing (no pin).
+    max_revisions counts REVIEW-driven replans; format_retries is per-call JSON repair."""
+
+    contract_alias: str = ""
+    researcher_alias: str = ""
+    planner_alias: str = ""
+    reviewer_alias: str = ""
+    max_revisions: int = 2
+    format_retries: int = 1
+    stage_timeout: float = 600.0
+
+
+_PLANNING_RUNS_DIRNAME = "planning-runs"
+
+
+def build_planner(parent_agent: Any, planning_cfg: dict) -> MultiStagePlanner:
+    """Assemble a ready planner from the ``planning`` config section (v0.5): aliases, budgets,
+    artifact store under <home>/.hermes/planning-runs."""
+    config = PlannerConfig(
+        contract_alias=str(planning_cfg.get("contract_alias") or ""),
+        researcher_alias=str(planning_cfg.get("researcher_alias") or ""),
+        planner_alias=str(planning_cfg.get("planner_alias") or ""),
+        reviewer_alias=str(planning_cfg.get("reviewer_alias") or ""),
+        max_revisions=int(planning_cfg.get("max_revisions", 2)),
+        format_retries=int(planning_cfg.get("format_retries", 1)),
+        stage_timeout=float(planning_cfg.get("stage_timeout", 600.0)),
+    )
+    base = str(planning_cfg.get("runs_dir") or os.path.join(os.path.expanduser("~"), ".hermes", _PLANNING_RUNS_DIRNAME))
+    return MultiStagePlanner(
+        config=config,
+        run_stage=HermesSubagentRunner(parent_agent=parent_agent, aliases={
+            "contract": config.contract_alias, "researcher": config.researcher_alias,
+            "planner": config.planner_alias, "reviewer": config.reviewer_alias,
+        }, timeout=config.stage_timeout),
+        store=FileArtifactStore(base),
+    )
+
+
 class StageRunner(Protocol):
     """Contract: run one role in a fresh context and return the final assistant TEXT.
 
@@ -232,12 +274,14 @@ class HermesSubagentRunner:
         self.aliases = dict(aliases)
         self.timeout = timeout
 
-    def _credentials_for(self, model_alias: str) -> dict:
+    def _credentials_for(self, model_alias: str) -> dict | None:
+        if not model_alias or not model_alias.strip():
+            return None  # inherit the parent's routing entirely (delegation backend default)
         from hermes_cli.model_switch import resolve_alias
 
-        resolved_model = model_alias
+        resolved_model = model_alias.strip()
         try:
-            resolved = resolve_alias(model_alias, current_provider=getattr(self.parent_agent, "provider", None) or "")
+            resolved = resolve_alias(resolved_model, current_provider=getattr(self.parent_agent, "provider", None) or "")
             if resolved:
                 resolved_model = resolved[1]
         except Exception:

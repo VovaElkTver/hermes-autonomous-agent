@@ -232,3 +232,51 @@ def test_runner_child_failure_and_empty_summary(monkeypatch):
         runner = HermesSubagentRunner(parent_agent=Parent(), aliases={})
         with pytest.raises(RuntimeError):
             runner(role="contract", model_alias="x", system_prompt="S", user_prompt="U")
+
+
+# ---------------- v0.5 entry point: tool + trigger audit ----------------
+
+import agent.planning_multistage as pm
+from agent.plan_prompt import build_plan_multistage_prompt
+import tools.planning_tool as pt
+
+
+def test_build_planner_uses_default_store_and_inherits_by_default(tmpdir):
+    planner = pm.build_planner(Parent(), {"multistage": True, "runs_dir": str(tmpdir)})
+    assert planner.store.run_dir.startswith(str(tmpdir))
+    assert planner.config.max_revisions == 2  # defaults survive an empty config section
+    assert planner.run_stage._credentials_for("") is None  # empty alias = inherit routing
+
+
+def test_plan_multistage_flag_off_short_circuits(monkeypatch):
+    monkeypatch.setattr(pt, "_load_planning_cfg", dict)
+    out = json.loads(pt.plan_multistage({"task": "x"}, parent_agent=Parent()))
+    assert "multistage" in out["error"]
+
+
+def test_plan_multistage_happy_path_runs_pipeline(monkeypatch, tmpdir):
+    monkeypatch.setattr(pt, "_load_planning_cfg",
+                        lambda: {"multistage": True, "runs_dir": str(tmpdir)})
+    script = [CONTRACT_OK, RESEARCH_OK, STRATEGY_OK, PLAN_OK, REVIEW_OK]
+
+    def fake_delegate(**kw):
+        return json.dumps({"results": [{"status": "completed", "summary": script.pop(0)}]},
+                          ensure_ascii=False)
+
+    monkeypatch.setattr(dt, "delegate_task", fake_delegate)
+    out = json.loads(pt.plan_multistage({"task": "восстановление состояния"}, parent_agent=Parent()))
+    assert out["status"] == "approved" and out["artifact_dir"]
+
+
+def test_skip_record_is_appended(tmpdir, monkeypatch):
+    log = tmpdir.join("skip.log")
+    monkeypatch.setattr(pt, "_SKIP_LOG_PATH", str(log))
+    pt._skip_record("trivial one-step task")
+    pt._skip_record("user said so")
+    lines = log.read().strip().splitlines()
+    assert len(lines) == 2 and json.loads(lines[1])["reason"] == "user said so"
+
+
+def test_gateway_multistage_prompt_mentions_tool():
+    prompt = build_plan_multistage_prompt("добавить восстановление")
+    assert "plan_multistage" in prompt and "[/plan" in prompt
