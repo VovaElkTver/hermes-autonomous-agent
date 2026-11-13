@@ -164,12 +164,12 @@ def operator_workspace_roots() -> set[str]:
     from tools.terminal_scope import TerminalPolicyUnavailable
     from utils import is_truthy_value
     # Work the model can schedule has no operator anchor: a kanban worker is launched in (with
-    # TERMINAL_CWD =) the task's workspace and a cron run's session cwd is the job's workdir, and the
-    # kanban_create / cronjob tools let the model pick both.
+    # TERMINAL_CWD =) the task's workspace and a scheduled run's session cwd is the job's workdir, and the
+    # kanban_create / scheduled job tools let the model pick both.
     if os.environ.get("HERMES_KANBAN_TASK"):
         return set()
     anchors = [os.getcwd]
-    if not is_truthy_value(get_session_env("HERMES_CRON_SESSION", "")):
+    if not is_truthy_value(get_session_env("HERMES_SCHEDULED_SESSION", "")):
         anchors.append(resolve_agent_cwd)
     home = normalize_path("~")
     roots: set[str] = set()

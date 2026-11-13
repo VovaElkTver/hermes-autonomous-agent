@@ -58,7 +58,7 @@ class TestSubdirectoryHintTracker:
         assert "Frontend rules" in result
 
     def test_disabled_tracker_never_injects_hints(self, project):
-        """A session that skips context files (cron without a workdir) must not have the same
+        """A session that skips context files (scheduled without a workdir) must not have the same
         files spliced into tool results, where they leak into exact-output deliveries (#9441)."""
         tracker = SubdirectoryHintTracker(working_dir=str(project), enabled=False)
         assert tracker.check_tool_call("read_file", {"path": str(project / "frontend" / "index.ts")}) is None

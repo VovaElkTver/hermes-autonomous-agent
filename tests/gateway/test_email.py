@@ -1440,7 +1440,7 @@ class TestSenderAuthentication(unittest.TestCase):
 
 def test_oversized_cron_output_is_delivered_as_one_whole_email():
     """No 4000-char truncation footer pointing at a file on the gateway host: the router hands
-    the whole cron payload to the email adapter, which sends it as a single message."""
+    the whole scheduled payload to the email adapter, which sends it as a single message."""
     import asyncio
     from gateway.config import GatewayConfig, PlatformConfig
     from gateway.delivery import DeliveryRouter

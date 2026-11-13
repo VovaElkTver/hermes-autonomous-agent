@@ -100,14 +100,14 @@ def test_self_held_lock_appends_writer_thread_candidates(caplog, tmp_path, monke
 
     def fake_candidates(exclude_tid=None, **_kw):
         seen["exclude_tid"] = exclude_tid
-        return ["[cron-scheduler] _run@scheduler_thread.py:34"]
+        return ["[scheduled-scheduler] _run@scheduler_thread.py:34"]
 
     monkeypatch.setattr(hsl, "state_db_write_lock_holders", fake_holders)
     monkeypatch.setattr(hsl, "candidate_writer_threads", fake_candidates)
     with caplog.at_level(logging.WARNING, logger="hermes_state_lockowners"):
         hsl.log_write_lock_holders(tmp_path / "state.db", 20)
     msg = caplog.text
-    assert "same-PID writer candidates: [cron-scheduler]" in msg
+    assert "same-PID writer candidates: [scheduled-scheduler]" in msg
     assert seen["exclude_tid"] == threading_get_ident()
 
 

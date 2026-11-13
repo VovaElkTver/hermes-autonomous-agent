@@ -5,7 +5,7 @@ nothing new; each repeat is a full model turn. After ``_PROMOTE_AFTER`` consecut
 with no new output, this promotes the session to ``notify_on_complete`` (wiring gateway delivery when
 the process was started silently) and tells the model to stop checking: the exit arrives as a message.
 
-Only where a completion can actually reach this agent: one-shot runners (``hermes -z``), cron, Kanban
+Only where a completion can actually reach this agent: one-shot runners (``hermes -z``), scheduled, Kanban
 workers, stateless HTTP sessions, delegated subagents, profiles whose effective
 ``display.background_process_notifications`` is ``off``, and callers that do not own the process's
 completion (another session's process, a subagent's un-handed-off process) keep the old result, since

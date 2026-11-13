@@ -235,5 +235,5 @@ def test_async_delegation_ledger_writes_inside_relay_tool_persist_off_relay_loop
         ledger.unscheduled("d-1")
         return {"ok": True}
 
-    relay_tools.execute("cronjob", {"action": "run"}, tool, session_id=SESSION)
+    relay_tools.execute("scheduled job", {"action": "run"}, tool, session_id=SESSION)
     _assert_persisted_off_loop(store, owner, caplog, "delegation.dispatch", "delegation.unscheduled")

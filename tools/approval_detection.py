@@ -85,9 +85,9 @@ _COMMAND_TAIL = r'(?:\s*(?:&&|\|\||;).*)?$'
 _WRITE_TARGET_BOUNDARY = r'(?=[\s;&|<>"\']|$)'
 
 # ---- Hardline (unconditional) blocklist ---------------------------------------------------
-# Commands that NEVER run via the agent, regardless of --yolo, approvals.mode=off, or cron approve
+# Commands that NEVER run via the agent, regardless of --yolo, approvals.mode=off, or scheduled approve
 # mode — a floor below yolo. Applies only to environments that can damage the host (local, ssh,
-# container-host cron); containerized backends already bypass the dangerous-command layer.
+# container-host scheduled); containerized backends already bypass the dangerous-command layer.
 # Deliberately tiny: only things with no recovery path (root wipe, raw block device writes,
 # shutdown, DoS). Recoverable operations (git reset --hard, chmod -R 777, curl|sh) stay in
 # DANGEROUS_PATTERNS.

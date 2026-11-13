@@ -90,7 +90,7 @@ class HostedRoomAuthorityRPC:
         config = _load_gateway_config()
         # A room has no clarification reply (group controls expose approvals only), so a member
         # turn that called clarify would block for clarify_timeout with its question unseen. As
-        # for cron, freeze it out; the member asks its question in the room reply instead.
+        # for scheduled, freeze it out; the member asks its question in the room reply instead.
         agent = dict(config.get('agent') or {})
         agent['disabled_toolsets'] = sorted(
             set(parse_config_string_list(agent.get('disabled_toolsets'))) | {'clarify'})

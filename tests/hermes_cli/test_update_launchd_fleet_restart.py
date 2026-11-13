@@ -214,7 +214,7 @@ class TestGetServicePidsScoping:
         assert gw._get_service_pids(all_profiles=True) == {100, 200}
 
     def test_default_stays_scoped_to_current_profile(self, monkeypatch):
-        """Regression guard: default-scope callers (gateway status, cron,
+        """Regression guard: default-scope callers (gateway status, scheduled,
         stop_profile_gateway's orphan reaper) must NOT start seeing sibling
         service PIDs — the reaper SIGTERM/SIGKILLs what they feed it."""
         self._wire(monkeypatch)

@@ -271,7 +271,7 @@ class ClientLifecycleMixin:
                 request_interrupt()
         except Exception:
             logger.debug("Abandoned-worker drain: codex interrupt failed", exc_info=True)
-        # Inline (cron-style) request abort hook, when registered.
+        # Inline (scheduled-style) request abort hook, when registered.
         try:
             abort_active = getattr(self, "_active_request_abort", None)
             if callable(abort_active):

@@ -339,7 +339,7 @@ def _verify_fleet_after_update(restart, *, _pre_update_plan, _windows_gateway_re
     # Check if any pre-update serve/dashboard runtimes survived on pre-update code generations (#100479).
     # This is the SUCCESS-path twin of the abort-recovery probe above: the restart phase only restarts
     # units, so an sshd-spawned `serve --isolated` or a manual `hermes serve` (no unit) is left running its
-    # pre-update sys.modules graph — and its cron ticker keeps firing agent jobs that ImportError on every
+    # pre-update sys.modules graph — and its scheduled ticker keeps firing agent jobs that ImportError on every
     # symbol added in the pulled range. The rows also feed the plan-vs-execution reconciliation below, so a
     # survivor is escalated (an owed gateway_restart follow-up) instead of merely printed.
     _stale_serve_rows: list | None = None

@@ -332,7 +332,7 @@ async def async_owner_scope(authority):
 def owner_scope(authority, *, hydrate_secrets=False):
     """Runtime scope of the profile that owns *authority* — under multiplex only.
 
-    Owner-side handlers (RPC dispatch, cron submit, admitted execution) must read config, jobs
+    Owner-side handlers (RPC dispatch, scheduled submit, admitted execution) must read config, jobs
     and policy for the OWNING profile, never the launch profile's ambient scope. A
     single-profile gateway keeps its ambient scope byte-for-byte: entering a scope there
     would read the profile's config/.env for every handler, including bypass (--safe-mode)

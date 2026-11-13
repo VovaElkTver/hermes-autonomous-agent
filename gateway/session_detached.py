@@ -121,7 +121,7 @@ def session_env_source(runner, source):
     if key is None:
         if getattr(source, 'shared_session', False) and source.chat_type != 'dm':
             # A shared chat's route has no user (Telegram observe commands keep the sender only for
-            # slash access): kanban/cron/send_message rebuild routes from these vars. The sender
+            # slash access): kanban/scheduled/send_message rebuild routes from these vars. The sender
             # still reaches tools as HERMES_SESSION_ACTOR_*, bound from the SessionContext.
             return dataclasses.replace(source, user_id=None, user_id_alt=None, user_name=None)
         return source

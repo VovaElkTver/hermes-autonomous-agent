@@ -383,7 +383,7 @@ def test_sessionless_home_outside_the_root_stays_default(monkeypatch, tmp_path):
 
 def test_named_launch_profile_chats_desktop_and_workers_share_one_container(monkeypatch, tmp_path):
     """A gateway launched as a named profile stamps no profile on its own chats; those chats, the
-    profile's Desktop sessions and its session-less cron/kanban work must all key one container."""
+    profile's Desktop sessions and its session-less scheduled/kanban work must all key one container."""
     from gateway.session_context import clear_session_vars, reset_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)

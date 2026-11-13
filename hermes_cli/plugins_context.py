@@ -216,7 +216,7 @@ class PluginContext(PluginCapabilityCtxMixin):
             return "default"
 
     def current_cron_execution(self) -> Any:
-        """Legacy plugin-API hook: no cron run can execute now that the cron
+        """Legacy plugin-API hook: no scheduled run can execute now that the scheduled
         package is excised, so this is always ``None``."""
         return None
 
@@ -797,7 +797,7 @@ class PluginContext(PluginCapabilityCtxMixin):
 
     def emit(self, event: str, payload: Optional[dict] = None) -> int:
         """Publish bare *event* as ``<plugin_key>:<event>`` (namespace FORCED to this plugin); return
-        the subscriber count scheduled. Any ``':'`` in the name (``hermes:x`` is reserved for core,
+        how many subscribers were queued. Any ``':'`` in the name (``hermes:x`` is reserved for core,
         foreign namespaces forbidden) raises ``ValueError``. Delivery is fire-and-forget via a
         single-worker queue: order preserved, a blocking subscriber cannot stall the emitter."""
         plugin_key = self.plugin_id

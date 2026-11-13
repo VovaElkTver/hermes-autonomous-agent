@@ -5,7 +5,7 @@ every native tool call dispatched by the agent adds ONE event
 ``{position_id, turn_id/session, toolset.tool, args_digest, result_digest,
 ok|error_code, ts, idem_key}`` to the agency-state.db ledger through the
 toolset's existing ``store.submit()`` — same atomicity, same envelope,
-monotonic seq. No new DB, no new files, no cron, no background threads:
+monotonic seq. No new DB, no new files, no scheduled, no background threads:
 emission is synchronous inside the tool call.
 
 Rules baked in here:

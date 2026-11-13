@@ -317,7 +317,7 @@ def test_telegram_named_private_dm_topic_is_parsed() -> None:
     assert _parse_target_ref("telegram", "722341991:Debug") == ("722341991", "Debug", True)
     assert _parse_target_ref("telegram", "722341991:17") == ("722341991", "17", True)
     assert _parse_target_ref("telegram", "-1001234567890:Debug") == (None, None, False)
-    # Only the live cron router resolves the name; the REST sender (send_message, cron's
+    # Only the live scheduled router resolves the name; the REST sender (send_message, scheduled's
     # standalone fallback) must say so instead of failing on int("Debug").
     pconfig, bot = SimpleNamespace(token="token", extra={}), AsyncMock()
     with patch("plugins.platforms.telegram.standalone._telegram_bot", return_value=bot), \
@@ -505,7 +505,7 @@ def test_unresolved_builtin_target_keeps_directory_error() -> None:
 
 
 def test_unresolved_builtin_target_passes_through_when_requested() -> None:
-    """Cron and react keep the old pass-through behavior for unresolved
+    """Scheduled and react keep the old pass-through behavior for unresolved
     built-in targets: with no model in the loop to react to an error, the
     raw id must reach the adapter, as it did before resolve_send_target
     took over these callers."""
@@ -546,14 +546,14 @@ def test_photon_group_guid_passes_through_when_requested() -> None:
 
 def test_parserless_plugin_target_passes_through_when_requested() -> None:
     """A plugin platform that declares no parser has no explicit syntax at
-    all, so passing the raw id through is the only way cron can target it."""
+    all, so passing the raw id through is the only way scheduled can target it."""
     from gateway.platform_registry import PlatformEntry, platform_registry
     from tools.send_message_tool import resolve_send_target
 
-    platform_name = "opaque-cron-fallback-test"
+    platform_name = "opaque-scheduled-fallback-test"
     entry = PlatformEntry(
         name=platform_name,
-        label="Opaque cron fallback test",
+        label="Opaque scheduled fallback test",
         adapter_factory=lambda cfg: None,
         check_fn=lambda: True,
     )

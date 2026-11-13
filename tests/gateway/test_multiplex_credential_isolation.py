@@ -90,7 +90,7 @@ class TestProfilePathResolutionUnderMultiplexScope:
 def test_turn_scoped_dotenv_reload_does_not_pollute_process_env(tmp_path, monkeypatch):
     """A routed profile reload must stay inside its context-local scope.
 
-    ``load_hermes_dotenv`` has several lazy-import and cron call sites beyond
+    ``load_hermes_dotenv`` has several lazy-import and scheduled call sites beyond
     the gateway's guarded reload helper.  Any one of them can run during a
     multiplexed turn, so the loader itself must not copy the active profile's
     ``.env`` into the shared process environment.
@@ -176,7 +176,7 @@ def test_launch_home_dotenv_still_loads_under_multiplex(tmp_path, monkeypatch):
 def test_launch_home_load_inside_foreign_turn_keeps_routed_cwd_out_of_process_env(tmp_path, monkeypatch):
     """A launch-targeted load while a FOREIGN profile is routed is still skipped: its terminal
     bridge reads config through the override, so it would copy the routed profile's ``terminal.cwd``
-    into the shared ``TERMINAL_CWD`` that the launch profile's own turns and cron jobs read."""
+    into the shared ``TERMINAL_CWD`` that the launch profile's own turns and scheduled jobs read."""
     import os
 
     from hermes_cli.env_loader import load_hermes_dotenv

@@ -301,7 +301,7 @@ def _desktop_page_vars():
     ``HERMES_DESKTOP`` is absent on a URL or cloud backend and would name the caller ``tui``."""
     from gateway.session_context import set_session_vars
 
-    tokens = set_session_vars(source="desktop", profile=_current_profile_name(), cron_session="")
+    tokens = set_session_vars(source="desktop", profile=_current_profile_name(), scheduled_session="")
     try:
         yield
     finally:

@@ -96,7 +96,7 @@ def append_user_instruction(parts: list, instruction: str) -> str:
     Single construction site guarantees the prefix is a byte-prefix of the message.
 
     Shared by every builder that ends a static skill scaffold with the caller-supplied volatile instruction
-    (single-skill invocations, cron job prompts). Keeping construction in one place guarantees the
+    (single-skill invocations, scheduled job prompts). Keeping construction in one place guarantees the
     registered prefix stays a byte-prefix of the built message — the invariant the request-time split
     depends on. See #81867.
     """
@@ -284,7 +284,7 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
 
 def ambiguous_skill_label(identifier: str, payload: dict) -> Optional[str]:
     """``Ambiguous skill name X: use one of <paths>`` when a failed skill_view *payload* is a same-tier
-    name collision, else None — so preload/cron say why instead of "Unknown"/"not found"."""
+    name collision, else None — so preload/scheduled say why instead of "Unknown"/"not found"."""
     load_names = payload.get("load_names") if isinstance(payload, dict) else None
     return f"{AMBIGUOUS_SKILL_PREFIX}{identifier}: use one of {', '.join(load_names)}" if load_names else None
 

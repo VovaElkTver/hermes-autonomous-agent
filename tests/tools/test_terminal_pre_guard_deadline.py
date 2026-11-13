@@ -2,7 +2,7 @@
 
 The supervised-gateway identity probe inside ``_pre_exec_block`` ends in a kernel process
 query that can wedge; before the deadline wrap, ``terminal_tool`` never returned and the
-cron run held its slot forever.
+scheduled run held its slot forever.
 """
 
 from __future__ import annotations

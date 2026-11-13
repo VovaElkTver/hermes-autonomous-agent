@@ -3,7 +3,7 @@
 Two behaviors that only show up with more than one profile on disk:
 
 * ``/api/profiles/sessions/sidebar`` must answer to one scope for all three of
-  its slices. Cron and messaging ignoring it is what made a concrete profile
+  its slices. Scheduled and messaging ignoring it is what made a concrete profile
   show another profile's Telegram threads and cronjobs (#65710, #42651,
   #70629).
 * ``/api/profiles/projects/tree`` must build each profile's tree from that
@@ -111,22 +111,22 @@ class TestSidebarScope:
 
     def test_concrete_profile_sees_only_its_own_slices(self, client, profiles_on_disk):
         _seed_session(profiles_on_disk["default"], "default-chat", source="cli")
-        _seed_session(profiles_on_disk["default"], "default-cron", source="cron")
+        _seed_session(profiles_on_disk["default"], "default-scheduled", source="cron")
         _seed_session(profiles_on_disk["default"], "default-telegram", source="telegram")
         _seed_session(profiles_on_disk["worker"], "worker-chat", source="cli")
-        _seed_session(profiles_on_disk["worker"], "worker-cron", source="cron")
+        _seed_session(profiles_on_disk["worker"], "worker-scheduled", source="cron")
         _seed_session(profiles_on_disk["worker"], "worker-telegram", source="telegram")
 
         payload = client.get(
             "/api/profiles/sessions/sidebar",
-            params={"recents_profile": "worker", "recents_exclude": "cron,telegram", "messaging_exclude": "cli,cron"},
+            params={"recents_profile": "worker", "recents_exclude": "scheduled,telegram", "messaging_exclude": "cli,scheduled"},
         ).json()
 
         assert payload["errors"] == []
         assert _slice_ids(payload, "recents") == {"worker-chat"}
         # The bug: these two used to come back with the default profile's rows
         # folded in, whatever scope the sidebar asked for.
-        assert _slice_ids(payload, "cron") == {"worker-cron"}
+        assert _slice_ids(payload, "cron") == {"worker-scheduled"}
         assert _slice_ids(payload, "messaging") == {"worker-telegram"}
 
     def test_all_scope_still_spans_every_profile(self, client, profiles_on_disk):
@@ -135,7 +135,7 @@ class TestSidebarScope:
 
         payload = client.get(
             "/api/profiles/sessions/sidebar",
-            params={"recents_profile": "all", "messaging_exclude": "cli,cron"},
+            params={"recents_profile": "all", "messaging_exclude": "cli,scheduled"},
         ).json()
 
         assert _slice_ids(payload, "messaging") == {"default-telegram", "worker-telegram"}
@@ -322,7 +322,7 @@ class TestSidebarShowSubagents:
 
         payload = client.get(
             "/api/profiles/sessions/sidebar",
-            params={"recents_profile": "all", "recents_exclude": "cron,subagent", "messaging_exclude": "cli,cron,desktop"},
+            params={"recents_profile": "all", "recents_exclude": "scheduled,subagent", "messaging_exclude": "cli,scheduled,desktop"},
         ).json()
 
         assert payload["errors"] == []

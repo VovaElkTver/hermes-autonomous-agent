@@ -62,7 +62,7 @@ def test_title_override_preserves_existing_control_message_eligibility(monkeypat
     assert start.called is titleable
 
 
-@pytest.mark.parametrize("platform", ["cron", "subagent", "CRON"])
+@pytest.mark.parametrize("platform", ["cron", "subagent", "SCHEDULED"])
 def test_title_override_cannot_enable_titling_for_machine_runs(monkeypatch, platform):
     agent = SimpleNamespace(_session_db=Mock(), session_id="test", platform=platform)
     title = Mock()

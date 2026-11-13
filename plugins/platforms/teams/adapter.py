@@ -865,7 +865,7 @@ def register(ctx) -> None:
         required_env=["TEAMS_CLIENT_ID", "TEAMS_CLIENT_SECRET", "TEAMS_TENANT_ID"],
         install_hint=_install_hint(), setup_fn=interactive_setup,
         env_enablement_fn=_env_enablement,  # env-only setups show up in gateway status
-        cron_deliver_env_var="TEAMS_HOME_CHANNEL",  # deliver=teams scheduled home-channel routing
+        scheduled_deliver_env_var="TEAMS_HOME_CHANNEL",  # deliver=teams scheduled home-channel routing
         standalone_sender_fn=_standalone_send,  # out-of-process scheduled delivery via Bot Framework REST
         allowed_users_env="TEAMS_ALLOWED_USERS", allow_all_env="TEAMS_ALLOW_ALL_USERS",
         max_message_length=28000,  # Teams supports up to ~28 KB per message

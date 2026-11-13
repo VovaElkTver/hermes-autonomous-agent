@@ -227,7 +227,7 @@ class TestSummarizeToolResultSkillTools:
 
 class TestSummarizeToolResultOutcome:
     """A compaction stub must carry the outcome of the call (#131244): a refused ``read_file``, a
-    rate-limited ``web_search``, a dead cron run, a non-zero process exit or a failed MCP tool used to
+    rate-limited ``web_search``, a dead scheduled run, a non-zero process exit or a failed MCP tool used to
     compress into the same stub as the success it never was, and the post-compaction agent reported
     the success."""
 

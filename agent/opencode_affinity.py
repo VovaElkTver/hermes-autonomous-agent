@@ -14,7 +14,7 @@ The value only has to be opaque and consistent per conversation, so it is derive
 the other affinity hints Hermes already sends (OpenRouter's sticky ``session_id``, xAI's
 ``x-grok-conv-id``): the host-declared routing scope first (a host that names its own conversation,
 #96811), then the ambient conversation ROOT (stable across compaction rotation and delegate trees),
-then the physical session id — normalized through ``_cache_scope_from_session_id`` so cron fires of
+then the physical session id — normalized through ``_cache_scope_from_session_id`` so scheduled fires of
 one job share a scope. Auxiliary calls (compression, titles, vision, MoA) have no session handle and
 resolve the ambient value, so they stay on the conversation's backend too (#70820).
 

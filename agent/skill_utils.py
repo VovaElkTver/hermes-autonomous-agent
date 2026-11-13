@@ -121,7 +121,7 @@ _ENV_DETECT_CACHE: dict[str, bool] = {}
 def _detect_kanban() -> bool:
     # Mirror tools/kanban_tools.py: a dispatcher-spawned worker (env vars, but
     # only when this execution OWNS the task — delegate children / in-process
-    # cron see the worker's vars) or a profile opted into the kanban toolset.
+    # scheduled see the worker's vars) or a profile opted into the kanban toolset.
     if os.getenv("HERMES_KANBAN_TASK") or os.getenv("HERMES_KANBAN_BOARD"):
         try:
             from agent.delegation_context import is_dispatcher_owned_worker_context
@@ -154,7 +154,7 @@ _ENV_DETECTORS: dict[str, Callable[[], bool]] = {
 def _detect_environment(env: str) -> bool:
     """True when the named runtime environment is active (unknown => True).
     Cached per process EXCEPT ``kanban``: that verdict is context-dependent
-    (delegate children / in-process cron see the worker's vars), so a
+    (delegate children / in-process scheduled see the worker's vars), so a
     process-wide cache would leak the first asker's answer to the others."""
     if env != "kanban" and env in _ENV_DETECT_CACHE:
         return _ENV_DETECT_CACHE[env]
@@ -403,7 +403,7 @@ def display_skill_create_dir() -> str:
 # skills.external_dirs. Inside ONE tier two different skills sharing a name stay ambiguous — refused,
 # never guessed (59da8ec4e) — while identical copies under one root resolve to the shallowest.
 TIER_PROJECT, TIER_LOCAL, TIER_CREATE_DIR, TIER_EXTERNAL = range(4)
-# Leading words of every same-tier refusal (skill_view error, preload/cron label) — one spelling.
+# Leading words of every same-tier refusal (skill_view error, preload/scheduled label) — one spelling.
 AMBIGUOUS_SKILL_PREFIX = "Ambiguous skill name "
 # (shadowed path, *sorted higher-tier paths) already judged: the identity check (it hashes both
 # SKILL.md files) and its one-time warning run once per pairing, not on every catalog resolve.
@@ -412,7 +412,7 @@ _SHADOW_CHECKED: set[tuple[str, ...]] = set()
 
 def get_skill_search_roots(local: Optional[Path] = None, *, include_project: bool = True) -> list[tuple[int, Path]]:
     """``(tier, dir)`` for every skill root in precedence order — the ONE ordering the skills list,
-    prompt index, slash commands, skill_view, preload and cron share. *local* overrides the profile
+    prompt index, slash commands, skill_view, preload and scheduled share. *local* overrides the profile
     skills dir (skills_tool passes its live root); that entry is kept even when missing."""
     roots = [(TIER_PROJECT, d) for d in get_project_skills_dirs()] if include_project else []
     roots.append((TIER_LOCAL, Path(local) if local is not None else get_skills_dir()))
@@ -526,8 +526,8 @@ def find_project_root(start: Optional[Path] = None) -> Optional[Path]:
     ``TERMINAL_CWD``, then the process cwd). The session cwd comes first because a multi-session host
     (TUI/desktop gateway) pins each session's workspace there while its terminal scope resolves a
     placeholder ``terminal.cwd`` to ``$HOME``; reading only the scope made every project skill invisible
-    on those surfaces (#114359). ``TERMINAL_CWD`` is the per-surface workdir the terminal tool and cron
-    jobs use (a cron job sets it from its per-job ``workdir`` without chdir'ing the scheduler process),
+    on those surfaces (#114359). ``TERMINAL_CWD`` is the per-surface workdir the terminal tool and scheduled
+    jobs use (a scheduled job sets it from its per-job ``workdir`` without chdir'ing the scheduler process),
     which lets non-interactive surfaces inherit a prior interactive trust decision by project identity —
     and a surface with no workdir in a trusted repo simply resolves no project and loads nothing (#48975).
     """
@@ -666,7 +666,7 @@ def iter_project_skill_files(project_dir: Path):
 
 
 def normalize_skill_lookup_name(identifier: str) -> str:
-    """Translate a trusted absolute skill path (slash commands / cron may store
+    """Translate a trusted absolute skill path (slash commands / scheduled may store
     them) to the relative form ``skill_view()`` accepts."""
     raw_identifier = (identifier or "").strip()
     if not raw_identifier:

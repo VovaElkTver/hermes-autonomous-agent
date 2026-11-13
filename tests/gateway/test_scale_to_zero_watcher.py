@@ -727,13 +727,13 @@ async def test_heartbeat_poll_task_does_not_block_idle():
         await asyncio.gather(r._heartbeat_poll_task, return_exceptions=True)
 
 
-# ── in-flight cron / API-server work must block suspend (the 10:45 near-miss) ──
+# ── in-flight scheduled / API-server work must block suspend (the 10:45 near-miss) ──
 #
-# Cron jobs run on the scheduler's thread pool and API-server runs live on the
+# Scheduled jobs run on the scheduler's thread pool and API-server runs live on the
 # adapter — both outside _running_agents (the #60432 blind spot). The idle
-# predicate must consume _active_work_count() (agents + cron + api runs), or a
-# suspend can freeze a cron job mid-run: observed on staging 2026-08-20, where
-# is_idle held True throughout a live cron run and only tick timing saved it.
+# predicate must consume _active_work_count() (agents + scheduled + api runs), or a
+# suspend can freeze a scheduled job mid-run: observed on staging 2026-08-20, where
+# is_idle held True throughout a live scheduled run and only tick timing saved it.
 
 
 def _work_count_runner(monkeypatch, *, agents=0, cron_ids=(), api_runs=0):
@@ -748,7 +748,7 @@ def _work_count_runner(monkeypatch, *, agents=0, cron_ids=(), api_runs=0):
         r, "_scale_to_zero_idle_timeout_seconds", lambda: 300.0, raising=False
     )
     monkeypatch.setattr(
-        "cron.scheduler.get_running_job_ids", lambda: set(cron_ids)
+        "scheduled.scheduler.get_running_job_ids", lambda: set(cron_ids)
     )
     api_adapter = SimpleNamespace(active_agent_work_count=lambda: api_runs)
     from gateway.platforms.base import Platform
@@ -773,7 +773,7 @@ def test_idle_true_when_all_work_sources_quiet(monkeypatch):
 
 
 def test_unreadable_cron_source_fails_awake(monkeypatch):
-    """A transient failure reading the cron work source must count as WORK
+    """A transient failure reading the scheduled work source must count as WORK
     (stay awake), not as idle — fail-open accounting would reopen the
     mid-job-freeze hole exactly when bookkeeping is broken."""
     r = _work_count_runner(monkeypatch)
@@ -781,7 +781,7 @@ def test_unreadable_cron_source_fails_awake(monkeypatch):
     def _boom():
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr("cron.scheduler.get_running_job_ids", _boom)
+    monkeypatch.setattr("scheduled.scheduler.get_running_job_ids", _boom)
     assert r._scale_to_zero_is_idle() is False
 
 

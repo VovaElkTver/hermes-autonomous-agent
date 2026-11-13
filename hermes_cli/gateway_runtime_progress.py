@@ -12,7 +12,7 @@ keeps the base deadline until the gateway publishes its lock).
 
 An explicit timeout is hard. That covers ``hermes gateway ensure/attach --timeout`` (Desktop runs it
 under its own outer timer) and the Ink TUI bootstrap; the adaptive wait serves the in-process clients
-(``hermes -z``, ``chat -q``, cron, kanban workers, ACP).
+(``hermes -z``, ``chat -q``, scheduled, kanban workers, ACP).
 """
 from __future__ import annotations
 

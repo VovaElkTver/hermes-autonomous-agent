@@ -10,7 +10,7 @@ so the updater takes the normal non-fork path and never touches the network):
 * ``head``: HEAD's ``scripts/install.sh`` into an empty HOME, then ``main`` gets NEXT, a synthetic
   child commit adding a marker file.
 
-Every process (gateway, dashboard, cron ticker, kanban dispatcher, the updater) runs inside ONE
+Every process (gateway, dashboard, scheduled ticker, kanban dispatcher, the updater) runs inside ONE
 ``NamespaceHost`` sandbox, the way they share a user's machine.
 """
 

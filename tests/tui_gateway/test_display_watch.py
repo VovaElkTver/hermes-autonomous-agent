@@ -1,6 +1,6 @@
 """Lease transitions made by ANOTHER process reach `hermes serve` clients as ``display.lease``.
 
-The agent lives in whatever process hosts it (messaging gateway, ``hermes chat``, a cron worker);
+The agent lives in whatever process hosts it (messaging gateway, ``hermes chat``, a scheduled worker);
 ``lease.on_change`` is in-process only, so the serve backend must notice the file move itself.
 """
 

@@ -32,7 +32,7 @@ _DAYS_SINCE_INSTALL_THRESHOLDS = (
 def tool_unavailable_fields(agent: Any, name: Any, issue: str, route: dict[str, str]) -> dict[str, str] | None:
     """Fields for a call to a shipped built-in the session has disabled; None for anything else.
 
-    Background reviews, delegated children and cron jobs run with toolsets Hermes (or the parent
+    Background reviews, delegated children and scheduled jobs run with toolsets Hermes (or the parent
     model) narrowed on purpose, so their misses say nothing about what users should get by default.
     A built-in deferred behind ``tool_search`` is enabled (reachable through ``tool_call``), not missing.
     """
@@ -69,12 +69,12 @@ def user_created_skill(d: dict[str, str]) -> bool:
 
 _TASK_SURFACE = {"desktop": "desktop", "tui": "tui"}
 # metric -> [(feature, predicate over the recorded dimensions)]. Unattended Hermes-owned work only
-# counts where the user set it up (a cron job, a curator run the user started).
+# counts where the user set it up (a scheduled job, a curator run the user started).
 _FEATURE_RULES: dict[str, tuple[tuple[str, Callable[[dict[str, str]], bool]], ...]] = {
     contract.MEMORY_OP_METRIC: (("memory", lambda d: _success(d) and d.get("origin") == "foreground"),),
     contract.SKILL_LIFECYCLE_METRIC: (("skills_created", user_created_skill),),
     contract.DELEGATION_RUN_METRIC: (("delegation", lambda d: True),),
-    contract.CRON_RUN_METRIC: (("cron", lambda d: d.get("outcome") in {"success", "failed"}),),
+    contract.SCHED_RUN_METRIC: (("cron", lambda d: d.get("outcome") in {"success", "failed"}),),
     contract.CURATOR_RUN_METRIC: (("curator", lambda d: _success(d) and d.get("trigger") == "manual"),),
     contract.TASK_STARTED_METRIC: (
         ("gateway_platform", lambda d: d.get("platform") not in {None, "none"}),

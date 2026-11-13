@@ -441,7 +441,7 @@ def _rewrite_compound_background(command: str) -> str:
 
 def _no_sudo_user() -> bool:
     """A delegated child or a `hermes chat -q` run: nobody can answer a sudo prompt. Single-query only
-    (not _no_user_can_answer): cron strips HERMES_INTERACTIVE and unattended platforms register no sudo callback."""
+    (not _no_user_can_answer): scheduled strips HERMES_INTERACTIVE and unattended platforms register no sudo callback."""
     from tools.approval_context import _is_single_query_approval_context
     return _in_delegated_child_context() or _is_single_query_approval_context()
 

@@ -1,7 +1,7 @@
 """Who owns the gateway role on THIS host, and which profiles does that one process serve?
 
 Multiplex-only (Teknium ruling): exactly ONE ``hermes gateway run`` per host, multiplexing every
-profile. Every reporting surface (doctor, ``cron status``, ``claw``, the dashboard liveness ladder)
+profile. Every reporting surface (doctor, ``scheduled status``, ``claw``, the dashboard liveness ladder)
 used to ask a per-PROFILE question instead — "does *my* profile own a gateway process?" — and a
 profile that is SERVED by the host gateway answered "no". That produced three user-visible lies:
 "not running", "Per-profile gateways: 0/3 up", and a silently skipped destructive-action warning.
@@ -50,7 +50,7 @@ class HostGatewayTopology:
 
     def describe(self) -> str:
         """``the host gateway (PID 42) serving profiles default, coder`` — one shared phrasing so
-        doctor, cron status and the state.db holder lines cannot drift apart."""
+        doctor, scheduled status and the state.db holder lines cannot drift apart."""
         roster = ", ".join(self.profiles) if self.profiles else "an unknown profile set"
         return f"the host gateway (PID {self.pid}) serving profiles {roster}"
 

@@ -754,7 +754,7 @@ def register(ctx) -> None:
         is_connected=_is_connected, required_env=["MATTERMOST_URL", "MATTERMOST_TOKEN"],
         install_hint="pip install aiohttp", setup_fn=interactive_setup,
         apply_yaml_config_fn=_apply_yaml_config,  # YAML→env bridge (see _YAML_BRIDGE)
-        cron_deliver_env_var="MATTERMOST_HOME_CHANNEL",
+        scheduled_deliver_env_var="MATTERMOST_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send,  # out-of-process scheduled send; without it `deliver=mattermost` fails
         max_message_length=MAX_POST_LENGTH, emoji="💬", allow_update_command=True,
         platform_hint=_PLATFORM_HINT,

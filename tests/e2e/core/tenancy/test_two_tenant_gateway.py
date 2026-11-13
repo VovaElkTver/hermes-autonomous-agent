@@ -1,6 +1,6 @@
 """C7 two-tenant canary: ONE multiplexed messaging gateway serving three profiles.
 
-Class: multiplex / tenancy isolation (issue_classes.md C7). Users hit it as "profile B's cron job ran
+Class: multiplex / tenancy isolation (issue_classes.md C7). Users hit it as "profile B's scheduled job ran
 with profile A's terminal settings", "my secondary profile answered with the launch profile's key",
 "deleting a profile killed the shared gateway", "a restart re-pinned one profile's env for all"
 (#89315, #101719, #105396, #111151, #102769, #107692).
@@ -9,17 +9,17 @@ Harness: a real ``hermes gateway run`` child process with ``gateway.multiplex_pr
 the launch profile ``default`` plus ``alpha`` and ``beta``. Each profile owns its own loopback provider
 (accepting only its own key), and a distinct value for EVERY per-profile knob: provider key (same env
 var NAME, different value), API-server key, a non-secret .env marker, model id, MEMORY.md, SOUL.md,
-terminal cwd, cron prompt, and a shell variable its tool call exports. Turns are driven through the
+terminal cwd, scheduled prompt, and a shell variable its tool call exports. Turns are driven through the
 real api_server platform (``/v1`` for the launch profile, ``/p/<name>/v1`` for the others); every
 turn runs ``env | sort; pwd`` in the terminal tool, so the provider receives an env snapshot taken
 INSIDE the tool subprocess.
 
-Phases (same invariant after each): interleaved turns + a cron tick firing one job per profile ->
+Phases (same invariant after each): interleaved turns + a scheduled tick firing one job per profile ->
 cross-profile API keys -> create/attach/delete a fourth profile (host PID must not change) ->
-SIGTERM restart + a second cron tick. Invariant (``check_isolation``): every request a provider
+SIGTERM restart + a second scheduled tick. Invariant (``check_isolation``): every request a provider
 recorded carries only its own tenant's key/model and no other tenant's canary; every env snapshot ran
 in its own cwd and shows no other tenant's canary; no file in any profile home (state.db + WAL, logs,
-sessions, cron output, config, .env) contains another tenant's canary; the gateway's own output
+sessions, scheduled output, config, .env) contains another tenant's canary; the gateway's own output
 never contains any tenant's secret.
 """
 
@@ -171,14 +171,14 @@ def _turns(gw: MultiplexGateway, tenants: dict[str, H.Tenant], order: list[str])
 def _await_cron(tenants: dict[str, H.Tenant], at_least: int) -> None:
     # tool call + follow-up per fire; the ticker's first tick runs right after boot.
     H.poll(lambda: all(H.cron_requests(t) >= 2 * at_least for t in tenants.values()), 150,
-           f"cron fire #{at_least} in every profile")
+           f"scheduled fire #{at_least} in every profile")
 
 
 def test_multiplexed_gateway_never_crosses_tenants(fleet, request: pytest.FixtureRequest) -> None:
     root, tenants, gw = fleet
     home = root / "home"
 
-    # Phase 1: boot with one due cron job per profile; interleave turns across all three.
+    # Phase 1: boot with one due scheduled job per profile; interleave turns across all three.
     for t in tenants.values():
         H.seed_due_cron_job(t, home)
     gw.start()
@@ -209,7 +209,7 @@ def test_multiplexed_gateway_never_crosses_tenants(fleet, request: pytest.Fixtur
     _turns(gw, tenants, ["alpha", "beta"])
     H.check_isolation(tenants, min_snapshots=3)
 
-    # Phase 4: SIGTERM restart; the new host re-serves all three and ticks each profile's cron again.
+    # Phase 4: SIGTERM restart; the new host re-serves all three and ticks each profile's scheduled again.
     gw.stop()
     assert not H.pid_alive(host_pid), "old gateway still alive after SIGTERM"
     for t in tenants.values():

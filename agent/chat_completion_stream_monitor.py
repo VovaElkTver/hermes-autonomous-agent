@@ -56,7 +56,7 @@ class StreamingWaitMonitor:
         dispatched attempt has been killed ``_STALE_ABANDON_KILLS`` times without unwinding,
         the request is parked where a socket shutdown cannot reach it, and re-killing it every
         window would stall the turn forever: a worker thread is abandoned (returns True); an
-        inline call (cron, delegated children) runs on the caller's thread and cannot be, so
+        inline call (scheduled, delegated children) runs on the caller's thread and cannot be, so
         the monitor stops touching activity and the owner's inactivity watchdog ends it."""
         with self.stream_attempt_lock:
             attempt = int(self.stream_attempt_state["current"])

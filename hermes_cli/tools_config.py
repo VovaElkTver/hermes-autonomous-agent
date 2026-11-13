@@ -88,7 +88,7 @@ CONFIGURABLE_TOOLSETS = [
     ("connections",     "🔌 Connections",               "remote connector tools and account authorization"),
     ("clarify",         "❓ Clarifying Questions",      "clarify"),
     ("delegation",      "👥 Task Delegation",           "delegate_task"),
-    ("cronjob",         "⏰ Cron Jobs",                 "create/list/update/pause/resume/run, with optional attached skills"),
+    ("scheduled job",         "⏰ Scheduled Jobs",                 "create/list/update/pause/resume/run, with optional attached skills"),
     ("discord",         "💬 Discord (read/participate)", "fetch messages, search members, create thread"),
     ("discord_admin",   "🛡️  Discord Server Admin",    "list channels/roles, pin, assign roles"),
     ("computer_use",     "🖱️  Computer Use (macOS/Windows/Linux)", "background desktop control via cua-driver"),
@@ -401,7 +401,7 @@ def _parse_enabled_flag(value, default: bool = True) -> bool:
 
 
 def enabled_mcp_server_names(config: dict) -> set[str]:
-    """MCP servers globally enabled in config.yaml or by a plugin (shared by platform + cron resolvers). Enabled
+    """MCP servers globally enabled in config.yaml or by a plugin (shared by platform + scheduled resolvers). Enabled
     unless ``enabled`` is explicitly falsey; portable-plugin servers (in-memory) count — enabling the plugin is
     the opt-in."""
     from tools.mcp_tool_common import mcp_server_enabled
@@ -428,7 +428,7 @@ def enabled_mcp_server_names(config: dict) -> set[str]:
 #: MUST ship in the same release as the toolset and be emptied in the next: once a released build has put the
 #: toolset on a checklist, an unchecking user's config is byte-identical to one saved before it existed and this
 #: rule would turn the opt-out back on (stuck checkbox). ``check_fn``-gated toolsets cost nothing here; never
-#: probe a remote service from this path — it runs on every CLI start, gateway session and cron tick.
+#: probe a remote service from this path — it runs on every CLI start, gateway session and scheduled tick.
 _RECENTLY_SHIPPED_TOOLSETS: frozenset = frozenset()
 
 

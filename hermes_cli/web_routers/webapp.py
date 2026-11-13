@@ -235,7 +235,7 @@ async def issue_socket_ticket(request: Request, socket: str = "", profile: str |
     serves this page runs the socket's sessions. A ``gateway`` ticket minted with *profile* names
     it: that socket answers a request that names no profile for *profile*, as a native ticket does
     (``chat_ws.gateway_ws``), never for the gateway's launch profile."""
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
 
     if socket not in SOCKET_TICKETS:
         raise HTTPException(400, "Unknown socket")
@@ -245,7 +245,7 @@ async def issue_socket_ticket(request: Request, socket: str = "", profile: str |
     identity, session_token = _ticket_principal(request)
     profile_home = None
     if checks_profile:
-        _name, home = _cron_profile_home(profile)
+        _name, home = _profile_home(profile)
         if socket == GATEWAY_SOCKET and profile:
             profile_home = str(home)
     return _socket_ticket_response(request, identity, socket, session_token, profile_home=profile_home)

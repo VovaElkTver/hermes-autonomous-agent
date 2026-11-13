@@ -13,8 +13,8 @@ stale value and its ``echo $HERMES_SESSION_ID`` reported a FOREIGN session's id
 The fix strips the per-session bridged vars (HERMES_SESSION_* / UI /
 CRON_AUTO_DELIVER_) from the snapshot at both dump sites in
 ``tools/environments/base_session_env.py``; they are re-injected fresh on every
-command. The same dump must drop the scope markers a delegate_task child / cron
-run stamps per command (HERMES_DELEGATED_CHILD_CONTEXT, HERMES_CRON_SESSION), or
+command. The same dump must drop the scope markers a delegate_task child / scheduled
+run stamps per command (HERMES_DELEGATED_CHILD_CONTEXT, HERMES_SCHEDULED_SESSION), or
 the parent's next command is misread as that child (#90782, #71941).
 """
 
@@ -94,7 +94,7 @@ def test_shared_snapshot_no_cross_session_leak(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# #90782 / #71941: scope markers (delegate_task child, cron run) must not
+# #90782 / #71941: scope markers (delegate_task child, scheduled run) must not
 # persist into the snapshot either.
 # ---------------------------------------------------------------------------
 

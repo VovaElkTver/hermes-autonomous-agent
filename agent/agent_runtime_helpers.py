@@ -412,7 +412,7 @@ def _merge_assistant_into(prev: dict, msg: dict) -> bool:
         # 'messages[N].tool_calls': empty array..."). Drop the key HERE, at the source:
         # ``sanitize_api_messages`` only fixes the per-call wire copy, so a ``[]`` left on the repaired turn
         # survives in the live/persisted trajectory returned to callers (gateway/WebUI transcripts, session
-        # resume, subagents, cron) and is replayed on the next turn — which is how #58755 kept reproducing
+        # resume, subagents, scheduled) and is replayed on the next turn — which is how #58755 kept reproducing
         # after the chokepoint fix (#77921). Popping is non-destructive: an empty array carries no
         # information.
         calls_changed = "tool_calls" in prev

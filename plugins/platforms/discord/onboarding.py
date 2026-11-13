@@ -281,7 +281,7 @@ def interactive_setup() -> None:
     _prompt_allowlist(check, prompt, prompt_yes_no)
     print()
     for line in (
-        "📬 Home Channel: where Hermes delivers cron job results,",
+        "📬 Home Channel: where Hermes delivers scheduled job results,",
         "   cross-platform messages, and notifications.",
         "   Easiest: type /set-home in a Discord channel once the bot is running.",
         "   Or paste a channel ID (Developer Mode → right-click a channel → Copy Channel ID).",

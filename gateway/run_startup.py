@@ -24,7 +24,7 @@ from gateway.platforms.base import BasePlatformAdapter
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.session import SessionSource, build_session_key
 from gateway.restart import (
-    DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, GATEWAY_FATAL_CONFIG_EXIT_CODE, is_global_startup_conflict
+    DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT, GATEWAY_FATAL_CONFIG_EXIT_CODE, is_global_startup_conflict
 )
 from gateway.run_shutdown import _log_suppressed, _send_error
 from hermes_cli.observability.shared_metrics_busy import note_running_chat_owner
@@ -108,7 +108,7 @@ class GatewayStartupMixin:
 
     def _park_last_fatal_platform(self, adapter) -> bool:
         """Mid-run twin of the all-fatal startup case: the last platform failed non-retryably, so park it
-        and stay up degraded for local clients and cron. Return False when the gateway must stop instead
+        and stay up degraded for local clients and scheduled. Return False when the gateway must stop instead
         (retryable, or another gateway owns the token/profile)."""
         if adapter.fatal_error_retryable or is_global_startup_conflict(adapter.fatal_error_code):
             return False
@@ -118,7 +118,7 @@ class GatewayStartupMixin:
             self._update_runtime_status(self._serving_state())
         logger.error(
             "%s is parked after a non-retryable error (fix it, then `hermes gateway restart`). The gateway "
-            "is DEGRADED — it serves local clients and cron with no messaging platform. %s: %s",
+            "is DEGRADED — it serves local clients and scheduled with no messaging platform. %s: %s",
             adapter.platform.value, adapter.fatal_error_code or "unknown",
             adapter.fatal_error_message or "unknown error",
         )
@@ -1035,7 +1035,7 @@ class GatewayStartupMixin:
             from gateway.shutdown_forensics import check_systemd_timing_alignment
             _alignment = check_systemd_timing_alignment(
                 self._restart_drain_timeout,
-                getattr(self, "_cron_drain_timeout", DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT),
+                getattr(self, "_scheduled_drain_timeout", DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT),
             )
             if _alignment is not None and _alignment.get("mismatch"):
                 logger.warning(
@@ -1045,7 +1045,7 @@ class GatewayStartupMixin:
                     "agent.restart_drain_timeout / agent.cron_drain_timeout.",
                     _alignment.get("unit", "(unknown)"), _alignment["timeout_stop_sec"],
                     _alignment["drain_timeout"],
-                    _alignment.get("cron_drain_timeout", DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT),
+                    _alignment.get("scheduled_drain_timeout", DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT),
                     _alignment["expected_min"],
                 )
 
@@ -1511,13 +1511,13 @@ class GatewayStartupMixin:
                 logger.error("Gateway hit a non-retryable startup conflict: %s", reason)
                 self._startup_fail_fatal_config(reason)
                 return True
-            # Every platform is parked, but local clients and cron still need this gateway: exiting 78
+            # Every platform is parked, but local clients and scheduled still need this gateway: exiting 78
             # would take them all down over one unusable bot. Stay up degraded, like the mixed case.
             self._startup_parked_platforms = True
             logger.error(
                 "%d configured platform(s) failed to start and are parked (fix the reported error, then "
                 "`hermes gateway restart`): %s. The gateway is DEGRADED — it serves local clients and "
-                "cron with no messaging platform.",
+                "scheduled with no messaging platform.",
                 len(startup_nonretryable_errors), "; ".join(startup_nonretryable_errors),
             )
             return False
@@ -1540,10 +1540,10 @@ class GatewayStartupMixin:
             )
         if enabled_platform_count <= 0:
             logger.warning("No messaging platforms enabled.")
-            logger.info("Gateway will continue running for cron job execution.")
+            logger.info("Gateway will continue running for scheduled job execution.")
             return False
         if startup_retryable_errors:
-            # All retryable: stay alive (cron runs, watcher recovers) rather than systemd restart-loop.
+            # All retryable: stay alive (scheduled runs, watcher recovers) rather than systemd restart-loop.
             logger.warning(
                 "Gateway started with no connected platforms — %d platform(s) queued for retry: %s",
                 len(startup_retryable_errors), "; ".join(startup_retryable_errors),
@@ -1554,11 +1554,11 @@ class GatewayStartupMixin:
         logger.warning(
             # Fall through to the normal "running" state — reconnect watcher takes it from here. In fleet
             # deployments the same config.yaml is shared across nodes that may only have credentials for a
-            # subset of platforms. Rather than failing hard, degrade gracefully and allow cron jobs to run
+            # subset of platforms. Rather than failing hard, degrade gracefully and allow scheduled jobs to run
             # (#5196).
             "No adapter could be created for any of the %d configured platform(s). "
             "Check that required dependencies are installed and credentials are set. "
-            "Gateway will continue for cron job execution; platforms whose plugin may still register "
+            "Gateway will continue for scheduled job execution; platforms whose plugin may still register "
             "are queued for background retry.", enabled_platform_count,
         )
         return False
@@ -1644,7 +1644,7 @@ class GatewayStartupMixin:
         # Surface state.db init failures to messaging platforms before the user loses data.
         # See #88235.
         await self._send_session_db_warning_notifications()
-        # Cron-store degraded-state notices excised with the cron package.
+        # Scheduled-store degraded-state notices excised with the scheduled package.
         # Resume recovered process watchers. Detach the batch atomically (fresh list, not clear(): a
         # concurrent append during the yield must not be lost); yield every 100 to keep the loop live.
         with _log_suppressed(logging.ERROR, "Recovered watcher setup error: %s"):

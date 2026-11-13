@@ -17,7 +17,7 @@ import pytest
 import hermes_cli.config as hc
 from tools.approval import check_all_command_guards, load_permanent_allowlist
 from tools.approval_context import _get_approval_config
-from tools.approval_context import _get_cron_approval_mode
+from tools.approval_context import _get_scheduled_approval_mode
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def config_home(tmp_path, monkeypatch):
     home.mkdir()
     (home / "config.yaml").write_text(
         "model:\n  default: test-model\n"
-        "approvals:\n  mode: manual\n  timeout: 300\n  cron_mode: deny\n"
+        "approvals:\n  mode: manual\n  timeout: 300\n  scheduled_mode: deny\n"
         "command_allowlist: []\n"
     )
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -46,7 +46,7 @@ def test_readers_return_live_cache_without_corrupting_it(
     # a full guard pass must leave the cache values untouched
     before = dict(first)
     check_all_command_guards("ls -la", "local")
-    _get_cron_approval_mode()
+    _get_scheduled_approval_mode()
     load_permanent_allowlist()
     assert _get_approval_config() == before
     assert hc.load_config_readonly()["approvals"]["mode"] == "manual"

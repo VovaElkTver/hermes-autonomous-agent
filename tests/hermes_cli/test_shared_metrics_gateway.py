@@ -1,4 +1,4 @@
-"""Invariants for gateway / cron shared metrics: bounded platform names with proven catalog provenance,
+"""Invariants for gateway / scheduled shared metrics: bounded platform names with proven catalog provenance,
 opt-in gating, and contract-valid rows."""
 
 import json
@@ -86,7 +86,7 @@ def test_every_gateway_row_is_contract_valid_and_disabled_config_records_nothing
     assert rows == [
         ("hermes.platform.health", {"error_class": "network", "event": "connect_failed", "platform": "telegram"}),
         ("hermes.platform.health", {"error_class": "auth", "event": "disconnect", "platform": "telegram"}),
-        ("hermes.cron.run", {"delivery_kind": "platform", "duration_bucket": "lt_1s", "outcome": "missed"}),
+        ("hermes.scheduled.run", {"delivery_kind": "platform", "duration_bucket": "lt_1s", "outcome": "missed"}),
     ]
     assert all(contract.counter_dimensions_are_valid(name, dims) for name, dims in rows)
 

@@ -91,7 +91,7 @@ def test_quick_snapshot_tree_is_owner_only_under_permissive_umask(tmp_path) -> N
 
     A normal 0022 umask creates SQLite databases and JSON files as 0644 and
     directories as 0755.  Quick snapshots contain session state, credentials,
-    pairing records, and cron data, so every published file must be 0600 and
+    pairing records, and scheduled data, so every published file must be 0600 and
     every directory 0700 regardless of the caller's umask or source modes.
     """
     home = tmp_path / ".hermes"

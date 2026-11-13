@@ -526,7 +526,7 @@ class PluginDispatchMixin:
                 lambda: self._event_pending_by_generation.get(generation, 0) == 0, timeout=timeout)
 
     def _dispatch_event(self, event: str, payload: dict[str, Any]) -> int:
-        """Queue *event* without blocking; return the subscriber count scheduled. Pending work is
+        """Queue *event* without blocking; return how many subscribers were queued for it. Pending work is
         bounded per generation so a blocking subscriber costs one worker and later emits drop."""
         depth = getattr(self._emit_depth, "value", 0)
         if depth >= _EVENT_EMIT_DEPTH_CAP:

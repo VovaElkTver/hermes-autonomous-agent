@@ -51,7 +51,7 @@ class TestClassifySandboxMirrorTarget:
         "backend,inner",
         [
             ("docker", "profiles/coder/memories/MEMORY.md"),
-            ("daytona", "profiles/default/cron/jobs.json"),
+            ("daytona", "profiles/default/scheduled/jobs.json"),
             ("podman", ".env"),
         ],
     )

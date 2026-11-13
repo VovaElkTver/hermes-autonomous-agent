@@ -477,7 +477,7 @@ def _is_anthropic_frontier_tier(model_id: Optional[str]) -> bool:
     Both tiers are the priciest Anthropic offerings and are unsafe defaults
     for a freshly-authenticated provider picker or any other silent fallback:
     paid users landing on a frontier tier have no opportunity to opt out
-    before the choice pins their main model and inherits into every cron job
+    before the choice pins their main model and inherits into every scheduled job
     that doesn't override ``model.provider``.
 
     Anchored on the ``claude-`` family prefix, then the ``opus-`` / ``fable-``

@@ -34,7 +34,7 @@ def _valid_zero_user_summary(label: str = "Checked artifacts.") -> str:
 {_NO_USER_TASK_SENTINEL}
 
 ## Goal
-Historical cron work only.
+Historical scheduled work only.
 
 ## Completed Actions
 1. {label}

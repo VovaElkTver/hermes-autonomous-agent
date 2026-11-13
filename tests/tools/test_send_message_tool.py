@@ -529,7 +529,7 @@ class TestSendToPlatformChunking:
     def test_signal_long_message_is_chunked(self, monkeypatch):
         """Standalone Signal sends split at the adapter's 8000-char limit.
 
-        The standalone path (hermes send / cron / MCP) speaks raw JSON-RPC via
+        The standalone path (hermes send / scheduled / MCP) speaks raw JSON-RPC via
         _send_signal and bypasses SignalAdapter.send(), so the shared
         truncate_message() pass in _send_to_platform must know Signal's limit
         (regression for #67279 / #57929 — long sends were rejected whole).
@@ -1497,7 +1497,7 @@ class _FakePlatform:
 class TestSendViaAdapterStandaloneFallback:
     """Coverage for the out-of-process plugin-platform send path.
 
-    When the gateway runner is not in this process (e.g. ``hermes cron``
+    When the gateway runner is not in this process (e.g. ``hermes scheduled``
     runs separately from ``hermes gateway``), ``_send_via_adapter`` should
     fall through to the plugin's ``standalone_sender_fn`` registered on
     its ``PlatformEntry``.  Without the hook, the existing error string
@@ -1575,7 +1575,7 @@ class TestSendViaAdapterStandaloneFallback:
 
     @pytest.mark.asyncio
     async def test_fresh_process_discovers_plugins_before_the_fallback(self, monkeypatch):
-        """No gateway and nothing registered yet (cron/CLI process): the fallback runs plugin
+        """No gateway and nothing registered yet (scheduled/CLI process): the fallback runs plugin
         discovery, so a platform without a dedicated route still reaches its standalone sender."""
         from tools.send_message_tool import _send_via_adapter
         from gateway.platform_registry import platform_registry

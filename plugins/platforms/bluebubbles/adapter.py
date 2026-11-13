@@ -712,7 +712,7 @@ def register(ctx) -> None:
         config_connected_fn=config_connected_extra("server_url", "password"),
         required_env=["BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_PASSWORD"], install_hint=_INSTALL_HINT,
         setup_fn=interactive_setup,
-        cron_deliver_env_var="BLUEBUBBLES_HOME_CHANNEL",
+        scheduled_deliver_env_var="BLUEBUBBLES_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send,  # out-of-process scheduled sends / send_message
         # 0 = send_message does not pre-chunk: the adapter's send() splits per paragraph and
         # truncates itself (MAX_MESSAGE_LENGTH), exactly as the former core sender did.

@@ -42,8 +42,8 @@ class TestCuratorFasterPrune:
 
 class TestRetiredBotChatDeliveryTimeout:
     def test_v51_drops_bot_chat_delivery_timeout_with_a_note(self, tmp_path, monkeypatch):
-        """The removed cron knob is dropped from existing configs with a one-time note;
-        sibling cron settings and the rest of the file survive untouched."""
+        """The removed scheduled knob is dropped from existing configs with a one-time note;
+        sibling scheduled settings and the rest of the file survive untouched."""
         from hermes_cli.config import DEFAULT_CONFIG
         from hermes_cli.config_migrations import run_migrations
 
@@ -80,7 +80,7 @@ class TestRetiredKeysWhateverTheStamp:
         assert raw["cron"] == {"max_parallel_jobs": 2}
 
     def test_branch_stamped_home_still_gets_main_retired_key_steps(self, tmp_path, monkeypatch):
-        """A home stamped 50 by a build whose v50 was the cron-key step skipped main's v46 (MCP
+        """A home stamped 50 by a build whose v50 was the scheduled-key step skipped main's v46 (MCP
         `disabled: true`) and v50 (tirith keys). Both apply, and a second pass writes nothing."""
         from hermes_cli.config import migrate_config
 

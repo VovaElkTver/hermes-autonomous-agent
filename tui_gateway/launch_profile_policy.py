@@ -72,7 +72,7 @@ def activate_multi_profile_hosting_eagerly() -> bool:
     """Activate at HOST startup when this machine has more than one servable profile home.
 
     Activation used to be lazy and one-way — it fired the first time a *request* asked for a second
-    home. Everything the host had already done by then (idle-reaper ticks, cron start, adapter
+    home. Everything the host had already done by then (idle-reaper ticks, scheduled start, adapter
     connects, MCP discovery) ran under single-profile assumptions and is never re-scoped, and the
     launch profile's env had already been mutated by then, so ``capture_launch_env`` froze a
     polluted snapshot. One ``hermes serve`` / ``hermes gateway run`` per host means the process
@@ -106,8 +106,8 @@ def activate_multi_profile_hosting_eagerly() -> bool:
         return False
     logger.info("Multi-profile hosting activated at startup (%d servable profile homes)", len(homes))
     activate_multi_profile_hosting()
-    # Route each home's records to its own logs/ now: the Desktop cron ticker used to be the only
-    # caller, and it stands down when a live gateway owns cron, leaving every secondary profile's
+    # Route each home's records to its own logs/ now: the Desktop scheduled ticker used to be the only
+    # caller, and it stands down when a live gateway owns scheduled, leaving every secondary profile's
     # model/cwd lines in the launch profile's agent.log.
     from hermes_logging import enable_profile_log_routing
     enable_profile_log_routing(sorted(homes))
@@ -158,7 +158,7 @@ def owner_secret_scope(home: str | Path) -> dict[str, str]:
     """THE secret mapping for a body owned by *home*: ``launch_secret_scope`` when *home* is this
     process's own (its env-only keys from docker ``-e`` / systemd ``Environment=`` / ``op run`` have
     no file to rebuild from), else the profile's own files (``build_profile_secret_scope``). Every
-    per-home binding point (routed gateway turns, cron fires, kanban ticks) builds through here, so
+    per-home binding point (routed gateway turns, scheduled fires, kanban ticks) builds through here, so
     the launch profile keeps its env-only credentials when a single-profile gateway starts
     multiplexing in place."""
     from agent.secret_scope import _is_process_home, build_profile_secret_scope

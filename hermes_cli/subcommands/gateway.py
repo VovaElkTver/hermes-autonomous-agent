@@ -14,9 +14,9 @@ _FORCE_SERVED_PROFILE_HELP = (
     "Start a separate gateway for this profile even when the default multiplexer already serves it "
     "(not recommended: two pollers on one bot token, port conflicts)")
 
-# `stop`/`restart` ask before interrupting live turns, cron jobs or background delegations.
+# `stop`/`restart` ask before interrupting live turns, scheduled jobs or background delegations.
 _INTERRUPT_HELP = (
-    "{verb} without asking even while sessions are live (turns, cron jobs, background delegations): "
+    "{verb} without asking even while sessions are live (turns, scheduled jobs, background delegations): "
     "they are interrupted. Without it the command names the live work and asks y/N (refuses when "
     "there is no terminal). --interrupt is the same flag")
 
@@ -112,7 +112,7 @@ def build_gateway_parser(
             "gateway. In-chat restarts and updates exit back to that manager "
             "instead of spawning a detached replacement. Use this when a "
             "launchd/systemd wrapper strips its native environment markers.")
-    # Internal: set only by a client that auto-starts its own gateway (chat, TUI, cron/kanban
+    # Internal: set only by a client that auto-starts its own gateway (chat, TUI, scheduled/kanban
     # clients). Never in service units, Desktop's `gateway ensure` start or a hand-run gateway.
     _flag(gateway_run, "--idle-exit", help=argparse.SUPPRESS)
     add_accept_hooks_flag(gateway_run)

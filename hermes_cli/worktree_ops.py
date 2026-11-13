@@ -812,7 +812,7 @@ def _tree_still_served(db_path: str, worktree_path: str) -> Optional[str]:
 
     Beyond pending admissions (``_retained_tree_is_live(pending_only=True)``): scheduled work for a
     session inside it (an active loop, heartbeat or goal continuation), another viewer still holding
-    such a session (its row was not ended by the quit), or an enabled cron job that runs in the tree
+    such a session (its row was not ended by the quit), or an enabled scheduled job that runs in the tree
     (``workdir``) or is bound to such a session's local chat. Reads only; unreadable fails SAFE."""
     import sqlite3
     from urllib.parse import quote
@@ -837,10 +837,10 @@ def _tree_still_served(db_path: str, worktree_path: str) -> Optional[str]:
 
 
 def _cron_bound_to_tree(worktree_path: str, chats: set) -> bool:
-    """An enabled, non-terminal cron job whose ``workdir`` is inside the tree, or whose origin is
+    """An enabled, non-terminal scheduled job whose ``workdir`` is inside the tree, or whose origin is
     the local chat of a session there. Reads ``jobs.json`` directly (``load_jobs`` may repair-write);
     an unreadable store fails SAFE."""
-    # Cron was excised from this branch: no job can pin a worktree, whatever a
+    # Scheduled was excised from this branch: no job can pin a worktree, whatever a
     # legacy ``jobs.json`` on disk claims.
     del worktree_path, chats
     return False

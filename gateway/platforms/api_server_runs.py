@@ -41,7 +41,7 @@ logger = logging.getLogger("gateway.platforms.api_server")
 # in the worker thread's own ``finally``, which also keeps it visible past ``adapters.clear()``.
 _API_WORKER_LOCK = threading.Lock()
 _API_WORKER_LIVE = 0
-# API-server agent turns and cron fires run on their own executor, as Desktop and messaging turns
+# API-server agent turns and scheduled fires run on their own executor, as Desktop and messaging turns
 # do (``GatewayRunner._get_executor``). asyncio's default pool is ``min(32, cpu_count + 4)`` threads
 # shared with every ``asyncio.to_thread`` SessionDB read in the session handlers, so once live
 # turns filled it each /api/sessions read queued behind a whole turn (#144362). Turn concurrency is
@@ -54,7 +54,7 @@ _API_TURN_EXECUTOR_LOCK = threading.Lock()
 
 
 def api_turn_executor() -> _UnboundedThreadExecutor:
-    """The executor that runs API-server agent turns and cron fires (never the loop's default)."""
+    """The executor that runs API-server agent turns and scheduled fires (never the loop's default)."""
     global _API_TURN_EXECUTOR
     with _API_TURN_EXECUTOR_LOCK:
         if _API_TURN_EXECUTOR is None:

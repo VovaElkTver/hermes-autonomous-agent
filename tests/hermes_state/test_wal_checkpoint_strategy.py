@@ -2,7 +2,7 @@
 
 Verifies that ALL checkpoints on the shared state.db use PASSIVE mode:
 periodic, close(), and pre-VACUUM. TRUNCATE fires a full WAL reset, and
-transient per-cron-run connections closing many times an hour would race
+transient per-scheduled-run connections closing many times an hour would race
 the live gateway writer and corrupt B-tree pages (#45383).
 """
 
@@ -90,7 +90,7 @@ class TestTryWalCheckpointPassive:
 
 
 class TestCloseUsesPassive:
-    """close() must use PASSIVE. Transient per-cron-run SessionDB connections
+    """close() must use PASSIVE. Transient per-scheduled-run SessionDB connections
     close many times an hour; a TRUNCATE reset there races the live gateway
     writer on the large WAL DB and corrupts B-tree pages (#45383)."""
 

@@ -132,7 +132,7 @@ def owner_stop_notice(captured, outcome, row=None):
     """The named notice for a turn the owner's restart/stop interrupted, or None. With the default
     ``agent.restart_drain_timeout: 0`` a restart interrupts in-flight turns at once; the admission
     settles ``interrupted`` and is never replayed, so the viewer is told the restart did it.
-    An unattended ``row`` (cron, automation, webhook) has nobody to resend it, so it gets the
+    An unattended ``row`` (scheduled, automation, webhook) has nobody to resend it, so it gets the
     neutral automation copy instead of resend advice (#134889 GW-20, GW-10's rule)."""
     # The cause is the one the turn recorded when it was interrupted (stop() interrupts with these
     # reasons), never the runner's flags at publication: a user Stop whose settlement was delayed

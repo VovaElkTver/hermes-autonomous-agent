@@ -35,14 +35,14 @@ def test_terminal_run_env_starts_from_the_sessions_toolchain(daemon_env):
         assert _make_run_env({'NVM_DIR': '/configured'})['NVM_DIR'] == '/configured'
     with client_env_scope({'HERMES_EPHEMERAL_SYSTEM_PROMPT': 'p'}):  # behaviour names are not tool env
         assert 'HERMES_EPHEMERAL_SYSTEM_PROMPT' not in _make_run_env({})
-    env = _make_run_env({})  # messaging/cron/Desktop: the gateway's own environment
+    env = _make_run_env({})  # messaging/scheduled/Desktop: the gateway's own environment
     assert '/daemon/bin' in _parts(env) and 'NVM_DIR' not in env
 
 
 def test_tool_envs_carry_the_behaviour_values_the_session_uses(daemon_env, monkeypatch, tmp_path):
     """A shell client's session reads its client's behaviour values, so the daemon's own (an operator's
     ephemeral prompt) never reach its tool subprocesses; a remote client's session still uses the
-    daemon's host values (prefill file), and an unbound session (messaging, cron) all of them."""
+    daemon's host values (prefill file), and an unbound session (messaging, scheduled) all of them."""
     import sys
     from agent.session_client_env import BEHAVIOUR_ENV, client_env_scope
     from tools.code_execution_env import _build_child_env
@@ -136,7 +136,7 @@ def test_execute_code_runs_each_sessions_own_interpreter(tmp_path):
         assert exe == roots[name] / 'bin' / 'python' and prefix.resolve() == roots[name].resolve()
     exe, prefix = child({'PATH': os.environ['PATH']})  # a client with no activated venv
     assert prefix.resolve() == Path(sys.prefix).resolve()
-    exe, prefix = child(None)  # messaging/cron/Desktop: the gateway's own environment, as before
+    exe, prefix = child(None)  # messaging/scheduled/Desktop: the gateway's own environment, as before
     assert prefix.resolve() == roots['daemon'].resolve()
 
 

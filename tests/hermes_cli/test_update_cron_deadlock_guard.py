@@ -1,14 +1,14 @@
-"""Regression tests for #100179: cron-update three-way restart deadlock.
+"""Regression tests for #100179: scheduled-update three-way restart deadlock.
 
 When `hermes update` runs INSIDE the gateway's own process tree (the
-hermes-auto-update cron job), waiting for that gateway to exit is a
+hermes-auto-update scheduled job), waiting for that gateway to exit is a
 circular wait:
 
   gateway waits on all in-flight work units (#77184)
-    -> cron agent session waits on the `hermes update` process
+    -> scheduled agent session waits on the `hermes update` process
       -> `hermes update` waits on the gateway to exit  [back to A]
 
-The wedged-loop probe cannot break it: the cron session posts activity
+The wedged-loop probe cannot break it: the scheduled session posts activity
 every ~180s (process-tool poll return), so it is never marked wedged and
 the gateway burns the full 1800s force-drain cap.
 

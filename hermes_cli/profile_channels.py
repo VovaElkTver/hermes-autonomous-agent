@@ -175,7 +175,7 @@ def declared_channel_env_keys(source_dir: Optional[Path] = None) -> dict[str, st
     with _plugin_scope(source_dir):
         entries = _registry_entries()
         for entry in entries:
-            for name in (*entry.required_env, entry.allowed_users_env, entry.allow_all_env, entry.cron_deliver_env_var):
+            for name in (*entry.required_env, entry.allowed_users_env, entry.allow_all_env, entry.scheduled_deliver_env_var):
                 if name:
                     keys[name] = entry.name
     with contextlib.suppress(Exception):
@@ -195,7 +195,7 @@ def _policy_env_keys(source_dir: Optional[Path] = None) -> set[str]:
     with _plugin_scope(source_dir):
         entries = _registry_entries()
         for entry in entries:
-            names.update(n for n in (entry.allowed_users_env, entry.allow_all_env, entry.cron_deliver_env_var) if n)
+            names.update(n for n in (entry.allowed_users_env, entry.allow_all_env, entry.scheduled_deliver_env_var) if n)
     with contextlib.suppress(Exception):
         from gateway.platform_env import EnvCred
         for step in _env_override_steps(entries):

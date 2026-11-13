@@ -1,6 +1,6 @@
 """Per-turn terminal scope: profile-scoped TERMINAL_* policy.
 
-Multiplexed surfaces (gateway, dashboard/TUI, cron) serve several profiles from one process;
+Multiplexed surfaces (gateway, dashboard/TUI, scheduled) serve several profiles from one process;
 mirroring terminal settings into ``os.environ`` let the first profile pin its backend onto
 everyone else (sandbox escape). Like ``agent/secret_scope.py``, a ContextVar holds the active
 profile's COMPLETE ``TERMINAL_*`` policy; while bound, ``terminal_env`` resolves ONLY from it

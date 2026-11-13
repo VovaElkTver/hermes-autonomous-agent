@@ -26,7 +26,7 @@ from tools.registry import tool_error
 _SLACK_USER_ID_RE = re.compile(r"^\s*(U[A-Z0-9]{8,})\s*$")
 
 # NOTE: ``send_message`` is intentionally NOT registered as an agent-callable model tool
-# (the agent must not fire cross-platform messages on its own); cron delivery, the
+# (the agent must not fire cross-platform messages on its own); scheduled delivery, the
 # ``hermes send`` CLI, the kanban notifier and the opt-in MCP server import the helpers.
 
 
@@ -101,7 +101,7 @@ def _authorize_relay_target(platform_name: str, chat_id, thread_id=None, *,
         # found (verified: `import gateway.relay.x` -> ModuleNotFoundError,
         # name="gateway.relay.x"). So a plain ImportError, or a nameless one, is
         # an unattributable FAULT — never proof that there is no relay here.
-        # I previously admitted the nameless case to protect the CLI/cron path;
+        # I previously admitted the nameless case to protect the CLI/scheduled path;
         # that reasoning was wrong, because that path does not produce one.
         if not isinstance(exc, ModuleNotFoundError) or (
             exc.name != "gateway.relay.egress" and not "gateway.relay.egress".startswith(f"{exc.name}.")
@@ -190,7 +190,7 @@ def _handle_react(args, remove=False):
     _, adapter = _live_adapter(platform)
     if adapter is None:
         return tool_error(f"Reactions require a live {platform_name} adapter in the running "
-                          "gateway (not available from cron/standalone contexts).")
+                          "gateway (not available from scheduled/standalone contexts).")
     react_fn = getattr(adapter, "remove_reaction" if remove else "add_reaction", None)
     if not callable(react_fn):
         return tool_error(f"Platform '{platform_name}' does not support message reactions.")
@@ -211,7 +211,7 @@ def _handle_send(args):
     # request bodies (feishu/lark, #113799). Every send_message caller (model tool
     # call, `hermes send`, dashboard console) enters here, so scrub once before the
     # media extraction, the session mirror and the platform sender see the text.
-    # Model output delivered by the gateway/cron is already scrubbed upstream
+    # Model output delivered by the gateway/scheduled is already scrubbed upstream
     # (``agent/turn_finalizer.py::finalize_turn``, ``gateway/run.py``).
     from agent.message_sanitization import _sanitize_surrogates
     message = _sanitize_surrogates(message)
@@ -462,16 +462,16 @@ def _describe_media_for_mirror(media_files):
 
 
 def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):
-    """Skip redundant cron send_message calls when the scheduler will auto-deliver there."""
+    """Skip redundant scheduled send_message calls when the scheduler will auto-deliver there."""
     from gateway.session_context import get_session_env
-    auto_platform = get_session_env("HERMES_CRON_AUTO_DELIVER_PLATFORM", "").strip().lower()
-    auto_chat_id = get_session_env("HERMES_CRON_AUTO_DELIVER_CHAT_ID", "").strip()
+    auto_platform = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", "").strip().lower()
+    auto_chat_id = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_CHAT_ID", "").strip()
     if not (auto_platform and auto_chat_id and auto_platform == platform_name and auto_chat_id == str(chat_id)
-            and (get_session_env("HERMES_CRON_AUTO_DELIVER_THREAD_ID", "").strip() or None) == thread_id):
+            and (get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_THREAD_ID", "").strip() or None) == thread_id):
         return None
     target_label = f"{platform_name}:{chat_id}" + (f":{thread_id}" if thread_id is not None else "")
-    return {"success": True, "skipped": True, "reason": "cron_auto_delivery_duplicate_target", "target": target_label,
-        "note": (f"Skipped send_message to {target_label}. This cron job will already auto-deliver "
+    return {"success": True, "skipped": True, "reason": "scheduled_auto_delivery_duplicate_target", "target": target_label,
+        "note": (f"Skipped send_message to {target_label}. This scheduled job will already auto-deliver "
                  "its final response to that same target. Put the intended user-facing content in "
                  "your final response instead, or use a different target if you want an additional message.")}
 
@@ -553,7 +553,7 @@ async def _dispatch_on_gateway_loop(runner, make_coro, log_message):
 
 async def _send_via_adapter(platform, pconfig, chat_id, chunk, *, thread_id=None, media_files=None,
                             force_document=False):
-    """Live in-process gateway adapter first, else the plugin's ``standalone_sender_fn`` (cron),
+    """Live in-process gateway adapter first, else the plugin's ``standalone_sender_fn`` (scheduled),
     else an error naming both; media uses the adapter's native media APIs under the same rules."""
     platform_name = platform.value if hasattr(platform, "value") else str(platform)
     runner, adapter = _live_adapter(platform)
@@ -579,13 +579,13 @@ async def _send_via_adapter(platform, pconfig, chat_id, chunk, *, thread_id=None
             return {"success": True, "message_id": result.message_id}
         return {"error": f"Adapter send failed: {_bounded_send_error(result.error)}"}
     try:
-        # Discover first: a fresh process (cron/CLI) has not registered plugin platforms yet.
+        # Discover first: a fresh process (scheduled/CLI) has not registered plugin platforms yet.
         sender, _ = _plugin_standalone_sender(platform_name)
     except Exception:
         sender = None
     if sender is None:
         return {"error": (f"No live adapter for platform '{platform_name}'. Is the gateway running with this platform "
-                          f"connected? For out-of-process delivery (e.g. cron in a separate process), the platform "
+                          f"connected? For out-of-process delivery (e.g. scheduled in a separate process), the platform "
                           f"plugin must register a standalone_sender_fn on its PlatformEntry.")}
     try:
         result = await sender(pconfig, chat_id, chunk, thread_id=thread_id, media_files=media_files,
@@ -607,7 +607,7 @@ async def _send_chunks(chunks, send_one):
     # --- Matrix: route ALL sends through the native adapter so text is encrypted in E2EE rooms too (issue:
     # text-only sends arrived with a red padlock because they took the raw-HTTP standalone path). The
     # adapter reuses the live gateway's E2EE session when available (#46310) and falls back to an
-    # encryption-aware ephemeral adapter for standalone/cron. ---
+    # encryption-aware ephemeral adapter for standalone/scheduled. ---
     for i, chunk in enumerate(chunks):
         result = await send_one(chunk, i == len(chunks) - 1)
         if isinstance(result, dict) and result.get("error"):
@@ -626,7 +626,7 @@ def _platform_max_length(platform):
 
 
 def _standalone_send_policy(platform_name):
-    """The plugin's ``StandaloneSendPolicy`` (None = generic routing). Cron calls
+    """The plugin's ``StandaloneSendPolicy`` (None = generic routing). Scheduled calls
     ``_send_to_platform`` directly, so discover first when the name is not yet registered
     (idempotent manifest scan; only this platform's adapter is materialized)."""
     from gateway.platform_registry import platform_registry

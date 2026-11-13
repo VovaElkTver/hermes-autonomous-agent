@@ -346,7 +346,7 @@ class GatewayAdapterLifecycleMixin(GatewaySecondaryReconnectMixin):
                     # No supervisor will revive this process, so exiting only severes the UI's
                     # connections and drops in-flight assistant messages (#118080). Stay alive and
                     # hand recovery to the reconnect watcher; the messaging platform stays down
-                    # either way, but cron / api_server / dashboard keep serving.
+                    # either way, but scheduled / api_server / dashboard keep serving.
                     logger.warning(
                         "%s adapter was lost without entering the reconnection queue; "
                         "on_all_adapters_down=stay_alive — gateway staying alive, reconnect "
@@ -410,7 +410,7 @@ class GatewayAdapterLifecycleMixin(GatewaySecondaryReconnectMixin):
         if not self.adapters and not self._failed_platforms:
             if adapter.fatal_error_retryable and self._on_all_adapters_down() == "stay_alive":
                 # No supervising service manager to revive the process (#118080): stay alive and
-                # keep serving cron / api_server / dashboard while the reconnect watcher owns
+                # keep serving scheduled / api_server / dashboard while the reconnect watcher owns
                 # recovery of the lost platform.
                 logger.warning(
                     "No connected messaging platforms remain; on_all_adapters_down=stay_alive — "
@@ -429,7 +429,7 @@ class GatewayAdapterLifecycleMixin(GatewaySecondaryReconnectMixin):
                 logger.error("No connected messaging platforms remain. Shutting down gateway cleanly.")
             await self.stop()
         elif not self.adapters and self._failed_platforms:
-            # All down but queued: stay alive (cron runs, watcher recovers) rather than restart-loop.
+            # All down but queued: stay alive (scheduled runs, watcher recovers) rather than restart-loop.
             logger.warning(
                 "No connected messaging platforms remain, but %d platform(s) "
                 "queued for reconnection — gateway staying alive, watcher will "
@@ -1060,7 +1060,7 @@ class GatewayAdapterLifecycleMixin(GatewaySecondaryReconnectMixin):
         return claimed
 
     def _record_served_profiles(self, active: str, profile_homes) -> None:
-        """Record the served set (eligible for routing/HTTP prefixes/cron/runtime scope — broader
+        """Record the served set (eligible for routing/HTTP prefixes/scheduled/runtime scope — broader
         than "has a connected adapter") for `hermes status`; seed per-profile PairingStores."""
         with _log_suppressed(logging.DEBUG, "could not record served_profiles", exc_info=True):
             from gateway.status import publish_runtime_status

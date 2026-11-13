@@ -1133,7 +1133,7 @@ def register(ctx) -> None:
         config_connected_fn=config_connected_extra("phone_number_id", "access_token"),
         required_env=["WHATSAPP_CLOUD_PHONE_NUMBER_ID", "WHATSAPP_CLOUD_ACCESS_TOKEN"],
         install_hint="aiohttp/httpx missing — reinstall hermes-agent", setup_fn=_interactive_setup,
-        cron_deliver_env_var="WHATSAPP_CLOUD_HOME_CHANNEL", emoji="📱", allow_update_command=False,
+        scheduled_deliver_env_var="WHATSAPP_CLOUD_HOME_CHANNEL", emoji="📱", allow_update_command=False,
         platform_hint=_PLATFORM_HINT,
         # Adapter lacks edit_message; promote once it lands.
         display_tier="low",

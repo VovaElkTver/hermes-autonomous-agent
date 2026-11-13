@@ -811,13 +811,13 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
             # HERMES_SESSION_KEY scopes per-session caches (interactive sudo password) to this
             # session, not the reused thread. ``cwd`` pins what the system prompt reports as the
             # working directory — otherwise it advertises the Hermes workspace while tools are
-            # rooted at the client's project and edits land outside it. ``cron_session=""`` masks
+            # rooted at the client's project and edits land outside it. ``scheduled_session=""`` masks
             # any leaked process-global HERMES_CRON_SESSION.
             def _session_context() -> Callable[[], None]:
                 from gateway.session_context import clear_session_vars, set_session_vars
 
                 tokens = set_session_vars(
-                    session_key=session_id, session_id=session_id, cwd=state.cwd, cron_session="",
+                    session_key=session_id, session_id=session_id, cwd=state.cwd, scheduled_session="",
                 )
                 return lambda: clear_session_vars(tokens)
 

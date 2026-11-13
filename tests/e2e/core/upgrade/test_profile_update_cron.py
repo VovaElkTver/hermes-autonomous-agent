@@ -1,10 +1,10 @@
-"""`hermes profile install` / `hermes profile update` against a real distribution with cron jobs.
+"""`hermes profile install` / `hermes profile update` against a real distribution with scheduled jobs.
 
-A distribution author schedules jobs with the real CLI (``hermes -p author cron create``) and
+A distribution author schedules jobs with the real CLI (``hermes -p author scheduled create``) and
 publishes the profile directory; a user installs it, schedules a job of their own, and later
 pulls the author's next version with ``hermes profile update``. Every step is a fresh sandboxed
-CLI process over a fake HOME; the assertions read the cron store the scheduler itself reads
-(``cron/jobs.json``) and the CLI's own ``cron list``.
+CLI process over a fake HOME; the assertions read the scheduled store the scheduler itself reads
+(``scheduled/jobs.json``) and the CLI's own ``scheduled list``.
 
 Contract (documented in the command help and profile-distributions.md): shipped jobs are
 installed but NOT auto-scheduled; an update refreshes the jobs the distribution ships, never
@@ -123,7 +123,7 @@ def test_profile_update_refreshes_shipped_jobs_and_never_runs_retired_ones(world
 
 def test_profile_update_keeps_the_users_own_cron_jobs(world):
     jobs = _by_name(world.after_update)
-    assert "my-own-reminder" in jobs, f"`profile update` deleted the user's own cron job; jobs now: {sorted(jobs)}"
+    assert "my-own-reminder" in jobs, f"`profile update` deleted the user's own scheduled job; jobs now: {sorted(jobs)}"
     assert jobs["my-own-reminder"].get("prompt") == "the user's own reminder"
     assert _is_scheduled(jobs["my-own-reminder"]), "the user's own job was paused by the update"
 

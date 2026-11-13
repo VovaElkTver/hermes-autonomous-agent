@@ -3,7 +3,7 @@ refuse every Bot Chat delivery for good (#141243, #143715).
 
 A crash or reconnect can leave a CLI/TUI/Desktop row titled "Bot Chat" with a route column but no
 local binding; another profile or (outside Desktop) another login may have stamped it.
-``adopt_legacy_session`` refuses such a row for every caller, so a cron ``deliver: bot-chat``
+``adopt_legacy_session`` refuses such a row for every caller, so a scheduled ``deliver: bot-chat``
 failed ``not_found`` on every beat. The door now moves it aside, as it
 does an API or messaging row, and mints the profile's local Bot Chat; adoptable history stays put.
 """
@@ -33,11 +33,11 @@ async def _deliver(authority, key, connection=None):
     from gateway.session_bot import deliver
     from tools.bot_live_delivery import _bot_chat_tip
     home = Path(authority.db.db_path).parent.resolve()
-    # The cron producer's door: ``bot_relay.deliver`` on a local interactive connection, no author,
+    # The scheduled producer's door: ``bot_relay.deliver`` on a local interactive connection, no author,
     # pinned to the Bot Chat it discovered first (``find_canonical_live_owner``).
     pinned = _bot_chat_tip(home)
     return await deliver(connection or _local_owner(authority), dict(id=key * 32, profile=served_profile_name(home),
-                                                       message='cron beat', **({'session_id': pinned} if pinned else {})))
+                                                       message='scheduled beat', **({'session_id': pinned} if pinned else {})))
 
 
 @pytest.mark.parametrize('column, value', [

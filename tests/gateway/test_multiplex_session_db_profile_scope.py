@@ -838,7 +838,7 @@ def test_crash_marker_from_a_secondary_profile_survives_restart(multiplex_homes)
 
 def test_default_namespace_rows_stay_in_launch_store_under_secondary_scope(multiplex_homes):
     """``agent:main`` rows belong to the launch home even while a secondary profile's scope is
-    active. A scoped background tick (async-delegation drain, cron mirror) that touches a
+    active. A scoped background tick (async-delegation drain, scheduled mirror) that touches a
     default-profile chat used to persist it into the secondary's ``state.db`` — the
     ``profile_name='<A>'`` row inside B's store from #102157."""
     root, profile = multiplex_homes

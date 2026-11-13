@@ -206,7 +206,7 @@ def _resolve_safe_cwd(cwd: str) -> str:
 
     Used by ``_run_bash`` to recover when the configured cwd is gone — most commonly because a previous tool
     call deleted its own working directory (issue #17558) — or inaccessible to this user, e.g. ``/root``
-    leaking from a root-launched CLI session into a non-root gateway's cron jobs (issue #65583). Without
+    leaking from a root-launched CLI session into a non-root gateway's scheduled jobs (issue #65583). Without
     this guard, ``subprocess.Popen(..., cwd=...)`` raises ``FileNotFoundError``/``PermissionError`` before
     bash starts, wedging every subsequent terminal call until the gateway restarts.
     """
@@ -217,7 +217,7 @@ def _resolve_safe_cwd(cwd: str) -> str:
         logger.warning(
             "Configured terminal cwd %r exists but is not accessible to "
             "this user (uid=%s) — falling back to the nearest usable "
-            "directory. If this is a gateway/cron process, check for "
+            "directory. If this is a gateway/scheduled process, check for "
             "root-owned paths leaking into terminal.cwd / TERMINAL_CWD "
             "(#65583).",
             cwd, getattr(os, "getuid", lambda: "?")())
@@ -321,7 +321,7 @@ def _finalize_child_env(env: dict) -> dict:
 def _scrubbed_env(parts, plugin_strip: frozenset, fix_path) -> dict:
     """Filter each ``(items, unwrap_force)`` in *parts* into one env, rewrite PATH via
     *fix_path* (always prepending the hermes install dir so bare ``hermes`` resolves
-    for children of a systemd/cron-launched gateway), then apply the shared guards."""
+    for children of a systemd/scheduled-launched gateway), then apply the shared guards."""
     out: dict[str, str] = {}
     for items, unwrap_force in parts:
         _filter_secret_env(items, out, unwrap_force=unwrap_force, plugin_strip=plugin_strip)
@@ -333,8 +333,8 @@ def _scrubbed_env(parts, plugin_strip: frozenset, fix_path) -> dict:
     out.update((k, v) for k, v in scoped_passthrough_additions(out).items() if k not in plugin_strip)
     path_key = _path_env_key(out)
     # Keep bare ``hermes`` invocations available to child jobs even when the gateway was launched by a
-    # service manager or cron without the console script's directory on PATH. The terminal environment
-    # already applies this invariant; Cron scripts use this sanitizer directly (#92998).
+    # service manager or scheduled without the console script's directory on PATH. The terminal environment
+    # already applies this invariant; Scheduled scripts use this sanitizer directly (#92998).
     if path_key is not None:
         out[path_key] = _prepend_hermes_bin_dir(fix_path(out.get(path_key, "")))
     return _finalize_child_env(out)
@@ -656,7 +656,7 @@ _HERMES_BIN_DIR_IS_PAYLOAD = False
 
 def _resolve_hermes_bin_dir() -> str | None:
     """Directory holding the ``hermes`` console-script, or None (cached). A gateway
-    launched by systemd/cron/a desktop launcher lacks the install dir on PATH and bare
+    launched by systemd/scheduled/a desktop launcher lacks the install dir on PATH and bare
     ``hermes`` exits 127. Order: a sealed payload's own launcher dir; ``which``; absolute
     ``sys.argv[0]`` naming a real hermes executable; ``sys.executable``'s dir if it holds
     the shim."""

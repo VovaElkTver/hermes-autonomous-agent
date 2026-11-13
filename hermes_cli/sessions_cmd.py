@@ -40,7 +40,7 @@ def _size_delta_label(saved_mb: float) -> str:
 
 def _confirm_prompt(prompt: str) -> bool | None:
     """Prompt for y/N confirmation. ``None`` when stdin is not a terminal and hits EOF (/dev/null, an empty
-    pipe: cron, a wrapper), which is not the same as the user saying no; Ctrl-D at a terminal is a no.
+    pipe: scheduled, a wrapper), which is not the same as the user saying no; Ctrl-D at a terminal is a no.
     Ctrl-C propagates: an interrupt is neither a no nor a success."""
     try:
         return input(prompt).strip().lower() in {"y", "yes"}
@@ -53,7 +53,7 @@ def _confirm_prompt(prompt: str) -> bool | None:
 
 def _confirm_or_exit_code(prompt: str, *, declined: str = "Cancelled.", unattended: str | None = "--yes") -> int | None:
     """``None`` to proceed, else the exit code after saying why not. A decline exits 0; a run nobody could
-    answer exits 1, so a cron job or wrapper that forgot *unattended* does not read "nothing happened" as
+    answer exits 1, so a scheduled job or wrapper that forgot *unattended* does not read "nothing happened" as
     success."""
     try:
         answer = _confirm_prompt(prompt)
@@ -773,7 +773,7 @@ def _cmd_prune_or_archive(db, args, action):
         return _prune_never_active_keyed(db, args)
     from hermes_cli.session_filters import build_prune_filters, describe_filters, format_epoch
     # Bare `prune` keeps the historical "older than 90 days" default. ANY filter — including --source —
-    # suppresses the implicit cutoff (`prune --source cron` matches ALL cron sessions); the preview +
+    # suppresses the implicit cutoff (`prune --source scheduled` matches ALL scheduled sessions); the preview +
     # confirmation below is the safety net.
     if prune and not _any_filter_args(args):
         args.older_than = "90"
@@ -1401,7 +1401,7 @@ def _print_empty_store(action: str, args) -> None:
         print("No sessions found.")
 
 
-# VACUUM, the FTS-layout rebuild and bulk deletes rewrite the store; underneath a live gateway/Desktop/cron
+# VACUUM, the FTS-layout rebuild and bulk deletes rewrite the store; underneath a live gateway/Desktop/scheduled
 # writer that is the second-writer class behind the retired-WAL refusal (#110054). `--force` is the override.
 _HELD_STORE_ACTIONS = frozenset({"optimize", "optimize-storage", "prune"})
 

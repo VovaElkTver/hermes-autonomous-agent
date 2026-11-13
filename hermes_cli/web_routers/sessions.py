@@ -35,8 +35,8 @@ list_router = APIRouter()
 search_router = APIRouter()
 manage_router = APIRouter()
 
-_SCHEDULED_PROFILE_HOME = late("_cron_profile_home", "hermes_cli.web_server_cron")
-_SCHEDULED_DEFAULT_PROFILE = late("_cron_default_profile", "hermes_cli.web_server_cron")
+_SCHEDULED_PROFILE_HOME = late("_profile_home", "hermes_cli.web_server_profile_homes")
+_SCHEDULED_DEFAULT_PROFILE = late("_default_dashboard_profile", "hermes_cli.web_server_profile_homes")
 _open_session_db_for_profile = late("_open_session_db_for_profile", "hermes_cli.web_server_sessions")
 _session_db_path_for_profile = late("_session_db_path_for_profile", "hermes_cli.web_server_sessions")
 
@@ -203,8 +203,8 @@ def get_sessions(
             min_message_count = max(0, min_messages)
             archived_only = archived == "only"
             include_archived = archived == "include"
-            # Source scoping: the desktop splits recents (exclude_sources=cron) from
-            # the scheduled-jobs section (source=cron) into two independent lists.
+            # Source scoping: the desktop splits recents (exclude_sources=scheduled) from
+            # the scheduled-jobs section (source=scheduled) into two independent lists.
             source_list = _csv(sources)
             include_subagents, exclude_list = subagent_listing_scope(
                 Path(db.db_path).parent, source=source or None, sources=source_list or None,

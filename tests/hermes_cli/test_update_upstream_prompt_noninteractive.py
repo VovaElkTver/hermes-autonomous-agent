@@ -1,7 +1,7 @@
 """The fork-upstream prompt must never block a non-interactive update (#60240).
 
 `_sync_with_upstream_if_needed` asks "Add official repo as 'upstream' remote?"
-on fork checkouts with no upstream remote. In unattended contexts (CI, cron,
+on fork checkouts with no upstream remote. In unattended contexts (CI, scheduled,
 the desktop updater hand-off) stdin is open but nobody answers, so a bare
 ``input()`` blocks forever. These tests pin the gate: under ``assume_yes`` or
 a non-TTY stdio pair the prompt is skipped as a decline WITHOUT persisting the

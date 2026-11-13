@@ -19,5 +19,5 @@ def test_frontmatter_blueprint_is_a_valid_installed_blueprint():
     assert spec is not None and spec.skill_name == "live-dashboard"
     job = blueprint_to_job_spec(spec)
     assert job["skills"] == ["live-dashboard"]
-    assert len(job["schedule"].split()) == 5, f"invalid cron expr: {job['schedule']}"
+    assert len(job["schedule"].split()) == 5, f"invalid scheduled expr: {job['schedule']}"
     assert "[SILENT]" in job["prompt"] and "~/.hermes" not in job["prompt"]

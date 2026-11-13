@@ -1,6 +1,6 @@
 """Regression tests for inaccessible-cwd fallback (#65583).
 
-``/root`` leaking into a non-root gateway/cron process's terminal cwd used to
+``/root`` leaking into a non-root gateway/scheduled process's terminal cwd used to
 kill every command with ``PermissionError: [Errno 13] Permission denied:
 '/root'`` — ``os.path.isdir('/root')`` is True for a non-root user (stat only
 needs search permission on ``/``), so the old existence-only check in

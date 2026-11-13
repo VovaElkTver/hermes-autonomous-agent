@@ -11,7 +11,7 @@ def test_exact_silence_tokens_are_intentional_silence():
 
 
 def test_autonomous_silence_accepts_marker_with_own_line_note():
-    """The loose rule for cron/webhook lanes: marker + explanation suppresses."""
+    """The loose rule for scheduled/webhook lanes: marker + explanation suppresses."""
     assert is_autonomous_silence_response("[SILENT]")
     assert is_autonomous_silence_response("[SILENT]\n\nNothing new this tick.")
     assert is_autonomous_silence_response("2 deals filtered\n\n[SILENT]")
@@ -20,7 +20,7 @@ def test_autonomous_silence_accepts_marker_with_own_line_note():
 
 
 def test_translated_sentinel_is_silence_in_every_form_the_english_one_is():
-    """#110935: a lane that answers the cron instruction in its own language translates the
+    """#110935: a lane that answers the scheduled instruction in its own language translates the
     sentinel; ``[静默]`` must suppress delivery exactly like ``[SILENT]`` (exact, own-line note,
     reordered lines, bracketless, edge punctuation)."""
     assert is_intentional_silence_response("[静默]")
@@ -36,7 +36,7 @@ def test_prose_mentioning_the_translated_sentinel_is_delivered():
 
 
 def test_autonomous_lane_agrees_with_interactive_lane_on_cjk_punctuation_variants():
-    """A Chinese lane emits fullwidth brackets or a trailing ``。``; cron/webhook must suppress
+    """A Chinese lane emits fullwidth brackets or a trailing ``。``; scheduled/webhook must suppress
     exactly what the interactive predicate suppresses, or the two lanes drift on the new tokens."""
     for variant in ("【静默】", "静默。", "【沉默】", "沉默。", "**[静默]**", "NO_REPLY."):
         assert is_intentional_silence_response(variant)

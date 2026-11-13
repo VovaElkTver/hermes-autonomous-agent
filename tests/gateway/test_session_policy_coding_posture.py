@@ -87,7 +87,7 @@ def test_tool_sources_and_picks_keep_their_toolsets_in_a_workspace(project, para
 
 
 def test_only_session_create_opts_into_the_workspace_posture(project):
-    # Kanban workers, legacy-row adoption, cron and hosted rooms build without opting in.
+    # Kanban workers, legacy-row adoption, scheduled and hosted rooms build without opting in.
     from gateway.session_policy import build_policy
     assert build_policy({'source': 'cli', 'cwd': str(project)}, FOCUS).toolsets == ('terminal',)
 

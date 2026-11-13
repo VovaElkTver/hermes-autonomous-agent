@@ -320,10 +320,10 @@ def _request_protected_instruction_approval(reasons: list[str], task_id: str = "
         except Exception:
             callback = None
         if callback is None:
-            # No human channel (script, cron, background thread): fail closed —
+            # No human channel (script, scheduled run, background thread): fail closed —
             # auto-approving here would recreate the persistence vector.
             return blocked.format(why=_NO_HUMAN)
-        # -q (every kanban worker), cron and unattended platforms can have a callback registered that nobody
+        # -q (every kanban worker), scheduled and unattended platforms can have a callback registered that nobody
         # answers: fail closed now, and never auto-approve, whatever approvals.<context>_mode says.
         from tools.approval_context import _no_user_can_answer
         if _no_user_can_answer():
@@ -393,7 +393,7 @@ def _check_approval_required_write(paths: list[str], task_id: str = "default") -
         pattern_key="ssh_config_write",
         description=description,
         display_target=f"<write to {display_targets}>",
-        cron_deny_message=blocked.format(why="requires approval but this cron session denies it."),
+        scheduled_deny_message=blocked.format(why="requires approval but this scheduled session denies it."),
         single_query_deny_message=blocked.format(
             why="requires approval but single-query (-q) sessions run "
                 "without a user present to approve it. To allow flagged "

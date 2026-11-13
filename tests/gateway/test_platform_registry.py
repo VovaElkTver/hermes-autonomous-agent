@@ -278,7 +278,7 @@ class TestGatewayConfigPluginPlatform:
 
 
 
-# ── Cron platform resolution ─────────────────────────────────────────
+# ── Scheduled platform resolution ─────────────────────────────────────────
 
 
 

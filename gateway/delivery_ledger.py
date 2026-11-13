@@ -280,8 +280,8 @@ def record_obligation(*, obligation_id: str, session_key: str, platform: str, ch
                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?)""",
             (obligation_id, session_key, platform, str(chat_id), str(thread_id) if thread_id else None,
              content, now, now, pid, started, str(adapter_profile).strip() if adapter_profile else "default"))
-        # Same transaction, same connection: the cron ledgers prune this way too
-        # (cron/delivery_queue._prune_terminal_unlocked, cron/executions._prune_unlocked).
+        # Same transaction, same connection: the scheduled ledgers prune this way too
+        # (scheduled/delivery_queue._prune_terminal_unlocked, scheduled/executions._prune_unlocked).
         _prune_unlocked(conn, now)
 
 

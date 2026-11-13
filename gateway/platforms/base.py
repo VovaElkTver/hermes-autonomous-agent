@@ -1830,7 +1830,7 @@ class BasePlatformAdapter(ABC):
     splits_long_messages: bool = False
     # Prefix users can always TYPE for Hermes commands ("!" where the client eats a leading "/").
     typed_command_prefix: str = "/"
-    # ``in_channel`` continuable-cron surface: job delivered FLAT, plain replies continue it via
+    # ``in_channel`` continuable-scheduled surface: job delivered FLAT, plain replies continue it via
     # the whole-channel bucket ``(platform, chat_id, None)``; needs a flat-reply outbound gate too
     # (Slack ``reply_in_thread: false``). False fails SAFE -> ``thread``.
     supports_inchannel_continuable: bool = False
@@ -2150,7 +2150,7 @@ class BasePlatformAdapter(ABC):
         except ScopedLockDirUnusable as exc:
             # An ACL an elevated install left on the lock dir (#134889 W2): name the repair. Stay
             # RETRYABLE: the dir is shared by every token-locked adapter, so a non-retryable park
-            # on a gateway that runs only those exits 78 and takes cron and the Desktop attach
+            # on a gateway that runs only those exits 78 and takes scheduled and the Desktop attach
             # endpoint down with it. The status module logs the WARNING once per dir (DEBUG after),
             # so the watcher's backoff retries quietly and picks the repair up without a restart.
             self._platform_lock_identity = None

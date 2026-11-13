@@ -155,7 +155,7 @@ def test_oneshot_unit_dispatcher_scope_wraps_or_warns_never_dooms_silently(
     user bus the worker gets its own ``hermes-worker-*`` scope; without one the
     spawn still happens (the unit's ``KillMode``/lifetime is unknowable, a
     long-lived sequencer keeps working) but the operator is told exactly why the
-    workers may die. A cron caller under the same unit is unchanged."""
+    workers may die. A scheduled caller under the same unit is unchanged."""
     from tools import process_registry
 
     workspace, task = worker_setup
@@ -186,10 +186,10 @@ def test_oneshot_unit_dispatcher_scope_wraps_or_warns_never_dooms_silently(
     warned = [r.getMessage() for r in caplog.records if "KILLED when the unit exits" in r.getMessage()]
     assert len(warned) == 1 and "KillMode=process" in warned[0]
 
-    cron = process_registry.restart_safe_gateway_child_argv(
-        ["hermes", "cron"], unit_suffix="cron-job-1", require_restart_safe_scope=True,
+    scheduled = process_registry.restart_safe_gateway_child_argv(
+        ["hermes", "cron"], unit_suffix="scheduled-job-1", require_restart_safe_scope=True,
     )
-    assert cron.mode == "in_process"
+    assert scheduled.mode == "in_process"
 
 
 @pytest.mark.platforms("linux")

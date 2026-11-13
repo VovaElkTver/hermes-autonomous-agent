@@ -3,7 +3,7 @@ state.db under an authority turn that outlived the settle (N59).
 
 The settle used to wait a flat TURN_SETTLE_SECONDS (45 s) whatever the drain and interrupt phases had
 already spent, so the stop ran past its watchdog leash; and the SessionDB close gate counted executor,
-cron, API and deferred workers but not the authority's still-running turn, so it closed and
+scheduled, API and deferred workers but not the authority's still-running turn, so it closed and
 checkpointed state.db under a live writer.
 """
 import asyncio

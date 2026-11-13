@@ -287,7 +287,7 @@ class HostedRoomService:
         if profiles_dir.is_dir():
             # ``profiles/.deleted/`` is the tombstone dir `hermes profile delete` leaves behind, not a
             # profile: feeding it to validate_roster failed plan_next_task on every cycle (#106847).
-            # Marker-less dirs (cron/log side-effect shells) are not profiles either.
+            # Marker-less dirs (scheduled/log side-effect shells) are not profiles either.
             profiles.update(
                 path.name for path in profiles_dir.iterdir()
                 if path.is_dir() and not path.name.startswith(".")

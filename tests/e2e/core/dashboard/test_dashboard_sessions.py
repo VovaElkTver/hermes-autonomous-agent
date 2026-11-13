@@ -2,7 +2,7 @@
 
 Users hit this as "the Sessions page 500s / shows 'database is locked' while a chat is running" or
 "the session count jumps backwards / double-counts" (the dashboard reads the same SQLite file the
-agent, gateway and cron write). Harness: the real ``hermes dashboard`` process and a real writer
+agent, gateway and scheduled write). Harness: the real ``hermes dashboard`` process and a real writer
 process (``hermes_state.SessionDB``, the agent's own persistence layer) appending sessions and
 messages as fast as it can. Readers hammer the list, stats, detail and messages routes in parallel.
 

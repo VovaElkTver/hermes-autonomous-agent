@@ -1,7 +1,7 @@
 """Multiplex-only reporting: one host gateway serving N profiles must be reported as such.
 
 Invariants (all fail on origin/main):
-* ``hermes -p <served> cron status`` names the HOST gateway as the ticker and never tells the
+* ``hermes -p <served> scheduled status`` names the HOST gateway as the ticker and never tells the
   user to start a second process.
 * ``hermes -p <served> doctor`` reports the single host gateway + its roster, not
   "Per-profile gateways: up/total", and still checks the HOST systemd unit's linger.
@@ -39,12 +39,12 @@ def served_host(tmp_path, monkeypatch):
 
 
 def test_cron_status_names_the_host_gateway_for_a_served_profile(served_host, capsys, monkeypatch):
-    from cron import jobs
-    from hermes_cli import cron
+    from scheduled import jobs
+    from hermes_cli import scheduled
 
-    monkeypatch.setattr(jobs, "CRON_DIR", served_host / "profiles/served/cron")
-    monkeypatch.setattr(jobs, "JOBS_FILE", served_host / "profiles/served/cron/jobs.json")
-    cron.cron_status()
+    monkeypatch.setattr(jobs, "CRON_DIR", served_host / "profiles/served/scheduled")
+    monkeypatch.setattr(jobs, "JOBS_FILE", served_host / "profiles/served/scheduled/jobs.json")
+    scheduled.cron_status()
     out = capsys.readouterr().out
 
     assert f"PID {os.getpid()}" in out and "served" in out

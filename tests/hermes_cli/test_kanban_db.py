@@ -1565,7 +1565,7 @@ def test_connect_heals_reduced_tasks_schema_seeded_by_external_harness(kanban_ho
 # Dispatcher spawn invocation — _resolve_hermes_argv()
 #
 # Workers spawned by the dispatcher must use a `hermes` invocation that does
-# not depend on PATH being set up correctly. cron jobs, systemd User= services,
+# not depend on PATH being set up correctly. scheduled jobs, systemd User= services,
 # launchd jobs, and other detached processes routinely run with a stripped
 # $PATH that doesn't include the venv's bin/, so a bare `["hermes", ...]`
 # spawn fails with FileNotFoundError and the task gets stuck. The resolver

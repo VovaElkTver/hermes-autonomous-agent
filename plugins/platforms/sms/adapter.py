@@ -349,7 +349,7 @@ def register(ctx) -> None:
         dashboard_required_env=("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"),
         check_fn=check_sms_requirements, is_connected=_is_connected,
         required_env=["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"],
-        install_hint="pip install aiohttp", cron_deliver_env_var="SMS_HOME_CHANNEL",
+        install_hint="pip install aiohttp", scheduled_deliver_env_var="SMS_HOME_CHANNEL",
         standalone_sender_fn=_standalone_send, max_message_length=MAX_SMS_LENGTH, pii_safe=True,
         emoji="📱", allow_update_command=True,
         platform_hint=_PLATFORM_HINT,

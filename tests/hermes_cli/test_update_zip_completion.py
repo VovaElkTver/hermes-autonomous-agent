@@ -37,7 +37,7 @@ def zip_update(tmp_path, monkeypatch, isolated_source_completion):
             f"_config_version: {DEFAULT_CONFIG['_config_version'] - 1}\n"
             "model:\n  default: retained-model\n", encoding="utf-8")
     (active / ".env").write_text("EXAMPLE_TOKEN=retained\n", encoding="utf-8")
-    jobs = active / "cron/jobs.json"
+    jobs = active / "scheduled/jobs.json"
     jobs.parent.mkdir()
     original_jobs = {"jobs": [{"id": "keep-me", "prompt": "retained schedule"}]}
     jobs.write_text(json.dumps(original_jobs), encoding="utf-8")
@@ -79,7 +79,7 @@ def zip_update(tmp_path, monkeypatch, isolated_source_completion):
         assert selected == root and desktop is False
         assert (root / "payload.txt").read_text() == "new"
         events.append("prepare")
-        # The pre-update snapshot must reach the real cron-loss safety net.
+        # The pre-update snapshot must reach the real scheduled-loss safety net.
         jobs.write_text('{"jobs": []}', encoding="utf-8")
     monkeypatch.setattr("hermes_cli.source_build.build_update_products", prepare)
     # PM/builds and machine-level repair are independently covered. Keep real

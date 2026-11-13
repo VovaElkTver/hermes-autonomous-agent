@@ -72,7 +72,7 @@ sessions_router = APIRouter()
 router = APIRouter()
 
 # Late-bound web_server helpers (resolved at call time; cycle-safe, monkeypatch-transparent).
-_scheduled_profile_home = late("_cron_profile_home", "hermes_cli.web_server_cron")
+_scheduled_profile_home = late("_profile_home", "hermes_cli.web_server_profile_homes")
 _resolve_profile_dir = late("_resolve_profile_dir", "hermes_cli.web_server_profiles")
 _spawn_hermes_action = late("_spawn_hermes_action", "hermes_cli.web_server_gateway")
 
@@ -472,8 +472,8 @@ def get_profiles_sessions(
     targets = ([_scheduled_profile_home(profile)] if profile and profile != "all"
                else _profile_targets("GET /api/profiles/sessions"))
 
-    # Source scoping (see /api/sessions): recents pass exclude_sources=cron, the scheduled-jobs
-    # section source=cron — two independent lists so scheduled sessions can't starve recents.
+    # Source scoping (see /api/sessions): recents pass exclude_sources=scheduled, the scheduled-jobs
+    # section source=scheduled — two independent lists so scheduled sessions can't starve recents.
     filters = dict(
         source=source or None, sources=_csv_list(sources) or None,
         exclude_sources=_csv_list(exclude_sources) or None, min_message_count=max(0, min_messages),
@@ -541,7 +541,7 @@ def get_profiles_sessions_sidebar(
     recents_scope = (recents_profile or "all").strip() or "all"
     recents_exclude_list = [s for s in (recents_exclude or "").split(",") if s.strip()]
     messaging_exclude_list = [s for s in (messaging_exclude or "").split(",") if s.strip()]
-    # (source, exclude) per slice; ``source=cron`` is the implicit scheduled-source taxonomy.
+    # (source, exclude) per slice; ``source=scheduled`` is the implicit scheduled-source taxonomy.
     slice_scope = {"recents": (None, recents_exclude_list), "cron": ("cron", None),
                    "messaging": (None, messaging_exclude_list)}
     cap = {"recents": min(max(recents_limit, 1), 500), "cron": min(max(cron_limit, 1), 500),

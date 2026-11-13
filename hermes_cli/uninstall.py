@@ -795,7 +795,7 @@ def run_uninstall(args):
     print(f"  Code:    {project_root}")
     print(f"  Config:  {hermes_home / 'config.yaml'}")
     print(f"  Secrets: {hermes_home / '.env'}")
-    print(f"  Data:    {hermes_home / 'cron/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
+    print(f"  Data:    {hermes_home / 'scheduled/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
     from hermes_cli.gui_uninstall import desktop_userdata_dir
     if (desktop_userdata := desktop_userdata_dir()).exists():
         print(f"  Desktop: {desktop_userdata}  (app data - kept by 'Keep data', removed by 'Full uninstall')")

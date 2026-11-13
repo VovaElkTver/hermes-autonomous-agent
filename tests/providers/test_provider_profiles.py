@@ -6,7 +6,7 @@ from providers import get_provider_profile
 class TestOpenRouterProfile:
 
     def test_sticky_session_id_normalizes_cron_timestamp(self):
-        """Cron re-fires of the same job keep the same sticky routing key."""
+        """Scheduled re-fires of the same job keep the same sticky routing key."""
         p = get_provider_profile("openrouter")
         first = p.build_extra_body(session_id="cron_job42_20260801_090000")
         second = p.build_extra_body(session_id="cron_job42_20260802_090000")
@@ -34,7 +34,7 @@ class TestOpenRouterProfile:
         assert tl["extra_headers"]["x-grok-conv-id"] == "sess-abc123"
 
     def test_grok_conv_id_normalizes_cron_timestamp(self):
-        """Cron re-fires of the same job must pin to the same xAI backend,
+        """Scheduled re-fires of the same job must pin to the same xAI backend,
         same as the body.session_id sticky key (#78941)."""
         p = get_provider_profile("openrouter")
         _, first = p.build_api_kwargs_extras(
@@ -94,7 +94,7 @@ class TestOpenRouterProfile:
 class TestNousProfile:
 
     def test_sticky_session_id_normalizes_cron_timestamp(self):
-        """Cron re-fires of the same job keep the same sticky routing key."""
+        """Scheduled re-fires of the same job keep the same sticky routing key."""
         p = get_provider_profile("nous")
         first = p.build_extra_body(session_id="cron_job42_20260801_090000")
         second = p.build_extra_body(session_id="cron_job42_20260802_090000")

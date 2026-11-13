@@ -173,7 +173,7 @@ def _resolve_budget_fallback(
 
     # A kanban worker must record a terminal outcome whether or not a fallback path
     # was eligible, so the dispatcher learns the worker could not complete. Only the
-    # dispatcher-owned worker owns the task: an in-process delegate_task child or cron run
+    # dispatcher-owned worker owns the task: an in-process delegate_task child or scheduled run
     # inherits ``HERMES_KANBAN_TASK`` via os.environ but exhausting ITS budget must not
     # close the parent's run and release its claim (#112817).
     _kanban_task = (
@@ -601,7 +601,7 @@ def _mirror_turn_to_memory(
         interrupted=interrupted, messages=messages,
     )
     # Background memory/skill review runs AFTER delivery so it never competes with the
-    # user's task. Suppressed by skip_background_review (e.g. cron): the fork costs
+    # user's task. Suppressed by skip_background_review (e.g. scheduled): the fork costs
     # ~30K tokens / event with no human-in-the-loop benefit. Best-effort; the review
     # clones the snapshot structurally so its sanitizers can't reach the live transcript.
     if (
@@ -676,7 +676,7 @@ def finalize_turn(
     # that could not be shrunk) carry the verdict the UI descriptor needs; a bare
     # ``turn_exit_reason`` collapsed to code="unknown", retryable=True on every surface.
     # Advisory verdicts (``fails_turn=False``) only add the code: ``failed``/``completed`` keep
-    # the loop's values so cron, kanban and transcript persistence behave as before.
+    # the loop's values so scheduled, kanban and transcript persistence behave as before.
     _exit_failure = None if interrupted else exit_reason_failure(_turn_exit_reason)
     if _exit_failure is not None and _exit_failure.fails_turn:
         failed = True

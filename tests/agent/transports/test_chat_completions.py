@@ -908,7 +908,7 @@ class TestPromptCacheKeyCapability:
         assert first != key("cron_job_20260715_100500", tool_name="search")
 
     def test_unrelated_sessions_get_distinct_keys(self, transport):
-        """#78941: identical static prefix across unrelated (non-cron) sessions
+        """#78941: identical static prefix across unrelated (non-scheduled) sessions
         must not collapse onto one shared prompt_cache_key."""
         kw1 = transport.build_kwargs(
             model="cache-model",

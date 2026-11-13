@@ -25,7 +25,7 @@ _TEXT_ONLY = frozenset({'text', 'surface_v1', 'display_v1', 'local_operator_v1'}
 # Sessions launched from an interactive local surface (classic CLI, TUI, Desktop, ACP editor): their
 # plain-text rows are prompt.submit input, whose observers settle a ``steered``/``cancelled`` row.
 # ``desktop`` is the label a Desktop chat migrated from main keeps (hermes_state_local_migration).
-# cron, kanban, a2a and hosted-room (bot_room) producers read a saved result for every outcome they
+# scheduled, kanban, a2a and hosted-room (bot_room) producers read a saved result for every outcome they
 # do not name, so a transfer or replacement would strand them: never offered, refused by name.
 _INTERACTIVE_SOURCES = frozenset({'cli', 'tui', 'gui', 'desktop', 'acp'})
 

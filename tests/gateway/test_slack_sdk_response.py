@@ -273,7 +273,7 @@ class TestHandoffThread:
         assert asyncio.run(adapter.create_handoff_thread("C_GEN", "review")) is None
 
 
-# ── standalone (out-of-process cron/send_message) delivery ─────────────────
+# ── standalone (out-of-process scheduled/send_message) delivery ─────────────────
 
 
 @contextlib.contextmanager
@@ -308,7 +308,7 @@ class TestStandaloneSendMediaPath:
 
     @response_shape
     def test_text_alongside_media_reports_its_ts(self, make_response, tmp_path):
-        """The text post's ts is the message_id cron threads follow-ups onto."""
+        """The text post's ts is the message_id scheduled threads follow-ups onto."""
         media = tmp_path / "report.pdf"
         media.write_bytes(b"%PDF-1.4 x")
         client = MagicMock()

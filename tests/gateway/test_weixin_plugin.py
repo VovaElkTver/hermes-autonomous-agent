@@ -331,7 +331,7 @@ class TestWeixinChunkDelivery:
     @patch.object(weixin, "_upload_ciphertext", new=AsyncMock(return_value="enc-q"))
     @patch.object(weixin, "_get_upload_url", new=AsyncMock(return_value={"upload_full_url": "https://cdn.example.com/upload"}))
     def test_media_send_reads_ret_and_resends_without_token_on_stale_session(self, send_items_mock, tmp_path):
-        """The media leg (cron media_files / send_document) must honour iLink ret like _send_text_chunk: a stale-token
+        """The media leg (scheduled media_files / send_document) must honour iLink ret like _send_text_chunk: a stale-token
         ``ret=-2 prepare failed`` gets one tokenless re-send, and a persistent error is a failure, not success (#112709)."""
         adapter = self._connected_adapter()
         doc = tmp_path / "report.pdf"
@@ -883,7 +883,7 @@ def test_register_declares_weixin_platform_entry():
     assert captured["setup_fn"] is weixin.interactive_setup
     assert captured["standalone_sender_fn"] is weixin._standalone_send
     assert captured["required_env"] == ["WEIXIN_ACCOUNT_ID", "WEIXIN_TOKEN"]
-    assert (captured["allowed_users_env"], captured["allow_all_env"], captured["cron_deliver_env_var"]) == (
+    assert (captured["allowed_users_env"], captured["allow_all_env"], captured["scheduled_deliver_env_var"]) == (
         "WEIXIN_ALLOWED_USERS", "WEIXIN_ALLOW_ALL_USERS", "WEIXIN_HOME_CHANNEL")
     assert captured["install_hint"] == "Weixin: aiohttp/cryptography not installed"
     assert captured["max_message_length"] == 0 and captured["allow_update_command"] is True

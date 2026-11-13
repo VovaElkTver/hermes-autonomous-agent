@@ -3006,7 +3006,7 @@ class TestBuzzPluginRegistration:
         ctx.register_platform.assert_called_once()
         kwargs = ctx.register_platform.call_args.kwargs
         assert kwargs["name"] == "buzz"
-        assert kwargs["cron_deliver_env_var"] == "BUZZ_HOME_CHANNEL"
+        assert kwargs["scheduled_deliver_env_var"] == "BUZZ_HOME_CHANNEL"
         assert kwargs["allowed_users_env"] == "BUZZ_ALLOWED_USERS"
         assert kwargs["allow_all_env"] == "BUZZ_ALLOW_ALL_USERS"
         assert callable(kwargs["standalone_sender_fn"])
@@ -3029,14 +3029,14 @@ class TestStandaloneSend:
 
         async def fake_exec(cli_path, args, *, relay_url, private_key, auth_tag="", input_text=None, timeout=30.0):
             captured.update(cli_path=cli_path, args=args, relay_url=relay_url, auth_tag=auth_tag, input_text=input_text)
-            return 0, json.dumps({"accepted": True, "event_id": "evt-cron", "message": ""}), ""
+            return 0, json.dumps({"accepted": True, "event_id": "evt-scheduled", "message": ""}), ""
 
         monkeypatch.setattr(_buzz_mod, "_exec_buzz", fake_exec)
 
-        result = await _standalone_send(PlatformConfig(enabled=True, extra={}), CHANNEL, "cron says hi")
-        assert result == {"success": True, "message_id": "evt-cron"}
+        result = await _standalone_send(PlatformConfig(enabled=True, extra={}), CHANNEL, "scheduled says hi")
+        assert result == {"success": True, "message_id": "evt-scheduled"}
         assert captured["args"][:2] == ["messages", "send"]
-        assert captured["input_text"] == "cron says hi"
+        assert captured["input_text"] == "scheduled says hi"
         # The private key must never be part of argv
         assert all("nsec1x" not in str(a) for a in captured["args"])
 
@@ -3044,7 +3044,7 @@ class TestStandaloneSend:
     async def test_standalone_send_injects_owner_auth_tag_from_credentials_file(
         self, monkeypatch, tmp_path
     ):
-        """Cron/standalone path must load NIP-OA auth_tag from credentials JSON.
+        """Scheduled/standalone path must load NIP-OA auth_tag from credentials JSON.
 
         Main-line regression: when only BUZZ_PRIVATE_KEY is ambient and the
         credentials file holds auth_tag, omitting injection causes relay 403
@@ -3082,7 +3082,7 @@ class TestStandaloneSend:
         monkeypatch.setattr(_buzz_mod, "_exec_buzz", fake_exec)
 
         result = await _standalone_send(
-            PlatformConfig(enabled=True, extra={}), CHANNEL, "cron needs owner auth"
+            PlatformConfig(enabled=True, extra={}), CHANNEL, "scheduled needs owner auth"
         )
         assert result == {"success": True, "message_id": "evt-auth"}
         assert captured["private_key"] == "nsec1fromfile"

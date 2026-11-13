@@ -63,7 +63,7 @@ async def _check_profile_scope(request, profile_id):
     # Existing handlers select body.profile OR query.profile. Check every value,
     # including repeated query keys, rather than normalizing away a disagreement.
     path = request.url.path.rstrip('/')
-    current = not path.startswith(('/api/profiles/', '/api/cron/jobs', '/api/sessions',
+    current = not path.startswith(('/api/profiles/', '/api/scheduled/jobs', '/api/sessions',
                                    '/api/fs/download', '/api/fs/read-data-url'))
     for value in request.query_params.getlist('profile'):
         _own_profile(value, profile_id, current=current)
@@ -76,7 +76,7 @@ async def _check_profile_scope(request, profile_id):
             body = None  # Route validation still owns malformed JSON.
         if isinstance(body, dict) and 'profile' in body:
             _own_profile(body['profile'], profile_id, current=current)
-    if path.startswith('/api/cron/jobs') and not request.query_params.get('profile'):
+    if path.startswith('/api/scheduled/jobs') and not request.query_params.get('profile'):
         # Job-id discovery and the default list scan other profiles. Require an
         # explicit, verified named profile instead of silently changing defaults.
         raise PermissionError('profile_scope_mismatch')

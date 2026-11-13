@@ -316,7 +316,7 @@ class TestBridgeEventMetadata:
     @pytest.mark.asyncio
     async def test_reply_to_bot_sent_image_resolves_from_outbound_index(self, tmp_path):
         """The bridge's quoted-media cache knows inbound messages only. A quote of an image WE sent
-        (cron chart, generated plot) must resolve from the outbound index written at send time —
+        (scheduled chart, generated plot) must resolve from the outbound index written at send time —
         otherwise "what is this?" under the bot's own image reaches the agent with no image."""
         adapter = _make_adapter()
         image = tmp_path / "chart.png"  # a workspace path, deliberately NOT inside a cache dir

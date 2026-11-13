@@ -7,7 +7,7 @@ failed fast — correctly — but nothing asked the server task to respawn the
 subprocess (#95626 added the reconnect signal).
 
 Signalling alone still lost the call: a gateway restart kills every MCP stdio
-child, and the first call from a surviving agent session (or a cron run
+child, and the first call from a surviving agent session (or a scheduled run
 spanning the restart) failed in 0.00s while the subprocess was respawned
 seconds later. Both fast-fail sites request a respawn, but only a call that
 has not reached the server is safe to retry:

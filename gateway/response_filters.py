@@ -146,7 +146,7 @@ class SilenceMarkerStreamHold:
 
 
 def is_autonomous_silence_response(response: Any) -> bool:
-    """Loose silence matcher for autonomous lanes (cron, webhook).
+    """Loose silence matcher for autonomous lanes (scheduled, webhook).
 
     Models reliably bracket ``[SILENT]`` with a short note, so unlike the
     interactive EXACT rule this also suppresses when a marker sits on its own
@@ -160,7 +160,7 @@ def is_autonomous_silence_response(response: Any) -> bool:
     lines = [ln for ln in stripped.splitlines() if ln.strip()]
     # Bracketed form only for the prefix rule, so a bare "Silent retry succeeded" is NOT swallowed.
     # Same de-punctuating forms as the interactive rule, so ``【静默】`` / ``静默。`` cannot
-    # be suppressed in chat yet delivered by cron.
+    # be suppressed in chat yet delivered by a scheduled run.
     return stripped.upper().startswith(_BRACKETED_SILENCE_MARKERS) or any(
         is_intentional_silence_response(c) for c in (stripped, lines[0], lines[-1])
     )

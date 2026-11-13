@@ -34,7 +34,7 @@ def _clean_approval_env(monkeypatch):
         "HERMES_EXEC_ASK",
         "HERMES_GATEWAY_SESSION",
         "HERMES_SESSION_PLATFORM",
-        "HERMES_CRON_SESSION",
+        "HERMES_SCHEDULED_SESSION",
         "HERMES_YOLO_MODE",
     ):
         monkeypatch.delenv(key, raising=False)

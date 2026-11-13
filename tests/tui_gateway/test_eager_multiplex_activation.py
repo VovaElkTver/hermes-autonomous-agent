@@ -33,8 +33,8 @@ def test_activates_for_a_real_second_profile(two_profile_host):
 
 
 def test_activation_routes_logs_per_profile_home(two_profile_host, monkeypatch):
-    """The secondary's records must reach its own logs/ even when no cron ticker starts (a live
-    gateway owns cron), else its model/cwd lines land in the launch profile's agent.log."""
+    """The secondary's records must reach its own logs/ even when no scheduled ticker starts (a live
+    gateway owns scheduled), else its model/cwd lines land in the launch profile's agent.log."""
     (two_profile_host / "config.yaml").write_text("{}\n", encoding="utf-8")
     import hermes_logging
 

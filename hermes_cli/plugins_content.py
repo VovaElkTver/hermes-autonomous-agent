@@ -73,7 +73,7 @@ def register_automation_blueprint(
 ) -> Optional[PluginRegistration]:
     """Add an Automation Blueprint to this profile's catalog as ``'<plugin_name>:<key>'``.
 
-    Automation blueprints were cron-job scaffolding; with the cron package excised the
+    Automation blueprints were scheduled-job scaffolding; with the scheduled package excised the
     catalog no longer exists, so every registration reports "skipped" (None)."""
     del key, title, description, schedule_template, prompt_template, category
     del slots, deliver_default, skills, tags

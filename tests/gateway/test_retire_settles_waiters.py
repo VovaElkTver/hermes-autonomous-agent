@@ -19,7 +19,6 @@ async def test_successful_retirement_fails_pending_waiters_and_keeps_rows_queued
     db, authority, execute, _returned = _authority(tmp_path, agent)
     monkeypatch.setattr(session_finite, 'execute_finite_admission', execute)
     monkeypatch.setattr(run_runtime, 'TURN_SETTLE_SECONDS', 1.0, raising=False)
-    monkeypatch.setattr('gateway.session_cron.unbind_owner', lambda authority: None)
     try:
         with db:
             await authority.submit(ACTOR, Submission(request_id='running', ref=REF, payload={'text': 'a'}, intent='queue'))

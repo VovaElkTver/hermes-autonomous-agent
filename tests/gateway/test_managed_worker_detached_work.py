@@ -1,6 +1,6 @@
 """A managed worker exits at its turn boundary, so it must never hand out detached work.
 
-``cronjob(action='run')`` and ``delegate_task`` schedule a daemon-pool unit only when the
+``scheduled job(action='run')`` and ``delegate_task`` schedule a daemon-pool unit only when the
 session can receive the completion later; a worker process cannot (nobody drains its queue
 after ``finished``, and recovery turns the orphaned ``running`` row into ``unknown``). The
 work runs inline and its outcome lands in the same turn.
@@ -32,7 +32,7 @@ def test_registered_worker_process_cannot_receive_async_completions(monkeypatch)
 
 
 class Model(BaseHTTPRequestHandler):
-    """Parent turn: run the cron job, then answer. Cron turn: one marker reply."""
+    """Parent turn: run the scheduled job, then answer. Scheduled turn: one marker reply."""
     def log_message(self, *args):
         pass
 
@@ -77,11 +77,11 @@ def test_managed_turn_runs_detachable_work_inline_and_leaves_no_orphan(tmp_path)
     (home / 'config.yaml').write_text(json.dumps({
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'm', 'base_url': url},
-        'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': ['cronjob']}}))
+        'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': ['scheduled job']}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ') if k in os.environ}
     env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
-    created = subprocess.run([sys.executable, '-c', 'import json; from cron.jobs import create_job; '
+    created = subprocess.run([sys.executable, '-c', 'import json; from scheduled.jobs import create_job; '
                               'print(json.dumps(create_job("CRON_CHILD_GOAL", "every 1h", name="inline", deliver="local")["id"]))'],
                              env=env, cwd=root, capture_output=True, text=True, timeout=60, check=False)
     peer.job_id = json.loads(created.stdout.strip().splitlines()[-1])
@@ -93,7 +93,7 @@ def test_managed_turn_runs_detachable_work_inline_and_leaves_no_orphan(tmp_path)
     async def exercise(desc):
         async with websocket(home, desc) as ws:
             session = await rpc(ws, 'session.create', request_id='detached', source='cli', cwd=str(home), model='m',
-                                provider='custom', base_url=url, api_key='loopback-only', toolsets=['cronjob'],
+                                provider='custom', base_url=url, api_key='loopback-only', toolsets=['scheduled job'],
                                 ignore_rules=True)
             sid = session['result']['session_id']
             submitted = await rpc(ws, 'prompt.submit', session_id=sid, input_id='run', text='run the job')

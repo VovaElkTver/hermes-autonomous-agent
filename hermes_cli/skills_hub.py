@@ -619,7 +619,7 @@ def _announce_blueprint(c: Console, skill_name: str) -> None:
             c.print(f"{lead}, but it wasn't added to your suggestions (already offered/dismissed, "
                     "or the pending list is full — run [bold]/suggestions[/] to review).")
             c.print("[dim]You can still schedule it any time by asking the agent "
-                    "or via[/] [bold]hermes cron add[/][dim].[/]\n")
+                    "or via[/] [bold]hermes scheduled add[/][dim].[/]\n")
     except Exception:  # pragma: no cover - blueprint detection is best-effort
         pass
 

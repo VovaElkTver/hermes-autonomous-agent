@@ -74,7 +74,7 @@ def test_disabled_relay_startup_hook_has_no_side_effects(profile, monkeypatch, s
     assert {k: v for k, v in os.environ.items() if k.startswith("GATEWAY_RELAY_")} == before
     # The test seam and an explicit URL do not override the operator either.
     assert relay.register_relay_adapter(force=True, url=URL) is False
-    # Standalone routing (cron preflight) agrees: nothing is relay-fronted.
+    # Standalone routing (scheduled preflight) agrees: nothing is relay-fronted.
     assert relay.relay_fronted_platforms() == set()
 
 
@@ -105,7 +105,7 @@ def test_predicate_agrees_with_loader_and_keeps_native_adapters(profile, monkeyp
     # Without the veto GATEWAY_RELAY_URL disables every directly-connected platform.
     assert config.platforms[Platform.SLACK].enabled is True
 
-    from cron.scheduler_delivery import _resolve_target_transport
+    from scheduled.scheduler_delivery import _resolve_target_transport
 
     resolved, error = _resolve_target_transport(
         {"id": "job"}, Platform.SLACK, "slack", {"chat_id": "channel"}, {}, config,

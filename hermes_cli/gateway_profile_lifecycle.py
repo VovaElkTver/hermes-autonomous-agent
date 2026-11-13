@@ -112,7 +112,7 @@ def profile_lifecycle(command: str, args) -> bool:
         marker.touch()
         answer = request_unserve_profile(host_home, name)
         if ack_confirmed(answer, "unserved", name):
-            print(f"Profile '{name}' parked; its bots and cron are stopped. "
+            print(f"Profile '{name}' parked; its bots and scheduled are stopped. "
                   f"Start again with: hermes -p {name} gateway start")
         else:
             print(f"Profile '{name}' parked, but immediate stop was not confirmed: {ack_failure(answer)}.")
@@ -156,7 +156,7 @@ def owned_gateway_pid() -> int | None:
 
     A served profile's runtime record carries the host multiplexer's pid (#141133), so the recorded
     pid alone never authorizes a stop. Every ``find_gateway_pids()`` caller (stop, uninstall's kill,
-    ``service_manager.is_running``, cron readiness, Windows start polls) reads it through here.
+    ``service_manager.is_running``, scheduled readiness, Windows start polls) reads it through here.
     """
     from gateway.status import get_running_pid, _get_process_hermes_home
 

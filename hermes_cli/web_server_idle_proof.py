@@ -1,6 +1,6 @@
 """Diagnostic work snapshot for a Desktop-pooled ``hermes serve`` child.
 
-Reads process admission, session/worker, delegation, cron and human-input ledgers. Unreadable
+Reads process admission, session/worker, delegation, scheduled and human-input ledgers. Unreadable
 state is indeterminate, never idle. This snapshot alone is NOT permission to retire: only
 ``backend_retirement.RetirementFence.prepare`` freezes admission before taking the snapshot,
 and only a confirmed commit permits the client to stop that exact backend generation.
@@ -40,7 +40,7 @@ def idle_proof(turn_probe: Callable[[], bool | str | None] = busy_ledger,
                input_probe: Callable[[], Optional[int]] = pending_human_input) -> dict:
     """``{"idle": True | False | None, "reason": str | None}`` plus ``"detail"`` naming the busy ledger.
 
-    ``True`` only when no turn is in flight (session table AND cron ledger) and nothing is waiting
+    ``True`` only when no turn is in flight (session table AND scheduled ledger) and nothing is waiting
     on a human. ``None`` whenever either probe is indeterminate — the caller treats it exactly like
     busy. ``turn_probe`` may answer with a bool or with :func:`busy_ledger`'s name; the name is
     surfaced as ``detail`` so a backend that refuses to retire says which work it is protecting.

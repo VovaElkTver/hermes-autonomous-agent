@@ -24,7 +24,7 @@ class ProcessOwnershipMixin:
         """Not owned, on purpose: ``persist_on_release`` jobs, which must outlive the agent (#41225);
         every job of a gateway, which re-adopts its jobs from the checkpoint after a crash (flagged by
         recover_from_checkpoint, which every gateway boot runs, checkpoint or not; a supervised gateway
-        also before it gets there). The classic CLI, the TUI, the Desktop, ACP, cron and messaging all
+        also before it gets there). The classic CLI, the TUI, the Desktop, ACP, scheduled and messaging all
         run their tools in a gateway, so their background jobs are not owned; a process that is not a
         gateway (a standalone serve with no session authority, the slash worker, an embedder of
         AIAgent) owns its jobs, and foreground commands are owned everywhere. Also not owned: every job of a

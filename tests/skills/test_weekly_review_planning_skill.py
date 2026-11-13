@@ -1,4 +1,4 @@
-"""Invariant: every skill a cron blueprint loads ships as a bundled skill."""
+"""Invariant: every skill a scheduled blueprint loads ships as a bundled skill."""
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +13,7 @@ def _skill_dir_exists(name: str) -> bool:
 
 def test_every_blueprint_skill_resolves_in_repo():
     """Invariant: any skill a blueprint loads must exist as a bundled skill."""
-    from cron.blueprint_catalog import CATALOG
+    from scheduled.blueprint_catalog import CATALOG
 
     for bp in CATALOG:
         for skill_name in bp.skills:

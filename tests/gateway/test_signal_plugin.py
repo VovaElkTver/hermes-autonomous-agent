@@ -18,7 +18,7 @@ def test_register_declares_the_former_core_wiring(monkeypatch):
     assert captured["max_message_length"] == adapter.MAX_MESSAGE_LENGTH == 8000
     assert captured["allowed_users_env"] == "SIGNAL_ALLOWED_USERS"
     assert captured["allow_all_env"] == "SIGNAL_ALLOW_ALL_USERS"
-    assert captured["cron_deliver_env_var"] == "SIGNAL_HOME_CHANNEL"
+    assert captured["scheduled_deliver_env_var"] == "SIGNAL_HOME_CHANNEL"
     assert captured["pii_safe"] is True and captured["allow_update_command"] is True
     assert callable(captured["standalone_sender_fn"]) and callable(captured["setup_fn"])
     for k in ("SIGNAL_HTTP_URL", "SIGNAL_ACCOUNT"):

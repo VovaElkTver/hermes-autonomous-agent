@@ -1,12 +1,12 @@
 """Regression tests for the stage2 API_SERVER_KEY bootstrap (OOF-285).
 
 The gateway's loopback api_server refuses to start without a strong
-API_SERVER_KEY, and hosted cron fires are forwarded through it — so the
+API_SERVER_KEY, and hosted scheduled fires are forwarded through it — so the
 stage2 keygen must succeed even when no ``.env`` exists yet. Historically it
 was gated on ``[ -f "$HERMES_HOME/.env" ]`` while the first-boot seed that
 was supposed to create ``.env`` silently no-oped (``.env.example`` was
 excluded from the image by ``.dockerignore``), leaving 40%+ of the hosted
-fleet with no api_server and every scheduled cron fire silently lost.
+fleet with no api_server and every scheduled fire silently lost.
 """
 from __future__ import annotations
 
@@ -172,7 +172,7 @@ def test_keygen_env_key_drops_stale_empty_assignment(
     The empty assignment must be removed: .env is loaded with override=True,
     so python-dotenv would set API_SERVER_KEY to the empty string, clobbering
     the operator's container-provided key and failing the api_server startup
-    guard — silently losing every cron fire.
+    guard — silently losing every scheduled fire.
     """
     home = tmp_path / "home"
     home.mkdir()

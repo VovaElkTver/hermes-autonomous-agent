@@ -19,7 +19,7 @@ def fake_hermes(tmp_path, monkeypatch):
         <tmp>/
           skills/foo/SKILL.md           # default profile
           plugins/foo/__init__.py
-          cron/<state>
+          scheduled/<state>
           memories/MEMORY.md
           profiles/
             hermes-security/

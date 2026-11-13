@@ -124,7 +124,7 @@ async def test_default_profiles_mcp_connections_survive_the_flip(standalone_host
 
 
 def test_default_cron_fire_and_kanban_tick_after_the_flip_keep_env_injected_credentials(standalone_host):
-    from cron.scheduler import _fire_secret_scope
+    from scheduled.scheduler import _fire_secret_scope
     from gateway.kanban_watchers_dispatcher import _default_profile_secret_scope
     runner, home = standalone_host
     _mkprofile(home, "daily-news-bot")
@@ -149,7 +149,7 @@ async def test_activation_does_not_run_once_shutdown_began(standalone_host):
 async def test_concurrent_rescans_keep_the_new_profiles_reservation(standalone_host, monkeypatch):
     """A watcher tick and a creator's rescan both start the switch. The slower preflight resuming
     while the faster rescan is still serving the bot must not reset the reservation to just the
-    default home (routing and cron would then miss a bot whose authority is live)."""
+    default home (routing and scheduled would then miss a bot whose authority is live)."""
     from gateway import run_profile_reconcile as rpr
     runner, home = standalone_host
     preflights = []

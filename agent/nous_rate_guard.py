@@ -1,6 +1,6 @@
 """Cross-session rate limit guard for Nous Portal.
 
-Writes rate limit state to a shared file so all sessions (CLI, gateway, cron,
+Writes rate limit state to a shared file so all sessions (CLI, gateway, scheduled,
 auxiliary) can check whether Nous Portal is currently rate-limited before making
 requests. Without it each 429 fans out into up to 9 calls per turn (3 SDK
 retries x 3 Hermes retries), all counted against RPH.

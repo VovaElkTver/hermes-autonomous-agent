@@ -9,7 +9,7 @@ Two rules, one per failure that took a production gateway down:
   definition (``gateway_service_owner``); the same module now refuses to OPERATE one:
   ``refuse_foreign_systemd_unit`` (salvaged from #141908, checked before any home sync) and
   ``refuse_foreign_launchd_plist``.
-* **Live sessions.** ``gateway stop``/``restart`` name the turns, cron jobs or background delegations the
+* **Live sessions.** ``gateway stop``/``restart`` name the turns, scheduled jobs or background delegations the
   gateway is running and ask y/N before interrupting them; ``-y``/``--yes`` (alias ``--interrupt``)
   skips the question, and with no terminal to ask on they refuse. The in-band restart
   drains turns, but its stop still interrupts every async delegation (``interrupt_all``), and a stop

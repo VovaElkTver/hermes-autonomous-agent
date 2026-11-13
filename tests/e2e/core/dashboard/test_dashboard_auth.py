@@ -7,7 +7,7 @@ route added tomorrow is covered the day it lands. The only exemptions are the on
 declares public (``PUBLIC_API_PATHS`` and the MCP OAuth redirect target, which a browser reaches from
 the identity provider without our header). Because that allowlist comes from production, the
 exemptions are held to their own contract instead of being trusted: a public route is either
-GET-only or refuses an uncredentialed call by its own mechanism (``/api/cron/fire`` verifies a
+GET-only or refuses an uncredentialed call by its own mechanism (``/api/scheduled/fire`` verifies a
 NAS-minted JWT), and no public response carries the sandbox's secrets.
 
 Every credential channel is probed per route: the ``X-Hermes-Session-Token`` header, the legacy

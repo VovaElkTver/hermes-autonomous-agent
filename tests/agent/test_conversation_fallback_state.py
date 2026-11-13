@@ -45,7 +45,7 @@ def test_substantive_tool_only_turn_invalidates_older_housekeeping_fallback():
     an empty response after the substantive tool turn, the system should enter
     the post-tool nudge path, not use the stale housekeeping fallback.
 
-    Production impact: scheduled cron jobs could return early without
+    Production impact: scheduled jobs could return early without
     completing their actual work (e.g., daily report job returning a
     housekeeping message instead of producing the report artifact).
 

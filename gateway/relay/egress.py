@@ -202,7 +202,7 @@ def _live_relay_fronted() -> Optional[set[str]]:
 
         runner = _gateway_runner_ref()
         if runner is None:
-            return None  # no gateway runner in this process (CLI, cron)
+            return None  # no gateway runner in this process (CLI, scheduled)
 
         registry = getattr(runner, "adapters", None)
         if not registry:

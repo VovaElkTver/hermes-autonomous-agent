@@ -64,7 +64,7 @@ def test_an_in_process_plugin_command_picks_with_the_cli_clarify_panel(plugin_ho
     cli._run_plugin_slash_command("/delegation", "")
     assert "MODE=model_map" in capsys.readouterr().out
     assert shown == [[{"qid": "q0", "question": "Delegation mode", "choices": _LABELS, "multi_select": False}]]
-    # Called where no surface binds an asker (a hook, a cron job): None, and the handler says so itself.
+    # Called where no surface binds an asker (a hook, a scheduled job): None, and the handler says so itself.
     assert invoke_plugin_command(plugins_mod.get_plugin_command_handler("delegation"), "") == "MODE=None"
 
 

@@ -1,4 +1,4 @@
-"""QQ Bot is a bundled platform plugin: env seeding and cron delivery, no live gateway."""
+"""QQ Bot is a bundled platform plugin: env seeding and scheduled delivery, no live gateway."""
 
 import pytest
 
@@ -32,7 +32,7 @@ def test_register_shape():
     assert entry.adapter_factory is QQAdapter and entry.check_fn is check_qq_requirements
     assert entry.required_env == ["QQ_APP_ID", "QQ_CLIENT_SECRET"]
     assert entry.allowed_users_env == "QQ_ALLOWED_USERS" and entry.allow_all_env == "QQ_ALLOW_ALL_USERS"
-    assert entry.cron_deliver_env_var == "QQBOT_HOME_CHANNEL"
+    assert entry.scheduled_deliver_env_var == "QQBOT_HOME_CHANNEL"
     assert entry.setup_fn is setup_qqbot and entry.standalone_sender_fn is standalone_send
     # send_message never chunked QQ text before the move; the REST sender truncates itself.
     assert entry.max_message_length == 0
@@ -64,8 +64,8 @@ def test_qqbot_platform_hint_comes_from_its_platform_entry():
 
 
 def test_qqbot_is_a_builtin_deliver_target():
-    """Webhook and cron treat qqbot as a shipped platform before any plugin load."""
-    from cron.scheduler_delivery import (
+    """Webhook and scheduled treat qqbot as a shipped platform before any plugin load."""
+    from scheduled.scheduler_delivery import (
         _is_known_delivery_platform,
         _resolve_home_env_var,
         _home_env_lookup,
@@ -80,7 +80,7 @@ def test_qqbot_is_a_builtin_deliver_target():
 def test_qq_prefixed_home_env_still_resolves_for_cron(monkeypatch):
     monkeypatch.delenv("QQBOT_HOME_CHANNEL", raising=False)
     monkeypatch.setenv("QQ_HOME_CHANNEL", "renamed-chat")
-    from cron.scheduler_delivery import _home_env_lookup
+    from scheduled.scheduler_delivery import _home_env_lookup
 
     assert _home_env_lookup("QQBOT_HOME_CHANNEL") == "renamed-chat"
 
@@ -88,7 +88,7 @@ def test_qq_prefixed_home_env_still_resolves_for_cron(monkeypatch):
 def test_cron_deliver_qqbot_without_a_live_gateway():
     from hermes_cli.plugins import discover_plugins
     discover_plugins()
-    from cron.scheduler_delivery import _is_known_delivery_platform, _resolve_home_env_var
+    from scheduled.scheduler_delivery import _is_known_delivery_platform, _resolve_home_env_var
 
     assert _is_known_delivery_platform("qqbot") is True
     assert _resolve_home_env_var("qqbot") == "QQBOT_HOME_CHANNEL"

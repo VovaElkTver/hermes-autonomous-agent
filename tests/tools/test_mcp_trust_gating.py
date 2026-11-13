@@ -260,16 +260,16 @@ class TestTrustGateApprovalRouting:
         assert seen[0]["pattern_key"] == "mcp_elicitation"
         assert seen[0]["request_id"]
 
-    @pytest.mark.parametrize("platform,cron,single_query", [
+    @pytest.mark.parametrize("platform,scheduled,single_query", [
         ("webhook", "", False),
         ("telegram", "1", False),
         ("api_server", "", True),
         ("local", "", True),  # a `chat -q` turn admitted to the gateway: finite, nobody answers
     ])
     def test_unattended_cron_and_single_query_contexts_do_not_use_callback(
-        self, monkeypatch, platform, cron, single_query
+        self, monkeypatch, platform, scheduled, single_query
     ):
-        """A registered callback must not widen consent for webhook, cron, or -q workers (#111526)."""
+        """A registered callback must not widen consent for webhook, scheduled, or -q workers (#111526)."""
         from gateway.session_context import clear_session_vars, set_session_vars
         from tools import approval, approval_prompt
         from tools.approval_context import (
@@ -280,7 +280,7 @@ class TestTrustGateApprovalRouting:
         session_key = f"{platform}-mcp-trust"
         notified = []
         session_tokens = set_session_vars(
-            platform=platform, session_key=session_key, cron_session=cron
+            platform=platform, session_key=session_key, scheduled_session=scheduled
         )
         key_token = set_current_session_key(session_key)
         approval.register_gateway_notify(session_key, lambda data: notified.append(data))
@@ -306,7 +306,7 @@ class TestTrustGateApprovalRouting:
 
     @pytest.mark.parametrize("context", ["single_query", "cron", "webhook"])
     def test_cli_panel_callback_is_never_asked_without_a_user(self, monkeypatch, context):
-        """`hermes chat -q`, cron and unattended platforms can keep the CLI panel callback registered, but
+        """`hermes chat -q`, scheduled and unattended platforms can keep the CLI panel callback registered, but
         nobody answers it: consent declines at once instead of waiting the approval timeout (the e2e
         hang after ef1faa4cf8)."""
         from gateway.session_context import clear_session_vars, set_session_vars
@@ -316,8 +316,8 @@ class TestTrustGateApprovalRouting:
         if context == "single_query":  # cli_single_query exports the marker into the process env
             monkeypatch.setenv("HERMES_SINGLE_QUERY_SESSION", "1")
             tokens = set_session_vars()
-        elif context == "cron":  # the cron scheduler binds it per job
-            tokens = set_session_vars(cron_session="1")
+        elif context == "cron":  # the scheduled scheduler binds it per job
+            tokens = set_session_vars(scheduled_session="1")
         else:  # an unattended platform: no adapter can carry an approval prompt
             tokens = set_session_vars(platform="webhook")
         asked = []

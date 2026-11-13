@@ -7,8 +7,8 @@ command, every surface) and the CLI prints its reply. Client-side state the CLI 
 (``/busy``: what Enter does while a turn runs) is mirrored locally after the owner accepts it.
 ``/refine`` and ``/review`` take the same route: their background reviewer must run beside the
 session's agent in the gateway (as on messaging), where its result is delivered back to the session.
-``/cron`` too: the profile's cron store belongs to the gateway that fires its jobs, so the gateway runs
-main's handler (one writer); ``/cron run`` lasts as long as the job, so a write waits with no deadline.
+``/scheduled`` too: the profile's scheduled store belongs to the gateway that fires its jobs, so the gateway runs
+main's handler (one writer); ``/scheduled run`` lasts as long as the job, so a write waits with no deadline.
 ``/toolsets`` too: the gateway builds the report from its own registry (MCP and plugin toolsets
 included) with this session's toolsets marked (gateway/session_info_reads.py).
 """
@@ -43,7 +43,7 @@ GATEWAY_SETTINGS = {"personality": None, "busy": _mirror_busy, "approvals": None
 def _unbounded(canonical, arg):
     """True for a form answered only once its work is done, however long.
 
-    The /cron write forms this existed for were excised with the cron package.
+    The /scheduled write forms this existed for were excised with the scheduled package.
     """
     del canonical, arg
     return False

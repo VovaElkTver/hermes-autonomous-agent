@@ -1,9 +1,9 @@
 """Regression tests for #60955: gateway must not freeze fallback_providers.
 
-Cron reloads ``fallback_providers`` from disk on every job. The gateway used to
+Scheduled reloads ``fallback_providers`` from disk on every job. The gateway used to
 freeze ``self._fallback_model`` at process start, so a chain configured (or
 edited) after ``hermes gateway`` was already running never reached messaging
-sessions — even though cron in the same process fell back correctly.
+sessions — even though scheduled in the same process fell back correctly.
 
 These tests pin the reload + cached-agent apply helpers without driving the
 full Feishu session path.

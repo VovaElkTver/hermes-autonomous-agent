@@ -8,7 +8,7 @@ Class C6 (bricked installs, stale code, lost state after `hermes update`). Each 
    own uv.lock and the warm uv cache: the installer's tier 0 and its editable layout; the installer
    script itself is covered by ``.github/workflows/install-e2e*.yml``);
 3. gives it user state created BY THE N-1 CLI ITSELF: sessions in state.db from real one-shot
-   turns against the scripted fake provider, a named profile with its own state.db, a cron
+   turns against the scripted fake provider, a named profile with its own state.db, a scheduled
    job, and a hand-edited config.yaml at the N-1 schema version with comments, long quoted
    unicode values and a legacy MCP ``disabled: true`` entry (the one documented N-1 -> HEAD
    migration);
@@ -27,7 +27,7 @@ Invariants after every leg (fresh processes only): the final update's exit code 
 (0 and HEAD checked out and the editable install serves HEAD's tree, or non-zero and nothing
 changed); ``hermes --version``, ``hermes doctor`` and a one-shot turn succeed; state.db and the
 profile's state.db pass ``integrity_check`` with unchanged row counts and byte-identical
-pre-existing messages (also after HEAD's first real use of the DB); the cron job survives; the
+pre-existing messages (also after HEAD's first real use of the DB); the scheduled job survives; the
 venv satisfies HEAD's dependency set; config.yaml of both profiles equals exactly what HEAD's own
 non-interactive ``migrate_config`` produces from the pre-update bytes (so the updater never
 rewrites anything beyond documented migrations), user values and comments survive independently
@@ -498,7 +498,7 @@ def assert_healthy_at_head(leg: Leg, provider: FakeLLMServer, final: subprocess.
         if before[name]["env"] is not None:
             assert (home / ".env").read_bytes() == before[name]["env"], f"{name} .env rewritten by the update"
     jobs_after = json.loads((leg.hermes_home / "cron" / "jobs.json").read_text(encoding="utf-8"))
-    assert _job_ids(jobs_after) == _job_ids(before["cron"]) and _job_ids(jobs_after), "cron jobs lost/changed"
+    assert _job_ids(jobs_after) == _job_ids(before["cron"]) and _job_ids(jobs_after), "scheduled jobs lost/changed"
     # 3. config: exactly HEAD's documented migrations, nothing else (asserted last, see the end)
     drift = []
     for name, home in _profile_homes(leg).items():
@@ -564,7 +564,7 @@ def provider():
 
 @pytest.fixture(scope="module")
 def template_home(tmp_path_factory, provider) -> Path:
-    """HERMES_HOME populated by the N-1 CLI itself (sessions, profile, cron, config)."""
+    """HERMES_HOME populated by the N-1 CLI itself (sessions, profile, scheduled, config)."""
     seed = make_leg(tmp_path_factory.mktemp("seed"), None)
     version = _base_config_version(seed)
     cfg = user_config(provider.base_url, version)

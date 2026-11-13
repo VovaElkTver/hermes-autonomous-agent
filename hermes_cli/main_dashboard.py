@@ -188,7 +188,7 @@ def _get_systemd_service_for_pid(pid: int) -> str | None:
     """The systemd service unit that supervises *pid* (``hermes-serve.service``), or None.
 
     A ``.service`` cgroup alone only says where the process was started: a dashboard launched by
-    hand from a shell that itself runs under some unit (a CI runner agent, ``cron.service``, a
+    hand from a shell that itself runs under some unit (a CI runner agent, a timer unit, a
     tmux or IDE user service, the gateway's own terminal tool) sits in THAT unit's cgroup. The
     unit owns the backend only when its live ``MainPID`` is this PID; otherwise restarting it
     restarts an unrelated service and leaves the dashboard down. None when the PID isn't part of

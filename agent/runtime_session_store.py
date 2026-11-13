@@ -1,7 +1,7 @@
 """Explicit worker persistence facade; never opens the canonical SQLite store.
 
 This first operation family is deliberately NOT a complete SessionDB substitute.
-No existing cron/child/compute consumer is switched until its inventory is covered.
+No existing scheduled/child/compute consumer is switched until its inventory is covered.
 """
 from __future__ import annotations
 

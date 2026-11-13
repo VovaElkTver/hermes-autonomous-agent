@@ -1,6 +1,6 @@
 """Auto-decompose billing bounds, proven against a REAL ``hermes gateway run`` embedded dispatcher.
 
-The gateway (no messaging platforms -> a kanban/cron-only process) ticks the embedded dispatcher
+The gateway (no messaging platforms -> a kanban/scheduled-only process) ticks the embedded dispatcher
 every second; each tick auto-decomposes triage cards through the auxiliary model, which is the
 recording fake provider (decomposer calls carry no ``tools`` so they land in ``aux_requests()``).
 Ticks are counted without sleeps: a fresh "probe" triage card is created only after the previous

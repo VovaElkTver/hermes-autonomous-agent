@@ -108,7 +108,7 @@ _spent: dict[tuple, float] = {}
 # One budget prompt at a time per tally: a parallel call must see the total the previous approval booked,
 # and identical prompts would otherwise coalesce into one answer that releases several charges.
 _ask_locks: dict[tuple, threading.Lock] = {}
-# A cron run has no chat: its approval session key is "" for every job, so the scheduler binds the run's own
+# A scheduled run has no chat: its approval session key is "" for every job, so the scheduler binds the run's own
 # id here and each run gets its own tally instead of every job in the process sharing one.
 _run_key: ContextVar[str] = ContextVar("mcp_cost_run_key", default="")
 

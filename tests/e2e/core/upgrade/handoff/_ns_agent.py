@@ -1,6 +1,6 @@
 """In-sandbox command agent for the hand-off suite (stdlib only, run as a plain script).
 
-The hand-off cells need several long-lived processes (gateway, dashboard, cron ticker, kanban
+The hand-off cells need several long-lived processes (gateway, dashboard, scheduled ticker, kanban
 dispatcher) and the real ``hermes update`` to share ONE PID namespace, exactly as they share one
 machine for a user: the updater's process scans must see the gateway it restarts, and a relaunched
 gateway must be findable by the next ``hermes gateway status``. ``_helpers.sandbox_argv`` gives every

@@ -26,9 +26,9 @@ def _fmt_elapsed(seconds: object) -> str:
     return f"{total // 60}m{total % 60:02d}s" if total >= 60 else f"{total}s"
 
 
-def _cron_job_name(job_id: str, home: Optional[Path]) -> Optional[str]:
-    """Legacy-name lookup for historical ``cron`` work units; jobs.json reading went
-    with the cron package, so only the raw id is available."""
+def _scheduled_job_name(job_id: str, home: Optional[Path]) -> Optional[str]:
+    """Legacy-name lookup for historical ``scheduled`` work units; jobs.json reading went
+    with the scheduled package, so only the raw id is available."""
     del job_id, home
     return None
 
@@ -42,8 +42,8 @@ def describe_active_work_unit(unit: dict, home: Optional[Path] = None) -> str:
     elapsed_part = f", running {_fmt_elapsed(elapsed)}" if elapsed is not None else ""
     if kind == "cron":
         job_id = str(unit.get("job_id") or "?")
-        name = _cron_job_name(job_id, home)
-        label = f"cron job {job_id}" + (f" ({name})" if name else "")
+        name = _scheduled_job_name(job_id, home)
+        label = f"scheduled job {job_id}" + (f" ({name})" if name else "")
         where = f" in external worker{pid_part}" if unit.get("external") else f" in-process{pid_part}"
         return f"{label}{where}{elapsed_part}"
     if kind == "chat":

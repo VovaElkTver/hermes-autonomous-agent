@@ -57,7 +57,7 @@ class TestMultiplexActiveFailClosed:
 
 class TestScopedSingleProfile:
     """Multiplex OFF with a scope installed: the scope is an overlay, not a
-    blindfold. The cron scheduler installs a ``<home>/.env`` scope around every
+    blindfold. The scheduled scheduler installs a ``<home>/.env`` scope around every
     job unconditionally, and single-profile deployments legitimately supply
     credentials via the process environment only (systemd ``Environment=``,
     ``pass-cli run`` / ``op run`` wrappers) — those must keep resolving."""
@@ -94,7 +94,7 @@ class TestScopedSingleProfile:
 
 class TestRoutedForeignHomeScope:
     """Multiplex OFF but the bound scope serves a DIFFERENT home (routed profile:
-    dashboard/desktop backend, per-profile cron ticker). os.environ is the LAUNCH
+    dashboard/desktop backend, per-profile scheduled ticker). os.environ is the LAUNCH
     profile's env there, so a scoped miss must fail closed exactly like multiplex —
     the .env-overlay fallthrough is only safe when the scope's home IS ours."""
 
@@ -291,7 +291,7 @@ class TestEnvFileParsing:
         Regression: load_env_file stripped only the outer quotes, leaving
         the writer's \\" and \\\\ escapes literal — credentials containing
         '\"' or '\\' worked interactively but were corrupted under scoped
-        (cron / multiplex) resolution.
+        (scheduled / multiplex) resolution.
         """
         from hermes_cli.config import _quote_env_value
 

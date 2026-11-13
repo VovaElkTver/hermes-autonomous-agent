@@ -44,7 +44,7 @@ _POLISHED_TOOLS = {
     "browser_back", "browser_snapshot", "browser_console", "browser_get_images", "browser_vision",
     "vision_analyze", "image_generate", "text_to_speech",
     # Schedulers / platform integrations
-    "cronjob", "send_message", "clarify", "discord", "discord_admin",
+    "scheduled job", "send_message", "clarify", "discord", "discord_admin",
     "feishu_doc_read", "feishu_drive_list_comments", "feishu_drive_list_comment_replies",
     "feishu_drive_reply_comment", "feishu_drive_add_comment",
     "kanban_create", "kanban_show", "kanban_comment", "kanban_complete",
@@ -630,7 +630,7 @@ _COMPLETION_FORMATTERS: dict[str, _Formatter] = {
     "skill_manage": _format_skill_manage_result,
     "web_search": _format_web_search_result,
     **{n: _format_browser_result for n in ("browser_navigate", "browser_snapshot", "browser_vision", "browser_get_images")},
-    **{n: _format_media_or_cron_result for n in ("vision_analyze", "image_generate", "cronjob")},
+    **{n: _format_media_or_cron_result for n in ("vision_analyze", "image_generate", "scheduled job")},
 }
 
 

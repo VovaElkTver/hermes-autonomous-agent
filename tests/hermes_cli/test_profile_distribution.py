@@ -349,7 +349,7 @@ class TestInstall:
         # 4. Owned paths should be updated
         assert (plan.target_dir / "SOUL.md").read_text() == "I am Source.\n"
         assert (plan.target_dir / "skills").is_dir()
-        # 5. Formerly-owned paths (mcp.json, cron/) should NOT be copied on update
+        # 5. Formerly-owned paths (mcp.json, scheduled/) should NOT be copied on update
         #    Note: mcp.json existed before so it stays (not removed). The guard is
         #    about what gets COPIED, not what's cleaned up.
         assert not (plan.target_dir / "new_config.toml").exists(), \
@@ -400,7 +400,7 @@ class TestInstall:
 class TestUpdate:
 
     def test_update_and_force_install_merge_owned_dirs_per_root(self, profile_env):
-        """skills/ and cron/ are containers of roots: roots the payload ships are replaced
+        """skills/ and scheduled/ are containers of roots: roots the payload ships are replaced
         wholesale (retired files disappear), roots the user added survive both paths."""
         staged = _make_staging_dir(profile_env, "src")
         plan = install_distribution(str(staged), name="skills_safe")

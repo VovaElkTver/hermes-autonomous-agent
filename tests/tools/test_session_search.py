@@ -543,13 +543,13 @@ class TestCrossProfileRead:
 
 
 # =========================================================================
-# Cron demotion in discover ranking (#19434)
+# Scheduled demotion in discover ranking (#19434)
 # =========================================================================
 
 class TestCronDemotion:
     def _seed_cron_and_interactive(self, db):
-        """One interactive (telegram) session and several cron sessions, all
-        matching the same query. Cron rows accumulate repetitive vocabulary
+        """One interactive (telegram) session and several scheduled sessions, all
+        matching the same query. Scheduled rows accumulate repetitive vocabulary
         and out-number the user's single interactive session — the live-data
         symptom in #19434.
         """
@@ -560,7 +560,7 @@ class TestCronDemotion:
                          (now - 90000, "s_user"))
         db.append_message("s_user", role="user", content="how is the venom project going")
         db.append_message("s_user", role="assistant", content="The venom project shipped its first milestone.")
-        # Several cron sessions, all newer and all stuffed with the same terms.
+        # Several scheduled sessions, all newer and all stuffed with the same terms.
         for i in range(8):
             sid = f"cron_{i}"
             db.create_session(sid, source="cron")
@@ -575,13 +575,13 @@ class TestCronDemotion:
         result = json.loads(session_search(query="venom project", limit=1, db=db))
         assert result["success"] is True
         assert result["count"] == 1
-        # With cron drowning FTS, bare BM25/recency would return a cron_* hit.
+        # With scheduled drowning FTS, bare BM25/recency would return a cron_* hit.
         # Demotion must put the user's interactive session first.
         assert result["results"][0]["source"] == "telegram"
         assert result["results"][0]["session_id"] == "s_user"
 
     def test_cron_still_reachable_when_only_match(self, db):
-        """Demotion must not exclude cron — when only cron matches, it still
+        """Demotion must not exclude scheduled — when only scheduled matches, it still
         comes back."""
         now = int(time.time())
         db.create_session("cron_only", source="cron")
@@ -1077,7 +1077,7 @@ class TestNewResetLineageDiscovery:
 
 
 class TestNewResetLineageBrowse:
-    """Browse must list /new-reset conversations, not only cron/root rows."""
+    """Browse must list /new-reset conversations, not only scheduled/root rows."""
 
     def test_reset_parent_appears_in_browse(self, db):
         _seed_gateway_new_reset_chain(db)

@@ -364,7 +364,7 @@ async def _create_bot_chat(authority, actor, *, displace=None):
             if (not await tracked_write(authority, partial(_displace_bot_chat, authority.db, displace))
                     and authority.db.get_session_by_title('Bot Chat') is not None):
                 return None
-        # The Bot Chat follows its profile whoever mints it (a Bot or cron delivery, a peer DM),
+        # The Bot Chat follows its profile whoever mints it (a Bot or scheduled delivery, a peer DM),
         # the same contract Desktop's create asks for. A later profile change reaches it.
         request_id = _bot_chat_creation_id(authority, actor)
         params = {'request_id': request_id, 'source': 'cli', 'cwd': str(Path.home()),
@@ -817,7 +817,7 @@ def _delivery_params(authority, actor, params):
         raise RuntimeStoreError('invalid_params') from exc
     message = params.get('message')
     # Main capped only a relayed bot DM (MESSAGE_MAX_CHARS + attribution headroom), at the relay
-    # edge; a trusted producer's report (cron bot-chat, its deferred drain) carries no author and
+    # edge; a trusted producer's report (scheduled bot-chat, its deferred drain) carries no author and
     # was admitted whole, so it gets a resource bound only.
     limit = _BOT_DM_MAX_CHARS if params.get('author') is not None else _PRODUCER_MAX_CHARS
     if not isinstance(message, str) or not message.strip() or len(message) > limit:
@@ -897,7 +897,7 @@ async def _settle(connection, params):
     sent": with no receipt and no admission row for ``bot:<id>``, a terminal ``refused`` receipt
     bound to the full identity is written, and every later ``deliver`` of the id answers with it
     instead of admitting. An admitted id gets its receipt; an in-flight pin stays unknown. Only the
-    Bot DM tool calls this, so cron's same-id retries of a refusal are unchanged.
+    Bot DM tool calls this, so scheduled's same-id retries of a refusal are unchanged.
 
     The writer is not re-checked: it may release between the refusal and this call, and "nothing
     was admitted" is all that is serialized here. So the receipt claims only that, and any

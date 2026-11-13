@@ -5,7 +5,7 @@ line written beside that tool (``fallback_prior_turn_content``). A follow-up tha
 silence marker says the same thing ("nothing to add"). On a turn whose host says a marker may not
 stay silent (``_silence_marker_needs_reply``, set by the gateway from ``silence_allowed``), the
 loop takes the same path, so the reply runs through the normal output transform, persistence and
-receipt. Without that flag (cron, CLI, machinery or unaddressed turns) the marker is kept.
+receipt. Without that flag (scheduled, CLI, machinery or unaddressed turns) the marker is kept.
 """
 
 from unittest.mock import patch
@@ -115,7 +115,7 @@ def test_the_chosen_reply_runs_through_the_output_transform(real_loop):
 
 
 def test_without_the_host_flag_the_marker_is_kept(real_loop):
-    # Cron, CLI, machinery and unaddressed turns: the marker is the deliberate result.
+    # Scheduled, CLI, machinery and unaddressed turns: the marker is the deliberate result.
     _register_todo(real_loop.agent)
 
     result = real_loop.run(_reply_then_marker(), "when is my meeting?")

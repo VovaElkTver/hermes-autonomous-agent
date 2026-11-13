@@ -150,7 +150,7 @@ def tool_env() -> dict[str, str]:
 
 def toolchain_environ(base=None) -> dict[str, str]:
     """The environment this session's tool subprocesses start from (``base``: the gateway's). Unbound
-    (messaging, cron, Desktop): unchanged. Every client's session drops the gateway's own behaviour
+    (messaging, scheduled, Desktop): unchanged. Every client's session drops the gateway's own behaviour
     values it reads from its client (:func:`session_env`), so tools never see the daemon's ephemeral
     prompt or provider request in place of the session's. A client not attached locally keeps the
     host values (``HOST_BEHAVIOUR``) and the rest of the gateway's environment. A local shell client's

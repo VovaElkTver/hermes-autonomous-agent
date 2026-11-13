@@ -89,7 +89,7 @@ def pre_agent_fallback_notice(
     primary_provider: Any, primary_model: Any, fallback_provider: Any, fallback_model: Any
 ) -> str:
     """User-visible one-shot line for a provider switch made during credential resolution, before
-    any AIAgent exists (#74349). Shared by the messaging gateway, the TUI/Desktop gateway and cron
+    any AIAgent exists (#74349). Shared by the messaging gateway, the TUI/Desktop gateway and scheduled
     so the three pre-agent fallback paths cannot drift in wording."""
     primary_desc = "/".join(str(p).strip() for p in (primary_provider, primary_model) if p) or "primary"
     fallback_desc = "/".join(str(p).strip() for p in (fallback_provider, fallback_model) if p) or "fallback"
@@ -146,7 +146,7 @@ def get_fallback_chain(config: dict[str, Any] | None) -> list[dict[str, Any]]:
 def scoped_fallback_chain(
     inherited: list[dict[str, Any]] | None, declared: Any, *, pinned: bool, owner: str,
 ) -> list[dict[str, Any]] | None:
-    """Fallback chain for a route owner that can pin its own primary (delegated child, cron job).
+    """Fallback chain for a route owner that can pin its own primary (delegated child, scheduled job).
 
     A pinned owner (explicit provider, endpoint or model) never borrows the *inherited* chain: the
     operator chose that route, and a chain entry is a different provider and usually a different

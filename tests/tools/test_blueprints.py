@@ -1,7 +1,7 @@
 """Tests for the blueprints layer (SKILL.md frontmatter <-> job-spec bridge).
 
 A blueprint is a skill with a metadata.hermes.blueprint block. These verify parsing,
-the job-spec translation, and the export round-trip. The cron store itself was
+the job-spec translation, and the export round-trip. The scheduled store itself was
 excised from this branch; only the metadata shape survives.
 """
 

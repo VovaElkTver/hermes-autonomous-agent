@@ -8,8 +8,8 @@ it has served nobody and has nothing to do for ``gateway.unmanaged_idle_exit_sec
 
 - no attached client (live ticketed WebSocket, outstanding ticket, or recent HTTP/WS activity);
 - no messaging adapter configured, connected or reconnecting (any profile);
-- no runnable cron job and no kanban task the dispatcher must act on;
-- no queued/started admission, live managed worker, in-flight agent/cron/API run, background
+- no runnable scheduled job and no kanban task the dispatcher must act on;
+- no queued/started admission, live managed worker, in-flight agent/scheduled/API run, background
   process or async delegation, active heartbeat/loop, pending handoff or hosted-room task.
 
 Every probe fails CLOSED: an unreadable source counts as work, so the gateway stays up. A gateway with
@@ -86,15 +86,15 @@ def _messaging_busy(runner) -> str | None:
 
 
 def _served_homes(runner) -> list[Path]:
-    from gateway.run import _cron_tick_profile_homes
+    from gateway.run import _scheduled_tick_profile_homes
     from gateway.session_authorities import all_authorities
     homes = {Path(a.profile_id) for a in all_authorities(runner)}
-    homes.update(Path(h) for _name, h in _cron_tick_profile_homes(runner.config))
+    homes.update(Path(h) for _name, h in _scheduled_tick_profile_homes(runner.config))
     return sorted(homes)
 
 
 def _cron_busy(homes) -> str | None:
-    """Cron was excised from this branch: no job can be running or scheduled."""
+    """Scheduled was excised from this branch: no job can be running or scheduled."""
     del homes
     return None
 
@@ -170,7 +170,7 @@ def busy_reason(runner, *, window: float, count_clients: bool = True) -> str | N
     """Why the gateway must stay up, or None when it may exit. Fails closed on any error.
 
     ``count_clients=False``: a restart is pending, and an attached or returning client is exactly who
-    needs the fresh gateway; every duty nothing would restart (adapters, cron, admissions) still counts.
+    needs the fresh gateway; every duty nothing would restart (adapters, scheduled, admissions) still counts.
     A client mid-attach (unredeemed ticket) still holds it: its first connect would be refused with
     no rediscovery, while an attached client waits out the drain and starts the fresh gateway.
     """
@@ -235,7 +235,7 @@ async def unmanaged_idle_exit_watcher(runner) -> None:
     if window <= 0:
         logger.info("Auto-started gateway idle exit disabled (gateway.unmanaged_idle_exit_seconds=0)")
         return
-    logger.info("Auto-started gateway: exits after %.0fs with no clients, adapters, cron/kanban work or "
+    logger.info("Auto-started gateway: exits after %.0fs with no clients, adapters, scheduled/kanban work or "
                 "admissions (gateway.unmanaged_idle_exit_seconds)", window)
     interval = min(30.0, max(0.5, window / 4))
     idle_since = None
@@ -247,7 +247,7 @@ async def unmanaged_idle_exit_watcher(runner) -> None:
             continue
         if await _retired_for_restart(runner, window):
             return
-        # The store/cron/kanban reads touch disk; keep them off the loop, then re-check the
+        # The store/scheduled/kanban reads touch disk; keep them off the loop, then re-check the
         # loop-only facts (clients, tickets, draining) synchronously right before acting.
         reason = await asyncio.to_thread(busy_reason, runner, window=window)
         if reason is not None:

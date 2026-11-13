@@ -662,7 +662,7 @@ DEVELOPER_ROLE_MODELS = ("gpt-5", "codex")
 # (``PlatformEntry.platform_hint``, read by agent/system_prompt._default_platform_hint).
 PLATFORM_HINTS = {
     "cron": (
-        "You are running as a scheduled cron job. There is no user present — you cannot ask questions, "
+        "You are running as a scheduled job. There is no user present — you cannot ask questions, "
         "request clarification, or wait for follow-up. Execute the task fully and autonomously, making "
         "reasonable decisions where needed. Your final response is automatically delivered to the job's "
         "configured destination — put the primary content directly in your response."
@@ -672,7 +672,7 @@ PLATFORM_HINTS = {
         "You are in a plain terminal (CLI). Markdown does NOT render — asterisks, headers, and fences appear as "
         "literal characters, so write plain text (indentation and blank lines are your only layout tools). Files: "
         "there is no attachment channel and MEDIA:/path tags are NOT intercepted here (they print as literal text) — "
-        # The cron local-only delivery caveat lives in cronjob_manage's deliver description (deferred: paid
+        # The scheduled local-only delivery caveat lives in cronjob_manage's deliver description (deferred: paid
         # only when the tool is loaded), not in every CLI/TUI prompt.
         "deliver a file by stating its absolute path or URL in plain text; the user opens it themselves."
     ),

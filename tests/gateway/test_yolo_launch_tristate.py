@@ -29,7 +29,7 @@ def test_untoggled_entry_keeps_launch_yolo_after_restart_but_explicit_off_stays_
     from gateway.config import Platform
     from gateway.session import SessionSource
     store = _store(tmp_path)
-    # Branch/reset/migration/cron/new-session entries are written without a toggle.
+    # Branch/reset/migration/scheduled/new-session entries are written without a toggle.
     untouched = store.get_or_create_session(SessionSource(platform=Platform.LOCAL, chat_id='branched', user_id='h'))
     revoked = store.get_or_create_session(SessionSource(platform=Platform.LOCAL, chat_id='revoked', user_id='h'))
     store.set_session_yolo(revoked.session_key, False)

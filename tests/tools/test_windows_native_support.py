@@ -678,16 +678,16 @@ class TestGatewayRunRestartWatcherOuterPopenFallback:
 
 
 # ---------------------------------------------------------------------------
-# cron pre-run scripts resolve bash dynamically (Git Bash on Windows)
+# scheduled pre-run scripts resolve bash dynamically (Git Bash on Windows)
 # ---------------------------------------------------------------------------
 
 
 class TestCronSchedulerBashResolution:
-    """cron.scheduler_script must resolve bash via PATH (Git Bash on Windows) and,
+    """scheduled.scheduler_script must resolve bash via PATH (Git Bash on Windows) and,
     when no bash exists, return an actionable error instead of a [WinError 2] crash."""
 
     def test_sh_script_uses_bash_found_on_path(self, tmp_path, monkeypatch):
-        from cron import scheduler_script
+        from scheduled import scheduler_script
 
         script = tmp_path / "job.sh"
         script.write_text("echo hi\n", encoding="utf-8")
@@ -701,7 +701,7 @@ class TestCronSchedulerBashResolution:
         assert argv == [found, str(script)]
 
     def test_missing_bash_returns_actionable_error(self, tmp_path, monkeypatch):
-        from cron import scheduler_script
+        from scheduled import scheduler_script
 
         script = tmp_path / "job.sh"
         script.write_text("echo hi\n", encoding="utf-8")

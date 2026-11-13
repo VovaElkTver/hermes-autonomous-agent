@@ -33,7 +33,7 @@ def _dangerous_entry():
 
 
 # ---------------------------------------------------------------------------
-# June 2026 hermes-0day campaign: SSH/PAM/sudoers/cron persistence + IOC block
+# June 2026 hermes-0day campaign: SSH/PAM/sudoers/scheduled persistence + IOC block
 # ---------------------------------------------------------------------------
 
 

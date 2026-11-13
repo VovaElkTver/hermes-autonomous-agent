@@ -1,5 +1,5 @@
 """Notices a left-core migration kept for a home (a gateway start, a CLI resolution) reach the first turn
-someone sees: an agent nobody watches (cron run, subagent, background fork) starts and runs without
+someone sees: an agent nobody watches (scheduled run, subagent, background fork) starts and runs without
 claiming them, so they are not dropped on an agent that has no way to show them."""
 from types import SimpleNamespace
 

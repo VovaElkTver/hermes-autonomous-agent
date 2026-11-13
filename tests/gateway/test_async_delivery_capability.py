@@ -36,7 +36,7 @@ from gateway.session_context import (
 
 class TestAsyncDeliverySupported:
     def test_default_unbound_is_supported(self):
-        """CLI / cron / unaware paths never bind the var -> supported."""
+        """CLI / scheduled / unaware paths never bind the var -> supported."""
         assert async_delivery_supported() is True
 
 
@@ -61,9 +61,9 @@ class TestAsyncDeliverySupported:
 # ---------------------------------------------------------------------------
 
 class TestDeclareStatelessChannel:
-    """``hermes -z`` and cron cannot receive a completion after their turn ends.
+    """``hermes -z`` and scheduled cannot receive a completion after their turn ends.
 
-    Cron clears the ``HERMES_SESSION_*`` routing keys, so an async delegation's
+    Scheduled clears the ``HERMES_SESSION_*`` routing keys, so an async delegation's
     completion event carries ``session_key=""`` and the gateway watcher drops it
     for lack of routing metadata; either way the job's final response has already
     shipped. One-shot simply exits. Both must bind the capability, or

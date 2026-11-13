@@ -111,7 +111,7 @@ DEFAULT_CONFIG = {
         # interrupted /v1 run fails its waiting caller, so it may not inherit
         # restart_drain_timeout's 0 (#82161, #132989). Clamped to the shutdown-watchdog
         # leash minus teardown headroom (~50s unless TimeoutStopSec is raised). 0 = opt out.
-        "cron_drain_timeout": 30,
+        "scheduled_drain_timeout": 30,
         # In-band restart (/restart, SIGUSR1): refuse new work, then wait up to this many seconds
         # for in-flight agents/api runs to finish before stop(). 0 = enter stop() at once. 30
         # min is a safety valve for wedged agents, not a target; raise for long unattended turns.
@@ -1666,7 +1666,7 @@ DEFAULT_CONFIG = {
         "mode": "smart",
         "timeout": 300,
         "discord_prompt_timeout": 300,  # Discord buttons stay clickable (min 30 s, cap MAX_SAFE_TIMEOUT_S)
-        "cron_mode": "deny",
+        "scheduled_mode": "deny",
         "single_query_mode": "deny",
         "unattended_mode": "deny",
         # Extra rules appended to the smart-approval guardian's SYSTEM prompt, e.g. "Always ESCALATE
@@ -2632,7 +2632,7 @@ DEFAULT_CONFIG = {
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
     },
-    "_config_version": 54,  # Config schema version - bump this when adding new required fields
+    "_config_version": 55,  # Config schema version - bump this when adding new required fields
 }
 
 

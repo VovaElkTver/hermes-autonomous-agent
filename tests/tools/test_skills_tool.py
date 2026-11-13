@@ -152,7 +152,7 @@ class TestRequiredEnvironmentVariablesNormalization:
         assert _is_env_var_persisted("FILLED_KEY", {}) is True
 
     def test_active_profile_secret_scope_satisfies_requirement(self):
-        """Cron workers must accept a value hydrated from this profile's vault."""
+        """Scheduled workers must accept a value hydrated from this profile's vault."""
         from agent import secret_scope
         from tools.skills_tool import _is_env_var_persisted
 

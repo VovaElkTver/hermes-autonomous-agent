@@ -298,7 +298,7 @@ _start_idle_reaper()
 def _launch_home() -> Path:
     """The launch profile's home at call time: the patched ``_hermes_home`` when a test changed
     it, else the live process home — resolved through :func:`get_process_hermes_home`, which honours
-    ``HERMES_HOME`` but ignores the context-local override. The desktop multiplex cron ticker sets
+    ``HERMES_HOME`` but ignores the context-local override. The desktop multiplex scheduled ticker sets
     that override per profile at startup, and a first touch inside a foreign window would bind
     process-wide launch state (the shared ``state.db`` handle, the launch ``.env`` secrets) to
     another profile (#102526). Resolving here rather than at import time lets a harness that
@@ -947,7 +947,7 @@ def _set_session_context(session_key: str, cwd: str | None = None, *, ui_session
             session_id = getattr(sess.get("agent"), "session_id", None) or session_key
         return set_session_vars(
             session_key=session_key, session_id=session_id, source=source,
-            profile=profile, cwd=resolved, ui_session_id=ui_session_id, cron_session="")
+            profile=profile, cwd=resolved, ui_session_id=ui_session_id, scheduled_session="")
     return []
 
 

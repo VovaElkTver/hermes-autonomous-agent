@@ -729,7 +729,7 @@ def test_env_shadowed_reapply_keeps_home_snapshot(tmp_path, monkeypatch, _fresh_
     env_loader.load_hermes_dotenv(hermes_home=home)
     assert env_loader.get_secret_source_values(home) == {"GLM_API_KEY": "vault-value"}
 
-    # cron per-fire / plugin-discovery re-pull: reset + reload with the key now shadowing itself.
+    # scheduled per-fire / plugin-discovery re-pull: reset + reload with the key now shadowing itself.
     env_loader.reset_secret_source_cache()
     env_loader.load_hermes_dotenv(hermes_home=home)
 
@@ -739,7 +739,7 @@ def test_env_shadowed_reapply_keeps_home_snapshot(tmp_path, monkeypatch, _fresh_
 
 
 def test_home_scoped_reset_preserves_sibling_snapshot(tmp_path, monkeypatch, _fresh_registry):
-    """A cron fire / discovery refresh for one profile resets only THAT home: a multiplex sibling's
+    """A scheduled fire / discovery refresh for one profile resets only THAT home: a multiplex sibling's
     hydrated snapshot stays intact instead of running empty until it re-hydrates."""
     home = tmp_path / ".hermes"
     sibling = home / "profiles" / "b"

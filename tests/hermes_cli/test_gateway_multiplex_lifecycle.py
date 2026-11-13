@@ -88,7 +88,7 @@ def test_cli_lifecycle_orders_marker_before_socket(homes, monkeypatch, capsys, v
     assert calls == {'stop': ['unserve'], 'start': ['serve'], 'restart': ['unserve', 'serve']}[verb]
     assert marker.exists() is (verb == 'stop')
     output = capsys.readouterr().out
-    assert {'stop': "Profile 'worker' parked; its bots and cron are stopped.",
+    assert {'stop': "Profile 'worker' parked; its bots and scheduled are stopped.",
             'start': "Profile 'worker' served", 'restart': "Profile 'worker' restarted"}[verb] in output
 
 
@@ -179,7 +179,7 @@ def test_stop_parks_a_served_profile_instead_of_stopping_the_host(homes, monkeyp
     gw._cmd_stop(SimpleNamespace())
     assert calls == ['unserve']
     assert marker.exists()
-    assert "parked; its bots and cron are stopped" in capsys.readouterr().out
+    assert "parked; its bots and scheduled are stopped" in capsys.readouterr().out
 
 
 def test_separate_gateway_beside_the_host_keeps_its_own_lifecycle(homes, monkeypatch):

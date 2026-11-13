@@ -109,7 +109,7 @@ def test_failed_run_retries_twice_before_burning():
 
 @pytest.mark.parametrize(("attempt", "reruns"), [(1, True), (3, False)])
 def test_the_pass_that_observes_a_failure_reruns_it_unless_burned(attempt, reruns):
-    """No cron re-wakes the reconciler, so the failure event's own pass must rerun."""
+    """No scheduled re-wakes the reconciler, so the failure event's own pass must rerun."""
     from datetime import datetime, timezone
 
     from scripts.releases.sequencer import reconcile

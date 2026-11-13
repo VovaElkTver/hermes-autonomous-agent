@@ -608,7 +608,7 @@ class TestBlueBubblesPluginRegistration:
         assert captured["required_env"] == ["BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_PASSWORD"]
         assert captured["allowed_users_env"] == "BLUEBUBBLES_ALLOWED_USERS"
         assert captured["allow_all_env"] == "BLUEBUBBLES_ALLOW_ALL_USERS"
-        assert captured["cron_deliver_env_var"] == "BLUEBUBBLES_HOME_CHANNEL"
+        assert captured["scheduled_deliver_env_var"] == "BLUEBUBBLES_HOME_CHANNEL"
         assert captured["emoji"] == "💬"
         assert captured["pii_safe"] is True and captured["allow_update_command"] is True
         assert "BLUEBUBBLES_SERVER_URL/BLUEBUBBLES_PASSWORD" in captured["install_hint"]

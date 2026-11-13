@@ -1,7 +1,7 @@
 """Regression coverage for #100818: compaction of a single-prompt session
-(the cron shape) must not leave the model with nothing to obey.
+(the scheduled shape) must not leave the model with nothing to obey.
 
-A cron run is one user message — the job prompt — followed by nothing but
+A scheduled run is one user message — the job prompt — followed by nothing but
 assistant/tool turns. When ContextCompressor fires mid-run, that prompt is
 folded into the handoff summary and no user message survives *after* it.
 SUMMARY_PREFIX then reads literally:
@@ -73,7 +73,7 @@ def _cron_transcript() -> list[dict[str, Any]]:
     return [
         {
             "role": "system",
-            "content": "You are Hermes. Cron preamble: if nothing to report, "
+            "content": "You are Hermes. Scheduled preamble: if nothing to report, "
             "return [SILENT].",
         },
         {"role": "user", "content": JOB_SENTINEL},
@@ -133,7 +133,7 @@ def test_cron_job_prompt_survives_after_the_handoff():
         JOB_SENTINEL in _text(m) for m in _actionable_user_rows(after)
     ) or (JOB_SENTINEL in carrier_tail)
     assert job_after_summary, (
-        "the in-flight cron job prompt must appear in a user message AFTER the "
+        "the in-flight scheduled job prompt must appear in a user message AFTER the "
         "handoff summary — SUMMARY_PREFIX orders the model to do nothing "
         "otherwise (#100818)"
     )
@@ -207,7 +207,7 @@ def test_completed_exchange_is_not_replayed():
 
 
 def _pending_tail_transcript() -> list[dict[str, Any]]:
-    """Cron shape whose LAST row is an assistant tool_calls turn still awaiting
+    """Scheduled shape whose LAST row is an assistant tool_calls turn still awaiting
     its result — compaction fired inside the tool-execution window."""
     msgs = _cron_transcript()
     msgs.append(

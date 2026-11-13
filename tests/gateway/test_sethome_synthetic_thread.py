@@ -7,7 +7,7 @@ persisted HomeChannel. Every bare-platform delivery (deliver="slack") then
 resolved home chat + home thread and landed inside the ephemeral thread
 spawned around the old /sethome message.
 
-Same contract as cron origin capture: a Slack thread id equal to the
+Same contract as scheduled origin capture: a Slack thread id equal to the
 message's own id is a synthetic session key, never a durable location.
 """
 

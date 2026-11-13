@@ -82,8 +82,8 @@ def should_arm(*, enabled: bool, relay_only_or_absent: bool, wake_url: Optional[
 def is_idle(*, active_work_count: int, seconds_since_last_inbound: float,
             idle_timeout_seconds: float, has_live_background_work: bool) -> bool:
     """Pure idle predicate: no active work, no inbound within the window, no live background work.
-    ``active_work_count`` is the BROAD aggregate (agent turns + cron + API runs) — passing only
-    ``len(_running_agents)`` reopens the mid-cron-job suspend hole. Callers that cannot read a
+    ``active_work_count`` is the BROAD aggregate (agent turns + scheduled + API runs) — passing only
+    ``len(_running_agents)`` reopens the mid-scheduled-job suspend hole. Callers that cannot read a
     work source must fail AWAKE (pass a positive sentinel), never fail to 0."""
     return (active_work_count <= 0 and not has_live_background_work
             and seconds_since_last_inbound >= idle_timeout_seconds)

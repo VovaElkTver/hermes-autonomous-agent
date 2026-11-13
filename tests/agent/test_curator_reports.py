@@ -105,7 +105,7 @@ def test_same_second_reruns_get_unique_dirs(curator_env):
 
 
 # ---------------------------------------------------------------------------
-# Cron job skill reference rewriting (curator ↔ cron integration)
+# Scheduled job skill reference rewriting (curator ↔ scheduled integration)
 # ---------------------------------------------------------------------------
 #
 # When the curator consolidates skill X into umbrella Y during a run, any

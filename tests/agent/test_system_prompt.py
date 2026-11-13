@@ -87,7 +87,7 @@ def test_kanban_guidance_requires_worker_task_at_agent_init(monkeypatch, task_id
 @pytest.mark.parametrize("task_id, owner, expected", [
     (None, True, False),        # interactive session with the kanban toolset enabled
     ("t_worker", True, True),   # the dispatcher-owned worker
-    ("t_worker", False, False), # cron run / delegate child inheriting the worker's env
+    ("t_worker", False, False), # scheduled run / delegate child inheriting the worker's env
 ])
 def test_kanban_guidance_fallback_requires_owned_worker_task(monkeypatch, task_id, owner, expected):
     """Prompt fallback preserves the worker boundary when init was bypassed: tool access
@@ -509,8 +509,8 @@ def test_coding_prompt_orders_shared_context_before_workspace(monkeypatch):
     expected_profile = (
         "Active Hermes profile: default. Other profiles (if any) live "
         f"under {_home_str}/profiles/<name>/. Each profile has its own skills/, "
-        "plugins/, cron/, and memories/ that affect a different session than "
-        "this one. Do not modify another profile's skills/plugins/cron/memories "
+        "plugins/, scheduled/, and memories/ that affect a different session than "
+        "this one. Do not modify another profile's skills/plugins/scheduled/memories "
         "unless the user explicitly directs you to."
     )
     expected = "\n\n".join((

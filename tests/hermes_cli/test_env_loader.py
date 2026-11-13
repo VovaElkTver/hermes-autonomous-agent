@@ -477,7 +477,7 @@ def test_cleanup_scope_is_the_profile_managed_set():
 #
 # load_hermes_dotenv loads .env with override=True, so a stale
 # TERMINAL_ENV=docker in .env used to silently beat config.yaml's
-# terminal.backend on every reload (gateway per-turn reload, cron standalone
+# terminal.backend on every reload (gateway per-turn reload, scheduled standalone
 # runs). The bridge re-applies config.yaml's EXPLICIT terminal keys last via
 # the shared hermes_cli.config.apply_terminal_config_to_env helper.
 # ---------------------------------------------------------------------------
@@ -492,7 +492,7 @@ def _seed_terminal_home(tmp_path, monkeypatch, *, config_yaml=None, env_text=Non
         (home / ".env").write_text(env_text, encoding="utf-8")
     # The bridge is scoped to the process HERMES_HOME (a different profile's
     # load must not bridge this process's config), so point the process at
-    # the seeded home like a real gateway/cron process would be.
+    # the seeded home like a real gateway/scheduled process would be.
     monkeypatch.setenv("HERMES_HOME", str(home))
     return home
 

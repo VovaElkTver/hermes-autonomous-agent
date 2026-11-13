@@ -1,4 +1,4 @@
-"""Cron-source exclusion from the external-content trigram FTS index."""
+"""Scheduled-source exclusion from the external-content trigram FTS index."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from hermes_state import SessionDB
 from hermes_state_common import FTS_TRIGRAM_SQL, SCHEMA_VERSION
 
-# The trigram cron-exclusion rebuild is the v30 data migration: a store one version behind IT, not one
+# The trigram scheduled-exclusion rebuild is the v30 data migration: a store one version behind IT, not one
 # behind the current SCHEMA_VERSION (later migrations do not re-run it).
 _PRE_TRIGRAM_EXCLUSION_VERSION = 29
 
@@ -34,7 +34,7 @@ def _trigram_rowids(db: SessionDB) -> set[int]:
 
 
 def _install_pre_v27_trigram(db: SessionDB, *, with_tool_calls: bool = False) -> None:
-    """Recreate the pre-cron-exclusion external-content trigram boundary.
+    """Recreate the pre-scheduled-exclusion external-content trigram boundary.
 
     ``with_tool_calls=True`` reproduces the FTS_STORAGE_VERSION 1 vtable
     (``tool_calls`` projected) that installs upgraded before #88217 carry;
@@ -165,7 +165,7 @@ def test_install_already_at_v28_still_gets_the_cron_exclusion_migration(tmp_path
 
     The original PR gated on ``current_version < 27``; main had meanwhile
     reached SCHEMA_VERSION 28 via column-reconciliation bumps, so a v28
-    database would have skipped the rebuild and kept cron rows in the trigram
+    database would have skipped the rebuild and kept scheduled rows in the trigram
     index forever. Pin the gate against the version main actually shipped.
     """
     db_path = tmp_path / "state.db"
@@ -186,7 +186,7 @@ def test_install_already_at_v28_still_gets_the_cron_exclusion_migration(tmp_path
     migrated = SessionDB(db_path=db_path)
     try:
         assert _trigram_rowids(migrated) == {cli_id}, (
-            "a v28 database kept cron rows in the trigram index: the migration gate did not fire"
+            "a v28 database kept scheduled rows in the trigram index: the migration gate did not fire"
         )
     finally:
         migrated.close()
@@ -215,11 +215,11 @@ def test_v1_tool_calls_layout_is_left_for_optimize_storage(tmp_path):
 
     migrated = SessionDB(db_path=db_path)  # must not raise
     try:
-        # Startup left the v1 layout alone (cron row still there) …
+        # Startup left the v1 layout alone (scheduled row still there) …
         assert _trigram_rowids(migrated) == {cli_id, cron_id}
         assert migrated.fts_optimize_available() is True
         # … and the opt-in path completes the transition: v2 columns,
-        # cron-filtered view, cron row purged.
+        # scheduled-filtered view, scheduled row purged.
         migrated.optimize_fts_storage()
         cols = [r[1] for r in migrated._conn.execute("PRAGMA table_info(messages_fts_trigram)")]
         assert "tool_calls" not in cols

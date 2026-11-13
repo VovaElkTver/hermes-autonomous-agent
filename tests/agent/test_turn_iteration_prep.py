@@ -85,7 +85,7 @@ def _interrupted_agent(tool_interrupt_reason):
     ("user sent a new message", "interrupted_by_user"),
     (None, "interrupted_by_user"),
     # A producer that named itself via ``tool_reason`` is booked as the issuer (#112647).
-    ("cron inactivity watchdog", "interrupted_by_system(cron_inactivity_watchdog)"),
+    ("scheduled inactivity watchdog", "interrupted_by_system(cron_inactivity_watchdog)"),
     ("turn liveness watchdog", "interrupted_by_system(turn_liveness_watchdog)"),
 ])
 def test_interrupt_exit_reason_names_the_system_issuer(tool_interrupt_reason, expected):

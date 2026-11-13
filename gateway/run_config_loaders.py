@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from gateway.config import Platform
 from gateway.restart import (
-    DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, DEFAULT_GATEWAY_POST_INTERRUPT_GRACE_TIMEOUT,
+    DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT, DEFAULT_GATEWAY_POST_INTERRUPT_GRACE_TIMEOUT,
     DEFAULT_GATEWAY_RESTART_AFTER_TURN_TIMEOUT, DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT,
-    DEFAULT_GATEWAY_SIGNAL_INTERRUPT_GRACE_TIMEOUT, parse_cron_drain_timeout,
+    DEFAULT_GATEWAY_SIGNAL_INTERRUPT_GRACE_TIMEOUT, parse_scheduled_drain_timeout,
     parse_restart_after_turn_timeout, parse_restart_drain_timeout,
     launchd_service_label, parse_signal_interrupt_grace_timeout, read_launchd_exit_timeout_s,
     resolve_launchd_capped_drain,
@@ -535,14 +535,17 @@ class GatewayConfigLoadersMixin:
         )
 
     @classmethod
-    def _load_cron_drain_timeout(cls) -> float:
-        """The cron and api_server (/v1) floor under the stop()/drain wait.
+    def _load_scheduled_drain_timeout(cls) -> float:
+        """The scheduled-run and api_server (/v1) floor under the stop()/drain wait.
 
         See #82161.
         """
+        # transitional fallback to HERMES_CRON_DRAIN_TIMEOUT, drop after fleet redeploy
+        env_var = ("HERMES_SCHEDULED_DRAIN_TIMEOUT" if os.getenv("HERMES_SCHEDULED_DRAIN_TIMEOUT")
+                   else "HERMES_CRON_DRAIN_TIMEOUT")
         return cls._load_env_or_agent_cfg_timeout(
-            "HERMES_CRON_DRAIN_TIMEOUT", "cron_drain_timeout",
-            parse_cron_drain_timeout, DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
+            env_var, "scheduled_drain_timeout",
+            parse_scheduled_drain_timeout, DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT,
         )
 
     @classmethod
@@ -607,13 +610,13 @@ class GatewayConfigLoadersMixin:
     def _refresh_fallback_model(self) -> list | None:
         """Re-read fallback_providers from disk for the next agent create/reuse.
 
-        Lets a chain edited after startup reach messaging sessions (cron already re-reads per job).
+        Lets a chain edited after startup reach messaging sessions (scheduled already re-reads per job).
         A TRANSIENT read/parse failure (user mid-edit, non-atomic write) keeps the last known-good
         chain; only a successful read that genuinely lacks the key clears it.
 
-        Cron already does this per job via ``get_fallback_chain``; the gateway previously froze
+        Scheduled already does this per job via ``get_fallback_chain``; the gateway previously froze
         ``self._fallback_model`` at process start, so a chain configured (or changed) after ``hermes
-        gateway`` was running never reached messaging sessions even though the same process's cron jobs fell
+        gateway`` was running never reached messaging sessions even though the same process's scheduled jobs fell
         back correctly. Fixes #60955.
 
         Reads the ACTIVE gateway home (the routed profile under multiplexing, else the launch home)

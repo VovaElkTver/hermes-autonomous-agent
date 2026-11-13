@@ -6,7 +6,7 @@ still running after 180.0s — restart may fail") and could deadlock `hermes
 update`. The fix probes the loop-liveness heartbeat file BEFORE draining and,
 only when the loop is provably dead, escalates SIGTERM → SIGKILL bounded to
 seconds. A busy-but-alive gateway (fresh heartbeat) must keep the full drain
-path — including the in-flight cron drain floor from #86684.
+path — including the in-flight scheduled drain floor from #86684.
 """
 
 import asyncio
@@ -455,7 +455,7 @@ class TestLaunchdRestartWedgedIntegration:
 
     def test_busy_gateway_keeps_full_drain_budget(self, monkeypatch):
         """A busy-but-alive gateway (fresh heartbeat) must NOT be escalated —
-        that would bypass the in-flight cron drain floor (#86684)."""
+        that would bypass the in-flight scheduled drain floor (#86684)."""
         events = self._setup(monkeypatch, gateway_cli.GATEWAY_LOOP_ALIVE)
         gateway_cli.launchd_restart()
         assert "escalate" not in events

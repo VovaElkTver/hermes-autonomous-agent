@@ -68,12 +68,12 @@ _SECRET_SOURCE_CACHE_LOCK = threading.RLock()
 
 # What THIS process has published from dotenv files, per variable: (value before our first publish, or
 # None if absent; last value we published; load pass that published it). Reloads run per gateway turn and
-# per cron fire, and a line like ``PATH=/x:${PATH}`` interpolated against an environ that already holds the
+# per scheduled fire, and a line like ``PATH=/x:${PATH}`` interpolated against an environ that already holds the
 # previous reload's output grows by ``/x:`` every time until child spawns fail with E2BIG (#109902). A new
 # pass resolves against the baseline instead — but only where the environ still holds exactly what we
 # published, so a value the shell, config bridge, or an external secret source changed since is not frozen.
 # One process-wide record (not per home/project scope): the environ is process-wide, so alternating
-# callers (gateway with a project .env, cron without; home A then B) must peel each other's output too.
+# callers (gateway with a project .env, scheduled without; home A then B) must peel each other's output too.
 _DOTENV_PUBLISHED: dict[str, tuple[str | None, str, int]] = {}
 _DOTENV_PASSES = itertools.count()
 _DOTENV_LOCK = threading.RLock()
@@ -263,7 +263,7 @@ def reset_secret_source_cache(hermes_home: str | os.PathLike | None = None) -> N
     """Forget applied homes so the next load re-pulls (tests, long-running processes after config edits).
 
     ``hermes_home`` limits the reset to ONE home: a multiplex gateway keeps every profile's snapshot in
-    this process, and a per-fire cron re-pull or a plugin-discovery refresh for one home must not wipe
+    this process, and a per-fire scheduled re-pull or a plugin-discovery refresh for one home must not wipe
     a sibling's hydrated snapshot — the sibling's next scope build would run empty until it re-hydrated
     (#102041)."""
     if hermes_home is None:
@@ -676,8 +676,8 @@ def load_hermes_dotenv(
     # home must be the launch home: a launch-targeted load inside a FOREIGN turn re-bridges terminal.*
     # from the config the override resolves to, i.e. the routed profile's cwd into the shared env.
     # External sources still refresh against the profile mapping.
-    # (``is_multiplex_active()`` is also true, context-locally, for a routed cron fire in the desktop
-    # backend — see ``cron.scheduler_provider.routed_profile_fire``.)
+    # (``is_multiplex_active()`` is also true, context-locally, for a routed scheduled fire in the desktop
+    # backend — see the routed-profile-fire branch of the multiplex activation path.)
     from agent.secret_scope import is_multiplex_active
     from hermes_constants import get_hermes_home, get_hermes_home_override
 
@@ -718,7 +718,7 @@ def load_hermes_dotenv(
         _clear_known_keys_missing_from_dotenv(user_env)  # mirrors reload_env(): inherited keys must not leak
 
     # .op.env AFTER .env so .env wins, but the bootstrap OP_SERVICE_ACCOUNT_TOKEN reaches
-    # apply_onepassword_secrets() even in cron with no shell state; gitignored so the token never enters
+    # apply_onepassword_secrets() even in scheduled with no shell state; gitignored so the token never enters
     # the committed .env. override=False lets a systemd `EnvironmentFile=-…/.op.env` token win.
     op_env = home_path / ".op.env"
     if op_env.exists() and not os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
@@ -775,7 +775,7 @@ def load_hermes_dotenv(
     # with override=True — so a stale TERMINAL_ENV=docker left in ~/.hermes/.env (e.g. written by an older
     # `hermes setup` before the user switched terminal.backend in config.yaml) silently wins again on every
     # reload. Startup launchers bridge config→env once, but long-lived processes (gateway per-turn reload,
-    # cron standalone runs) call load_hermes_dotenv() repeatedly and used to flip the effective backend back
+    # scheduled standalone runs) call load_hermes_dotenv() repeatedly and used to flip the effective backend back
     # to the stale .env value mid-session (#29186, #67323).
     _reapply_terminal_config_bridge(home_path)
 
@@ -992,7 +992,7 @@ def _apply_external_secret_sources(home_path: Path) -> None:
     # Snapshot EVERY name a source supplied, not just the newly applied ones. A name the source supplied
     # but the pre-existing process value won (``skipped_existing``) is still this home's effective value
     # for it — and on the unscoped path os.environ IS this home's environment. Skipping those names
-    # latched an EMPTY snapshot whenever the key was already in the env: after the first cron/plugin
+    # latched an EMPTY snapshot whenever the key was already in the env: after the first scheduled/plugin
     # re-pull (the previous apply's own write-back shadows every key) or from boot under systemd
     # ``EnvironmentFile=``. Under multiplex the scope is the only credential source, so an empty
     # snapshot failed every default-profile turn for the process lifetime (#102041).

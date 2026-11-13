@@ -1,12 +1,12 @@
 """Tests for typed block reasons + the unblock-loop breaker.
 
 Covers the built-in fix for the kanban "blocked loop" — a worker blocks a
-task, a cron unblocks it, the worker re-blocks for the same reason, repeat
+task, a scheduled unblocks it, the worker re-blocks for the same reason, repeat
 forever. The fix gives ``block_task`` a typed ``kind`` and a persistent
 ``block_recurrences`` counter:
 
 * ``dependency`` blocks route to ``todo`` (parent-gated, auto-resumed) and
-  never enter the human ``blocked`` bucket a cron would keep unblocking —
+  never enter the human ``blocked`` bucket a scheduled would keep unblocking —
   unless no parent is open, in which case the wait can never be satisfied
   and the block is recorded as ``needs_input`` (sticky, loop-counted).
 * ``needs_input`` / ``capability`` / un-typed blocks land in ``blocked``;
@@ -141,7 +141,7 @@ def test_dependency_block_with_terminal_parents_parks_then_escalates(
         assert kb.recompute_ready(conn) == 0
         assert kb.get_task(conn, child).status == "blocked"
 
-        # A cron/human unblocks; the worker re-declares the same impossible wait.
+        # A scheduled/human unblocks; the worker re-declares the same impossible wait.
         assert kb.unblock_task(conn, child)
         assert kb.claim_task(conn, child, claimer="worker") is not None
         assert kb.block_task(conn, child, reason="still waiting", kind="dependency")

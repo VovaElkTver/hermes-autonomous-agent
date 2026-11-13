@@ -6,7 +6,7 @@ of calling ``agent._claim_stream_writer()`` directly. That indirection exists so
 an agent object that doesn't expose the fence (a version-skewed checkout, a
 duck-typed agent, a test double) degrades to "no fence" rather than aborting the
 whole turn with ``'AIAgent' object has no attribute '_claim_stream_writer'`` —
-the exact AttributeError that killed a cron job.
+the exact AttributeError that killed a scheduled job.
 
 These tests assert the fence's *contract*: it may drop a provably superseded
 stream, but it must never fence (or crash) the sole legitimate writer.

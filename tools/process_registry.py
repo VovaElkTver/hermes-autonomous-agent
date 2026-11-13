@@ -358,7 +358,7 @@ class RestartSafeScopeUnavailable(RuntimeError):
 
 def _warn_scope_degraded_once(detail: str, *, consequence: str) -> None:
     """Warn once per process: the condition is host-level and the probe verdict
-    is cached, so this would otherwise fire on every cron dispatch."""
+    is cached, so this would otherwise fire on every scheduled dispatch."""
     global _scope_degraded_warned
     if _scope_degraded_warned:
         return
@@ -366,10 +366,10 @@ def _warn_scope_degraded_once(detail: str, *, consequence: str) -> None:
     logger.warning("%s; %s", detail, consequence)
 
 
-_CRON_DEGRADED_CONSEQUENCE = (
-    "cron children are dispatched as direct external subprocesses without restart-safe "
-    "cgroup isolation (killed if the gateway restarts mid-job). Set "
-    "cron.require_restart_safe_scope=true in config.yaml to fail closed instead."
+_SCHEDULED_DEGRADED_CONSEQUENCE = (
+    "scheduled-run children are dispatched as direct external subprocesses without restart-safe "
+    "cgroup isolation (killed if the gateway restarts mid-job); dispatch callers that need it "
+    "must pass require_restart_safe_scope=True explicitly."
 )
 _UNIT_DEGRADED_CONSEQUENCE = (
     "workers are spawned unmanaged inside this systemd unit's cgroup and will be KILLED when the "
@@ -424,11 +424,11 @@ def restart_safe_gateway_child_argv(
     A systemd-supervised gateway restart kills every process in the service
     cgroup, so children that must survive it run in a transient user scope.
     Hosts with no user systemd session (containers, LXCs without linger) cannot
-    create one; hard-failing there is a silent cron outage, so callers state the
+    create one; hard-failing there is a silent scheduled outage, so callers state the
     policy: ``require_restart_safe_scope=True`` raises
     :class:`RestartSafeScopeUnavailable` (kanban's long-lived workers), ``False``
     degrades to a direct external subprocess with a once-per-process warning
-    (cron, behind ``cron.require_restart_safe_scope``).
+    (scheduled runs; their dispatcher opts in per call).
 
     ``outlives_parent=True`` (fire-and-forget kanban workers): any *other*
     systemd unit — a ``Type=oneshot`` dispatch timer, an operator's sequencer
@@ -436,7 +436,7 @@ def restart_safe_gateway_child_argv(
     there too (#113612). Whether that unit actually kills its children
     (``KillMode``, lifetime) is not knowable here, so without a user bus it
     degrades with a loud warning instead of refusing: a long-lived
-    ``Type=simple`` sequencer without linger keeps working. A cron job blocks its
+    ``Type=simple`` sequencer without linger keeps working. A scheduled job blocks its
     caller until it finishes and never needs this.
     """
     if not _IS_LINUX:
@@ -450,11 +450,11 @@ def restart_safe_gateway_child_argv(
     def _degrade(detail: str) -> GatewayChildDispatch:
         if supervised_gateway:
             if require_restart_safe_scope:
-                # Stored as the cron execution's error and shown on the job row: name the remedy.
+                # Stored as the scheduled execution's error and shown on the job row: name the remedy.
                 raise RestartSafeScopeUnavailable(
                     f"cannot create restart-safe systemd scope for gateway child: {detail}"
                 )
-            _warn_scope_degraded_once(f"managed gateway: {detail}", consequence=_CRON_DEGRADED_CONSEQUENCE)
+            _warn_scope_degraded_once(f"managed gateway: {detail}", consequence=_SCHEDULED_DEGRADED_CONSEQUENCE)
         else:
             _warn_scope_degraded_once(f"systemd unit dispatch: {detail}", consequence=_UNIT_DEGRADED_CONSEQUENCE)
         return GatewayChildDispatch("degraded", command)
@@ -697,7 +697,7 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
         import queue as _queue_mod
         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
         # Durable delegation completions are NOT rehydrated here: this constructor runs at
-        # import time in every process that touches the tools graph (cron clients, `hermes
+        # import time in every process that touches the tools graph (scheduled clients, `hermes
         # sessions list`, workers), and restoring means writing the canonical ledger. The
         # owner replays them explicitly (GatewayRunner._start_recover_previous_run) and the
         # first consumer through restore_completions() (#123265). Importing the module is

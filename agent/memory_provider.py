@@ -127,7 +127,7 @@ class MemoryProvider(ABC):
         ``agent_identity``, ``agent_workspace``, ``parent_session_id``, ``user_id``, ``user_id_alt``.
         Agent builds also pass ``resumed`` (bool: an earlier turn of this session id ran) and
         ``message_count`` (int: messages already stored for it, which on TUI/Desktop can include the
-        prompt being submitted). A new session id (subagent, cron run, fresh chat) or no session
+        prompt being submitted). A new session id (subagent, scheduled run, fresh chat) or no session
         store gives ``False`` and a count of 0 or 1; a ``/branch`` child seeded with copied history
         reports the copy. Read both with ``kwargs.get``: older Hermes omits them. A mid-process
         ``/resume`` rebinds through :meth:`on_session_switch` instead.
@@ -184,7 +184,7 @@ class MemoryProvider(ABC):
         ("" on a first turn or an image-only one), from the transcript Hermes holds, so a resumed process can redo
         what a live one queued at the end of that turn. Context Hermes appended to an image turn (recalled memory,
         plugin and gateway notes) is not part of it. Best-effort: known runtime user-role rows and /steer messages
-        are skipped, but a notice a gateway replays after a restart (cron delivery, process heartbeat, watch-disabled
+        are skipped, but a notice a gateway replays after a restart (scheduled delivery, process heartbeat, watch-disabled
         notice) can come through, and so can the notes on an image turn an older Hermes stored or that repair or
         compaction later merged with another turn."""
 

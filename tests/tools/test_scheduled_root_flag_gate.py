@@ -16,10 +16,10 @@ def fork_cfg(monkeypatch):
 
 
 def test_cron_gate_mirrors_root_flag(fork_cfg) -> None:
-    from tools.fork_mode import cron_runtime_enabled
-    assert cron_runtime_enabled() is False  # fork default: autonomous ON → jobs OFF
+    from tools.fork_mode import scheduled_runtime_enabled
+    assert scheduled_runtime_enabled() is False  # fork default: autonomous ON → jobs OFF
     fork_cfg["autonomous_mode"] = False
-    assert cron_runtime_enabled() is True   # donor parity posture
+    assert scheduled_runtime_enabled() is True   # donor parity posture
 
 
 def test_api_server_jobs_surface_is_gone() -> None:

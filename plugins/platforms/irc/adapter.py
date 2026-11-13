@@ -603,7 +603,7 @@ def register(ctx):
         install_hint="No extra packages needed (stdlib only)",
         setup_fn=interactive_setup,
         env_enablement_fn=_env_enablement,  # env-only setups show in gateway status
-        cron_deliver_env_var="IRC_HOME_CHANNEL",  # defaults to IRC_CHANNEL (see _env_enablement)
+        scheduled_deliver_env_var="IRC_HOME_CHANNEL",  # defaults to IRC_CHANNEL (see _env_enablement)
         standalone_sender_fn=_standalone_send,  # scheduled sends running separately from the gateway
         allowed_users_env="IRC_ALLOWED_USERS",
         allow_all_env="IRC_ALLOW_ALL_USERS",

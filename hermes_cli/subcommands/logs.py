@@ -48,5 +48,5 @@ Examples:
         "--since", metavar="TIME", help="Show lines since TIME ago (e.g. 1h, 30m, 2d)")
     logs_parser.add_argument(
         "--component", metavar="NAME",
-        help="Filter by component: gateway, agent, tools, cli, cron, gui")
+        help="Filter by component: gateway, agent, tools, cli, scheduled, gui")
     logs_parser.set_defaults(func=cmd_logs)

@@ -545,7 +545,7 @@ def _count_session_rows(path: Path) -> Optional[tuple[int, int]]:
     database that is not a Hermes session store, or one that cannot be read.
     Callers must never read ``None`` as "zero rows": acting on an unreadable
     database would mask the very loss this count exists to surface.  Same
-    contract as :func:`_count_cron_jobs`.
+    contract as :func:`_count_scheduled_jobs`.
     """
     if not path.is_file():
         return None
@@ -678,10 +678,10 @@ def _set_config_path_value(data: dict[str, Any], dotted: tuple[str, ...], value:
     node[dotted[-1]] = value
 
 
-def _count_cron_jobs(path: Path) -> Optional[int]:
-    """Return the number of cron jobs stored in ``path``.
+def _count_scheduled_jobs(path: Path) -> Optional[int]:
+    """Return the number of scheduled jobs stored in ``path``.
 
-    The canonical on-disk shape is ``{"jobs": [...]}`` (see ``cron/jobs.py``).
+    The canonical on-disk shape is ``{"jobs": [...]}`` (see ``scheduled/jobs.py``).
     A legacy bare-list shape (``[...]``) is also honoured.
 
     Returns:
@@ -693,10 +693,10 @@ def _count_cron_jobs(path: Path) -> Optional[int]:
     if not path.is_file():
         return None
     try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs — Windows editors
+        # utf-8-sig: same dialect as scheduled/jobs.load_jobs — Windows editors
         # may leave a UTF-8 BOM that plain utf-8 json.load rejects. Without
         # it a BOM'd jobs.json counts as "unreadable" (None) and the
-        # post-update cron-loss auto-restore safety net silently disables.
+        # post-update scheduled-loss auto-restore safety net silently disables.
         with open(path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):

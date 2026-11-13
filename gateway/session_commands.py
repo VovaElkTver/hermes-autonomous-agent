@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import shlex
 
-# /cron slash handling (session_cron_commands) was excised with the cron package.
+# /scheduled slash handling (session_cron_commands) was excised with the scheduled package.
 from hermes_state_runtime import RuntimeStoreError
 
 logger = logging.getLogger(__name__)
@@ -42,14 +42,14 @@ _APPROVAL_COMMANDS = frozenset({'approve', 'deny'})
 # Reports with no messaging handler: the classic CLI's own text, built by the owner for this
 # session (gateway/session_info_reads.py).
 _INFO_READS = frozenset({'toolsets', 'platforms'})
-# The classic CLI's own handler, run by the owner (gateway/session_cron_commands.py): the profile's cron store
-# belongs to the gateway whose ticker fires its jobs, so no client writes it. Bare ``/cron`` and ``list``
+# The classic CLI's own handler, run by the owner (gateway/session_cron_commands.py): the profile's scheduled store
+# belongs to the gateway whose ticker fires its jobs, so no client writes it. Bare ``/scheduled`` and ``list``
 # read; every other form (add/edit/pause/resume/run/remove) is a control that writes the store. A write runs
 # only on a connection that is not attached to the session: the classic CLI's command socket
 # (GatewayConnection.call_until), which waits with no deadline. A viewer's own connection (Ink, Desktop, ACP
-# send /cron there) answers its reads, prompts and interrupts one request at a time with a deadline, and a
-# /cron run lasts as long as its job, so it keeps main's refusal whichever surface created the session.
-# /cron (the only owner command) was excised with the cron package.
+# send /scheduled there) answers its reads, prompts and interrupts one request at a time with a deadline, and a
+# /scheduled run lasts as long as its job, so it keeps main's refusal whichever surface created the session.
+# /scheduled (the only owner command) was excised with the scheduled package.
 _OWNER_COMMANDS = frozenset()
 # Commands that move the session's goal/loop/heartbeat state: every viewer's cards repaint after them.
 _AUTOMATION_COMMANDS = frozenset({'goal', 'subgoal', 'loop', 'heartbeat'})
@@ -81,7 +81,7 @@ def _first_token(arg):
 
 
 # The read-only argument forms of a read command whose other subcommands write: ``/usage reset``
-# redeems a credit, ``/suggestions accept|catalog`` schedules cron jobs delivering to this
+# redeems a credit, ``/suggestions accept|catalog`` schedules scheduled jobs delivering to this
 # (non-messaging) chat. Only the first word counts.
 _READ_ARGUMENTS = {
     'skills': lambda arg: not arg.strip(),

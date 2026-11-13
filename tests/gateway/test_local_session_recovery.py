@@ -144,9 +144,9 @@ async def test_branch_and_local_entries_keep_the_routing_prune_sweep_running(tmp
 
 @pytest.mark.asyncio
 async def test_delete_retires_owner_receipts_and_never_resurrects_the_id(tmp_path, monkeypatch):
-    """The deletion fence takes the local policy receipt (a cron policy's ``request_json`` holds
+    """The deletion fence takes the local policy receipt (a scheduled policy's ``request_json`` holds
     the job and raw prompt) and the API binding + declared conversation key with the transcript;
-    a later create/cron/API retry of the same deterministic id is refused instead of recreating it."""
+    a later create/scheduled/API retry of the same deterministic id is refused instead of recreating it."""
     from gateway.config import GatewayConfig
     from gateway.session import SessionStore
     from gateway.session_api import bind_api_session

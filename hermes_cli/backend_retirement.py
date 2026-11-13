@@ -67,7 +67,7 @@ class RetirementFence:
                 return {"ok": False, "idle": False}
             self._preparing = True
         # No admissions can cross the freeze. Do not hold our lock while reading ledgers:
-        # some callers already hold a session/cron lock when reserving their work.
+        # some callers already hold a session/scheduled lock when reserving their work.
         verdict = None
         try:
             verdict = idle_proof()["idle"]

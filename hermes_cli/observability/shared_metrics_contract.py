@@ -313,7 +313,7 @@ EXECUTION_OUTCOMES = frozenset({"failed", "success"})
 PLATFORM_HEALTH_MARK = PLATFORM_HEALTH_METRIC = "hermes.platform.health"
 PLATFORM_DELIVERY_MARK = PLATFORM_DELIVERY_METRIC = "hermes.platform.delivery"
 REPLY_LATENCY_MARK = REPLY_LATENCY_METRIC = "hermes.gateway.reply_latency"
-CRON_RUN_MARK = CRON_RUN_METRIC = "hermes.cron.run"
+SCHED_RUN_MARK = SCHED_RUN_METRIC = "hermes.sched.run"
 # Plugin platforms are named only when Nous ships them (plugins/platforms/) or the installer proved a
 # plugin-catalog install (shared_metrics_catalog.platform_metric_name); every other one is ``plugin``.
 _PLATFORM_CATALOGS = ("bundled_platform_names", "catalog_platform_names")
@@ -340,8 +340,8 @@ PLATFORM_ERROR_CLASSES = frozenset({"none", "auth", "network", "rate_limited", "
 DELIVERY_OUTCOMES = frozenset({"sent", "failed"})
 DELIVERY_FAILURE_CLASSES = frozenset({"none", "rate_limited", "too_long", "auth", "network", "forbidden", "other"})
 REPLY_LATENCY_BUCKETS = frozenset({"lt_2s", "2s_to_5s", "5s_to_15s", "15s_to_60s", "gte_60s"})
-CRON_RUN_OUTCOMES = frozenset({"success", "failed", "missed", "skipped", "cancelled"})
-CRON_DELIVERY_KINDS = frozenset({"local", "platform", "webhook", "none", "other"})
+SCHED_RUN_OUTCOMES = frozenset({"success", "failed", "missed", "skipped", "cancelled"})
+SCHED_DELIVERY_KINDS = frozenset({"local", "platform", "webhook", "none", "other"})
 
 # ---- v4 install ----
 STARTUP_SURFACES = frozenset({"cli", "desktop_attach", "gateway_boot", "serve_boot", "tui"})
@@ -746,7 +746,7 @@ DESKTOP_KEYBIND_ACTION_IDS = frozenset({
     "composer.reasoningDown", "composer.reasoningUp", "composer.send", "composer.sendQueued", "composer.slash",
     "composer.steer", "composer.voice", "conversation.scrollPageDown", "conversation.scrollPageUp",
     "hud.snapToPointer", "keybinds.openPanel", "nav.agents", "nav.artifacts", "nav.capabilities",
-    "nav.commandCenter", "nav.commandPalette", "nav.cron", "nav.messaging", "nav.profiles", "nav.settings",
+    "nav.commandCenter", "nav.commandPalette", "nav.scheduled", "nav.messaging", "nav.profiles", "nav.settings",
     "profile.create", "profile.default", "profile.next", "profile.prev", "profile.toggleAll",
     "session.archive", "session.focusSearch", "session.new", "session.newTab", "session.newWindow",
     "session.next", "session.prev", "session.togglePin", "view.closeTab", "view.closeTerminal",
@@ -963,8 +963,8 @@ _COUNTER_DIMENSION_VALUES: dict[str, dict[str, frozenset[str]]] = {
         "failure_class": DELIVERY_FAILURE_CLASSES, "outcome": DELIVERY_OUTCOMES, "platform": ADAPTER_PLATFORMS,
     },
     REPLY_LATENCY_METRIC: {"first_response_bucket": REPLY_LATENCY_BUCKETS, "platform": ADAPTER_PLATFORMS},
-    CRON_RUN_METRIC: {
-        "delivery_kind": CRON_DELIVERY_KINDS, "duration_bucket": DURATION_BUCKETS, "outcome": CRON_RUN_OUTCOMES,
+    SCHED_RUN_METRIC: {
+        "delivery_kind": SCHED_DELIVERY_KINDS, "duration_bucket": DURATION_BUCKETS, "outcome": SCHED_RUN_OUTCOMES,
     },
     # ---- v4 model ----
     MODEL_TOOL_QUALITY_METRIC: {"call_role": MODEL_CALL_ROLES, "issue": TOOL_CALL_ISSUES},
@@ -1185,7 +1185,7 @@ _DECISION_MARK_METRICS = {
     # ---- end v4 loop ----
     # ---- v4 gateway ----
     PLATFORM_HEALTH_MARK: PLATFORM_HEALTH_METRIC, PLATFORM_DELIVERY_MARK: PLATFORM_DELIVERY_METRIC,
-    REPLY_LATENCY_MARK: REPLY_LATENCY_METRIC, CRON_RUN_MARK: CRON_RUN_METRIC,
+    REPLY_LATENCY_MARK: REPLY_LATENCY_METRIC, SCHED_RUN_MARK: SCHED_RUN_METRIC,
     # ---- v4 model ----
     MODEL_TOOL_QUALITY_MARK: MODEL_TOOL_QUALITY_METRIC, MODEL_FRICTION_MARK: MODEL_FRICTION_METRIC,
     CONTEXT_PEAK_MARK: CONTEXT_PEAK_METRIC,
@@ -1735,7 +1735,7 @@ def count_bucket(count: int) -> str:
 _TOOL_CATEGORY_EXACT = {
     **{category: category for category in TOOL_CATEGORIES},
     "clarify": "planning", "kanban": "planning", "todo": "planning", "session_search": "memory",
-    "cronjob": "scheduler", "skills": "skill", "x_search": "web",
+    "scheduled job": "scheduler", "skills": "skill", "x_search": "web",
 }
 _TOOL_CATEGORY_PREFIXES = (
     ("mcp", "mcp"),

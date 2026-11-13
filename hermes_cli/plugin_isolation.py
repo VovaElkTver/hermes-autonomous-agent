@@ -160,7 +160,7 @@ def import_user_code(path: Any, module_name: str) -> Optional[ModuleType]:
 def user_plugin_host() -> Any:
     """The active profile's plugin host when ``plugins.isolation`` is ``host``, else ``None``.
 
-    Category loaders (memory providers, context engines, cron schedulers) ask this before importing
+    Category loaders (memory providers, context engines, scheduled schedulers) ask this before importing
     a user plugin directory, so the same plugins keep working with their code in the host.
     """
     if isolation_mode() != ISOLATION_HOST:

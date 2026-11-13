@@ -132,7 +132,7 @@ def _shadowed_by_builtin(requested_norm: str) -> bool:
     """Raw names map to custom providers only when they are not canonical built-ins. Explicit
     ``custom:<name>`` keys always target the saved entry, and bare ``custom`` is exempt: a user may
     literally name a ``providers:`` entry "custom" (returning None before the config scan made such
-    cron jobs fail with ``auth_unavailable``). Defer to the built-in only when the raw name IS the
+    scheduled jobs fail with ``auth_unavailable``). Defer to the built-in only when the raw name IS the
     canonical provider (``nous``); an entry matching merely an alias (``kimi`` → ``kimi-coding``)
     is the user's target."""
     if requested_norm == "custom" or requested_norm.startswith("custom:"):
@@ -272,7 +272,7 @@ def _compatible_entry_path(config: dict[str, Any], entry: dict[str, Any]) -> Opt
 
 def has_named_custom_provider(requested_provider: str) -> bool:
     """True when config defines a ``providers:`` / ``custom_providers:`` entry matching the request
-    (public wrapper so e.g. the cronjob tool need not reach into a private helper)."""
+    (public wrapper so e.g. the scheduled job tool need not reach into a private helper)."""
     try:
         return _rp()._get_named_custom_provider(requested_provider) is not None
     except Exception:

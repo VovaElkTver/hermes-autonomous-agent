@@ -14,7 +14,7 @@ CLI call and dropped; nothing is written to disk or env.
 
 The surface owns the prompt: ``set_unlock_prompt_callback`` is installed by
 the CLI panel / TUI gateway bridge for the current thread, exactly like the
-sudo-password callback. Headless contexts (cron, webhook, api_server,
+sudo-password callback. Headless contexts (scheduled, webhook, api_server,
 single-query) install none and the vault stays locked — the same posture
 approvals take where nobody can answer.
 """
@@ -246,7 +246,7 @@ def is_unlocked(backend: str) -> bool:
 
 
 def can_prompt_here() -> bool:
-    """False in contexts where no human can answer (cron, webhook, api_server, -q)."""
+    """False in contexts where no human can answer (scheduled, webhook, api_server, -q)."""
     from tools.approval_context import _no_user_can_answer
     if _no_user_can_answer():
         return False

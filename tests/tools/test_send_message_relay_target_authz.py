@@ -402,7 +402,7 @@ def test_missing_relay_module_still_authorizes(relay_env, monkeypatch):
     """The converse: genuine ABSENCE must keep working (no gateway ⇒ no relay).
 
     Without this, "fail closed on faults" would silently become "refuse
-    everything in CLI/cron contexts", which is the outage the original broad
+    everything in CLI/scheduled contexts", which is the outage the original broad
     except was there to avoid.
     """
     import gateway.relay as gr
@@ -555,7 +555,7 @@ def test_nested_dependency_importerror_refuses(monkeypatch):
 
 
 def test_absent_gateway_module_importerror_still_authorizes(monkeypatch):
-    """Control: genuine absence (CLI/cron) must keep working."""
+    """Control: genuine absence (CLI/scheduled) must keep working."""
     import builtins
 
     import tools.send_message_tool as smt
@@ -931,7 +931,7 @@ def test_guard_uses_the_live_adapter_not_stale_env_discovery(monkeypatch):
 
 
 def test_guard_falls_back_to_config_when_no_live_adapter(monkeypatch):
-    """Control: with no live runner (CLI/cron) the config path must still work."""
+    """Control: with no live runner (CLI/scheduled) the config path must still work."""
     import gateway.relay as gr
     import gateway.relay.egress as eg
     import gateway.run as gr_run

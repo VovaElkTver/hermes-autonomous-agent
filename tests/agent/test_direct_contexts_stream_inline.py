@@ -1,6 +1,6 @@
-"""Delegated children and cron turns stream on the wire (#90202, #100260).
+"""Delegated children and scheduled turns stream on the wire (#90202, #100260).
 
-``should_use_direct_api_call`` contexts (gateway cron turns, delegate_task
+``should_use_direct_api_call`` contexts (gateway scheduled turns, delegate_task
 children) must not spawn the interrupt worker — it wedges inside their nested
 thread pools (#62151, #60203). The original fix short-circuited them onto the
 NON-streaming wire, which silently dropped every liveness property streaming
@@ -202,7 +202,7 @@ def test_inline_stream_stale_detector_still_fires_from_monitor_thread(
 
 
 def test_inline_stream_cross_thread_interrupt_aborts_promptly(stalling_wire, monkeypatch):
-    """``AIAgent.interrupt()`` from another thread (cron watchdog, delegation
+    """``AIAgent.interrupt()`` from another thread (scheduled watchdog, delegation
     stall monitor) must abort the inline stream and surface InterruptedError
     — the property the direct_api_call path guaranteed via
     ``_active_request_abort``."""

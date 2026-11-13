@@ -7,7 +7,7 @@ is already admitted; the edit applies from the next message. The same event carr
 ``everyone`` (every member gets a turn on an unaddressed message, the default) or ``lead`` (the lead picks
 who takes it; ``gateway/hosted_room_lead.py``).
 
-Scheduled posts are ordinary ``message.user`` events whose server-owned actor id names the cron job. Only
+Scheduled posts are ordinary ``message.user`` events whose server-owned actor id names the scheduled job. Only
 this module mints that actor (``groups.send`` hard-codes ``desktop``), so a client cannot impersonate a job.
 """
 
@@ -30,7 +30,7 @@ _CONTEXT_ACTOR = {"kind": "system", "id": "room-control"}
 # Actor id prefixes for posts the scheduler makes. A result post can start a round when it @mentions a
 # member; a failure notice never does (its text is machine-written, not addressed to anyone).
 SCHEDULED_POST_PREFIX = "cron:"
-SCHEDULED_NOTICE_PREFIX = "cron-notice:"
+SCHEDULED_NOTICE_PREFIX = "scheduled-notice:"
 ROUTING_MODES = ("everyone", "lead", "auto")
 _EMPTY_CONTEXT = {"purpose": "", "notes": "", "routing": "everyone", "lead_member_id": ""}
 
@@ -130,7 +130,7 @@ def post_scheduled_message(
     db_path: DbPath, *, room_id: Any, job_id: str, job_name: str, run_key: str, text: str, notice: bool = False,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Append one cron output to a room. Idempotent per ``run_key``: a retried delivery of the same run
+    """Append one scheduled output to a room. Idempotent per ``run_key``: a retried delivery of the same run
     returns the original event instead of posting twice."""
     from gateway.hosted_room_discussion import MAX_USER_TEXT_BYTES, validate_user_payload
 
@@ -139,12 +139,12 @@ def post_scheduled_message(
     suffix = "\n\n[Output truncated to fit the room.]"
     if len(text.encode("utf-8")) > MAX_USER_TEXT_BYTES:
         text = text.encode("utf-8")[:MAX_USER_TEXT_BYTES - len(suffix.encode())].decode("utf-8", "ignore") + suffix
-    payload = validate_user_payload({"text": text, "thread_id": f"cron-{digest[:24]}"})
+    payload = validate_user_payload({"text": text, "thread_id": f"scheduled-{digest[:24]}"})
     prefix = SCHEDULED_NOTICE_PREFIX if notice else SCHEDULED_POST_PREFIX
     job_label = re.sub(r"[^A-Za-z0-9._:-]", "-", job_id)[: hosted_rooms.MAX_ACTOR_ID_CHARS - len(prefix)] or "job"
     actor = {"kind": "user", "id": f"{prefix}{job_label}",
              "display_name": (job_name or job_id)[: hosted_rooms.MAX_ACTOR_LABEL_CHARS]}
-    event_id = f"cron-post:{digest[:40]}"
+    event_id = f"scheduled-post:{digest[:40]}"
     try:
         return hosted_rooms.append_event(
             db_path, room_id=room_id, event_id=event_id, kind="message.user", actor=actor,

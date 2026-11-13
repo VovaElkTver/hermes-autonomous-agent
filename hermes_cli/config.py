@@ -130,7 +130,8 @@ _ENV_VAR_NAME_DENYLIST: frozenset[str] = frozenset({
     # Security policy / approval-routing context — set via their dedicated controls only.
     "HERMES_YOLO_MODE", "HERMES_ACCEPT_HOOKS", "HERMES_REDACT_SECRETS",
     "HERMES_INTERACTIVE", "HERMES_EXEC_ASK", "HERMES_GATEWAY_SESSION",
-    "HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
+    "HERMES_SCHEDULED_SESSION", "HERMES_CRON_SESSION",  # transitional fallback, drop after fleet redeploy
+    "HERMES_SINGLE_QUERY_SESSION",
     "HERMES_SESSION_KEY", "HERMES_SESSION_PLATFORM"})
 
 
@@ -1414,7 +1415,7 @@ def _env_ref_lookup(name: str) -> Optional[str]:
     """Resolve the env var behind a ``${VAR}`` / ``${env:VAR}`` ref — plain ``os.environ`` outside
     a profile secret scope (legacy behavior for the default profile).
 
-    Inside a scope (a multiplexed gateway turn, a secondary profile's config load, a cron job) the read goes
+    Inside a scope (a multiplexed gateway turn, a secondary profile's config load, a scheduled job) the read goes
     through ``agent.secret_scope.get_secret`` so the ref resolves against *that* profile's ``.env``: under
     multiplexing a miss is a miss, never another profile's ``os.environ`` value (#84079 — every profile
     "had" the default profile's ``${MATRIX_ACCESS_TOKEN}`` and fanned out). Same policy as

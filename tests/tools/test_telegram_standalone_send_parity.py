@@ -1,4 +1,4 @@
-"""The standalone Telegram sender (``hermes send``, the ``send_message`` tool, standalone cron
+"""The standalone Telegram sender (``hermes send``, the ``send_message`` tool, standalone scheduled
 delivery) makes the gateway adapter's outbound decisions for the same text: the push-notification
 mode, the invisible-only guard, the ``rich_messages`` fast-path, and a MarkdownV2 retry before
 plain text when Bot API HTML rejects a tag. The ``telegram`` package is stubbed; the bot records
@@ -74,8 +74,8 @@ def standalone(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
 
 def test_notifications_mode_reaches_every_standalone_send(standalone) -> None:
-    """``important`` (default) sends silently, text and media alike; ``notify`` rings (cron's
-    ``cron.delivery.notify``); ``display.platforms.telegram.notifications: all`` in config.yaml rings."""
+    """``important`` (default) sends silently, text and media alike; ``notify`` rings (scheduled's
+    ``scheduled.delivery.notify``); ``display.platforms.telegram.notifications: all`` in config.yaml rings."""
     doc = standalone.home / "report.txt"
     doc.write_text("x", encoding="utf-8")
     assert standalone.run("status: still syncing")["success"] is True

@@ -2,7 +2,7 @@
 
 Unconditional blocks (hardline, ``sudo -S`` password piping, the user's own
 ``approvals.deny`` globs) and the permanent command allowlist match. All of
-them run BEFORE yolo / ``approvals.mode: off`` / cron approve-mode; the
+them run BEFORE yolo / ``approvals.mode: off`` / scheduled approve-mode; the
 allowlist runs after. Session state stays in ``tools.approval`` and is read
 through it at call time.
 """
@@ -97,7 +97,7 @@ def _hardline_block_result(description: str, command: str = "") -> dict:
         f"BLOCKED (hardline): {description}. "
         "This command is on the unconditional blocklist and cannot "
         "be executed via the agent — not even with --yolo, /yolo, "
-        "approvals.mode=off, or cron approve mode. If you genuinely "
+        "approvals.mode=off, or scheduled approve mode. If you genuinely "
         "need to run it, run it yourself in a terminal outside the agent."
     )
     # The parser-limit block is almost always a giant inline payload, not a forbidden operation, and is typically

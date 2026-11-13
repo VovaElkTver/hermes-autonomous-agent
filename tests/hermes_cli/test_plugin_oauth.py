@@ -565,7 +565,7 @@ def test_revoked_grant_keeps_no_tokens_and_uninstall_drops_the_grant(idp, api):
 
 def test_sign_in_is_refused_where_nobody_can_answer_the_browser(idp, monkeypatch):
     _plugin(oauth=[_entry(idp)])
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
     with pytest.raises(SystemExit, match="your own terminal"):
         _auth("add")
     assert idp.token_requests == [] and idp.opened == []

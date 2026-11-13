@@ -1,9 +1,11 @@
-"""Regression for TUI-8 (#134889): the native picker's stored feed lists messaging and cron sessions.
+"""Regression for TUI-8 (#134889): the native picker's stored feed lists messaging sessions.
 
 Before the shared gateway the picker listed every source except the internal ones (kanban, tool,
-oneshot); the stored feed listed only local labels, so a Telegram conversation or a finished cron run
-could not be picked from Ink's ``/resume``. Resuming such a row is the cold mount
-(``gateway/session_route_recovery.py``); this pins that the listing offers it.
+oneshot); the stored feed listed only local labels, so a Telegram conversation could not be picked
+from Ink's ``/resume``. Resuming such a row is the cold mount (``gateway/session_route_recovery.py``);
+this pins that the listing offers it. The finished-scheduled-run row of the original scenario was
+booked through the excised scheduler; a routeless ``cron`` label is neither local-receipt nor
+messaging today, so only the messaging half stays pinned here.
 """
 from types import SimpleNamespace
 
@@ -28,20 +30,6 @@ async def _owner(tmp_path, monkeypatch):
     return authority, store._db
 
 
-async def _finished_cron_run(authority, db, tmp_path):
-    """A cron fire through the owner's own path, then settled the way a finished run books it."""
-    from cron import jobs
-    from gateway import session_cron
-    from hermes_state_runtime import cancel_session_input
-    with jobs.use_cron_store(tmp_path / 'cron'):
-        job = jobs.create_job(prompt='report', schedule='every 1h', deliver='local', model='m')
-        receipt = await session_cron.operation(authority, 'submit', {'job_id': job['id'], 'request_id': 'fire',
-                                                                     'extra_prompt': None})
-    cancel_session_input(db, epoch=authority.epoch, admission_id=receipt['admission_id'])
-    db.end_session(receipt['session_id'], 'cron_complete')
-    return receipt['session_id']
-
-
 def _messaging_row(db, sid, chat_id, *, profile_name=None, platform='telegram'):
     import json
     route = f'agent:main:{platform}:dm:{chat_id}'
@@ -61,7 +49,6 @@ async def test_the_stored_feed_lists_messaging_and_cron_sessions_and_hides_inter
     authority, db = await _owner(tmp_path, monkeypatch)
     _messaging_row(db, 'tg-chat', '111')
     _messaging_row(db, 'tg-other-profile', '112', profile_name='other')
-    cron_run = await _finished_cron_run(authority, db, tmp_path)
     for sid, source in [('worker', 'kanban'), ('integration', 'tool'), ('once', 'oneshot')]:
         db.create_session(sid, source=source, model='m')
         db.append_message(sid, 'user', sid + ' question')
@@ -74,7 +61,7 @@ async def test_the_stored_feed_lists_messaging_and_cron_sessions_and_hides_inter
     listed = await native.dispatch({'id': 1, 'method': 'session.list', 'params': {'scope': 'stored'}})
     assert 'result' in listed, listed
     ids = {row['id'] for row in listed['result']['sessions']}
-    assert {'tg-chat', cron_run} <= ids
+    assert {'tg-chat'} <= ids
     assert not ids & {'worker', 'integration', 'once', 'tg-other-profile'}
 
     resumed = await native.dispatch({'id': 2, 'method': 'session.resume', 'params': {'session_id': 'tg-chat'}})

@@ -2657,7 +2657,7 @@ class TestConfigRoundTrip:
 
 
 class TestNewEndpoints:
-    """Tests for session detail, logs, cron, skills, tools, raw config, analytics."""
+    """Tests for session detail, logs, scheduled, skills, tools, raw config, analytics."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, monkeypatch, _isolate_hermes_home):
@@ -5059,7 +5059,7 @@ class TestValidateProviderCredential:
 
 
 class TestDesktopCronTicker:
-    """The dashboard backend fires cron jobs itself only when desktop-spawned."""
+    """The dashboard backend fires scheduled jobs itself only when desktop-spawned."""
 
     def _client(self):
         try:
@@ -5071,7 +5071,7 @@ class TestDesktopCronTicker:
         return TestClient(app)
 
     def test_ticker_runs_when_desktop(self, monkeypatch, _isolate_hermes_home):
-        import cron.scheduler as sched
+        import scheduled.scheduler as sched
 
         called = threading.Event()
         monkeypatch.setattr(sched, "tick", lambda *a, **k: called.set())
@@ -5079,7 +5079,7 @@ class TestDesktopCronTicker:
         monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", "desktop-spawn-token")
 
         with self._client():
-            assert called.wait(3.0), "expected cron tick under a Desktop-owned backend"
+            assert called.wait(3.0), "expected scheduled tick under a Desktop-owned backend"
 
 
 class TestServeIndexMissingIndex:

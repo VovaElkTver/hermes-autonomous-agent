@@ -1323,7 +1323,7 @@ class TestEnvWriteDenylist:
             "HERMES_INTERACTIVE",
             "HERMES_EXEC_ASK",
             "HERMES_GATEWAY_SESSION",
-            "HERMES_CRON_SESSION",
+            "HERMES_SCHEDULED_SESSION",
             "HERMES_SINGLE_QUERY_SESSION",
             "HERMES_SESSION_KEY",
             "HERMES_SESSION_PLATFORM",

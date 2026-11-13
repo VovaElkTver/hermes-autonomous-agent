@@ -268,7 +268,7 @@ class PluginHost:
 
     def load_instance(self, plugin_dir: Path, *, module_name: str, base_ref: str, capture: str,
                       ctx: Any = None, before_reload: Optional[Callable[[], None]] = None) -> Any:
-        """Load a category plugin (memory provider, context engine, cron scheduler) in the host and
+        """Load a category plugin (memory provider, context engine, scheduled scheduler) in the host and
         return a proxy that is an instance of ``base_ref``. ``ctx`` receives its other registrations.
 
         The proxy outlives a host crash: its next use loads the plugin into the new host (after

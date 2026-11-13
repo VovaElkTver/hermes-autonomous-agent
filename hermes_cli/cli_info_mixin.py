@@ -523,7 +523,7 @@ class CLIInfoMixin:
         agent, so a bang command never becomes a turn: nothing touches ``conversation_history``,
         zero tokens, role alternation / prompt caching untouched by construction
         (tests/hermes_cli/test_bang_shell_mode.py). Returns False when the text is not a bang command or
-        bang mode is disabled for this context (gateway/cron), so the caller routes normally.
+        bang mode is disabled for this context (gateway/scheduled), so the caller routes normally.
         """
         from cli import _rich_text_from_ansi
         from hermes_cli.bang_shell import (
@@ -533,7 +533,7 @@ class CLIInfoMixin:
         if not is_bang_command(text):
             return False
         if not bang_shell_enabled():
-            # Gateway / cron / API: no composer, no human at a keyboard, and those users already
+            # Gateway / scheduled / API: no composer, no human at a keyboard, and those users already
             # have shells — route normally rather than becoming remote execution.
             return False
 

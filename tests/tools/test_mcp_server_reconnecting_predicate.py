@@ -1,4 +1,4 @@
-"""``mcp_server_reconnecting`` (cron preflight's "is this outage healing on its own?" question)
+"""``mcp_server_reconnecting`` (scheduled preflight's "is this outage healing on its own?" question)
 must say True only for a transient park. A server parked on a PERMANENT error (revoked
 credentials, endpoint gone) fails its self-probe identically every time, so treating it as
 reconnecting would run the job tool-less forever with no blocked_config alert.

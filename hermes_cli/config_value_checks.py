@@ -21,7 +21,7 @@ def _validate_timezone(config: dict[str, Any], issues: list[ConfigIssue]) -> Non
     """``timezone`` must be an IANA name the runtime can load.
 
     ``hermes_time._get_zoneinfo()`` swallows an invalid name behind a single WARNING in the
-    gateway log, then runs the agent clock AND every cron schedule on server-local time.
+    gateway log, then runs the agent clock AND every scheduled schedule on server-local time.
     Surface it here, where doctor and the startup check both look. Silent when the
     interpreter has no tz database at all (bare Windows without ``tzdata``) — nothing can be
     judged there.
@@ -30,7 +30,7 @@ def _validate_timezone(config: dict[str, Any], issues: list[ConfigIssue]) -> Non
         return
     tz = config.get("timezone")
     hint = ("Use an IANA zone name such as America/New_York or Asia/Tokyo (see "
-            "`timedatectl list-timezones`). With an invalid value the agent clock and cron "
+            "`timedatectl list-timezones`). With an invalid value the agent clock and scheduled "
             "schedules silently fall back to server-local time. HERMES_TIMEZONE overrides "
             "this key when set.")
     if tz is not None and not isinstance(tz, str):

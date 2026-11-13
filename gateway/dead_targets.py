@@ -1,5 +1,5 @@
 """Persistent registry of delivery targets confirmed unreachable. Re-sending to a permanently gone chat
-(deleted group, bot kicked/blocked, deactivated user) every cron tick wastes flood-control budget; delivery
+(deleted group, bot kicked/blocked, deactivated user) every scheduled tick wastes flood-control budget; delivery
 short-circuits targets proven dead and any later successful send clears the flag. Only *whole-chat* deaths
 (``forbidden``, chat-level ``not_found``) are recorded: adapters self-heal thread/topic-level ``not_found``
 by retrying without ``reply_to``. Storage is a per-profile JSON file; reads/writes are best-effort (a

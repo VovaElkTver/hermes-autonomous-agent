@@ -190,7 +190,7 @@ def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None
 # CLI) carved out of the TERMINAL scrub only (``_make_run_env``,
 # ``_sanitize_subprocess_env``); execute_code, hermes_subprocess_env, docker and
 # env_passthrough registration stay sealed (GHSA-rhgp-j443-p4rf). CONTEXT-GATED via
-# ``_buzz_terminal_context_active``: a Telegram/CLI/cron session on a host that also
+# ``_buzz_terminal_context_active``: a Telegram/CLI/scheduled session on a host that also
 # runs a Buzz gateway must not get the signing key. Values are used directly, never
 # scope-resolved (UnscopedSecretError under multiplex); the snapshot treats them as
 # profile-scoped. Prefix-based so future BUZZ_* names need no code change.
@@ -202,11 +202,11 @@ def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None
 # operating as a Buzz agent — either the process is a Buzz-ACP managed agent (``BUZZ_MANAGED_AGENT`` is set,
 # only by Buzz Desktop's buzz-acp harness; see #76243 / #78511) or the current session's platform is
 # ``buzz`` (the gateway's ``HERMES_SESSION_PLATFORM`` ContextVar; concurrency safe under a multi-session
-# host). A Telegram/CLI/cron session on a host that also runs a Buzz gateway does NOT get BUZZ_PRIVATE_KEY
+# host). A Telegram/CLI/scheduled session on a host that also runs a Buzz gateway does NOT get BUZZ_PRIVATE_KEY
 # in its terminal children — blanket passthrough of a signing key to every terminal child on the host would
 # be wrong (maintainer triage note on #76243: don't expose the key to unrelated shell commands).
 # ``_sanitize_subprocess_env`` is also consumed by search workers (e.g. the ddgs web-search subprocess), the
-# computer-use driver binary, and user-script runners (bang ``!`` commands, quick commands, cron scripts,
+# computer-use driver binary, and user-script runners (bang ``!`` commands, quick commands, scheduled scripts,
 # webhook-filter scripts), so those children receive the vars too — matching the approved background/PTY
 # scope. Every other surface stays sealed — execute_code scrubbing, :func:`hermes_subprocess_env` (browser /
 # TUI host / ACP agent spawns), docker children, and ``env_passthrough`` registration (skills/config
@@ -240,7 +240,7 @@ def _buzz_terminal_context_active() -> bool:
     platform is ``buzz`` via the gateway ContextVar — authoritative under a concurrent
     multi-session host, so a sibling Telegram session resolves its OWN platform.
 
-    Gateway / CLI / cron / kanban processes never carry it. See #76243.
+    Gateway / CLI / scheduled / kanban processes never carry it. See #76243.
     """
     if os.environ.get("BUZZ_MANAGED_AGENT"):
         return True
@@ -335,7 +335,7 @@ def _is_hermes_internal_secret(key: str) -> bool:
 # added to any adapter is covered without a second edit, but ONLY under a platform prefix
 # (``DISCORD_``, ``GATEWAY_``, a plugin adapter's name): an operator's own ``DEMO_ALLOWED_SENDER``
 # is script data, not a Hermes gate, and deleting it by name shape broke routed ``no_agent``
-# cron scripts (#119539). ``HERMES_*`` never counts (``HERMES_MEDIA_ALLOW_DIRS``,
+# scheduled scripts (#119539). ``HERMES_*`` never counts (``HERMES_MEDIA_ALLOW_DIRS``,
 # ``HERMES_ALLOW_PRIVATE_URLS`` are process settings, not adapter gates).
 _PROFILE_GATE_ENV_MARKERS = (
     "_ALLOWED_", "_ALLOW_ALL_", "_ALLOW_FROM", "_ALLOW_BOTS", "_ALLOW_PUBLIC_", "_IGNORED_CHANNELS",

@@ -1,7 +1,7 @@
 """`hermes sessions set-journal-mode delete|wal` — the offline self-service path for #100896.
 
 ``database.journal_mode: delete`` can never self-apply on a store that is already WAL:
-``apply_wal_with_fallback`` deliberately never live-downgrades (#68545 — other gateway/cron/worker connections
+``apply_wal_with_fallback`` deliberately never live-downgrades (#68545 — other gateway/scheduled/worker connections
 may hold uncheckpointed WAL commits). Before this command the only escape hatch was an undocumented hand-run
 ``PRAGMA journal_mode=DELETE``. This runs it under the same admission the maintenance paths use: refuse while
 ANY foreign process holds the file or a sidecar (``foreign_state_db_holders``), flip without waiting out openers

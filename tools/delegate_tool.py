@@ -127,7 +127,7 @@ def _open_child_session_db(parent_agent) -> Any:
     handle (non-launch profiles), else lineage / session_search break; released by the child's close() via
     _owns_session_db."""
     # Each child gets a DEDICATED SessionDB connection instead of the parent's live object. The parent's
-    # handle is owned by the parent's lifecycle (cron run_job's finally block, gateway session end, /new)
+    # handle is owned by the parent's lifecycle (scheduled run_job's finally block, gateway session end, /new)
     # and can be closed while a fire-and-forget background child is still flushing on a daemon thread —
     # every subsequent flush then hits the closed handle and the child's transcript is silently dropped
     # (#81267). It MUST point at the same database FILE as the parent's handle: parents can hold non-default
@@ -692,12 +692,12 @@ def _build_top_level_description(*, independent_completions=None) -> str:
     # vocabulary); model_tools session-filters the list to tools the session has.
     if orchestration_available:
         restrictions_rule = (
-            "- Children cannot call clarify, memory, or cronjob.\n"
+            "- Children cannot call clarify, memory, or scheduled job.\n"
             f"- Children can themselves delegate while depth remains (max_spawn_depth={_get_max_spawn_depth()}); the "
             "runtime derives this from depth automatically.\n"
         )
     else:
-        restrictions_rule = "- Children cannot call delegate_task, clarify, memory, or cronjob.\n"
+        restrictions_rule = "- Children cannot call delegate_task, clarify, memory, or scheduled job.\n"
     from tools.delegate_tool_config import _get_independent_completions
 
     if independent_completions is None:
@@ -708,7 +708,7 @@ def _build_top_level_description(*, independent_completions=None) -> str:
 _DELIVERY_INDEPENDENT, _DELIVERY_JOINED = "each ungrouped task / `group` returns on its own", "one message per call"
 
 _DESCRIPTION_DELIVERY = (
-    "Sessions without a later-result consumer (including one-shot CLI and cron) join parallel children "
+    "Sessions without a later-result consumer (including one-shot CLI and scheduled) join parallel children "
     "and return results in this tool call. "
     "Otherwise runs in the background: dispatch returns live transcript paths and results re-enter "
     "as a new message when subagents finish ({delivery}). Background results are delivered only "
@@ -727,7 +727,7 @@ _DESCRIPTION_HEAD = (
     "- Mechanical multi-step work with no reasoning needed -> execute_code\n"
     "- A single tool call -> call the tool directly\n"
     "- Tasks needing user interaction -> subagents cannot ask questions\n"
-    "- Durable work that must survive this session -> cronjob or terminal(background=True, notify=True); /stop, /new, "
+    "- Durable work that must survive this session -> scheduled job or terminal(background=True, notify=True); /stop, /new, "
     "or process exit halts running subagents (whole tree); each returns an 'interrupted' completion with partial output.\n\n"
     "RULES:\n"
     "- Children know nothing of this conversation: pass everything needed via 'context', including any required "

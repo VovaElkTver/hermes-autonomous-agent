@@ -205,7 +205,7 @@ def _organic_matrix_reply_key(adapter, room_id: str, thread_id: str) -> str:
 
 @pytest.mark.parametrize("is_dm", [False, True], ids=["room", "dm"])
 def test_matrix_handoff_key_matches_the_thread_reply_key(is_dm, monkeypatch):
-    """A Matrix handoff (and cron ``attach_to_session``) seeds a thread rooted on the seed event; the
+    """A Matrix handoff (and scheduled ``attach_to_session``) seeds a thread rooted on the seed event; the
     adapter keys replies in it on the ROOM's type (``group``/``dm``), never a ``thread`` slot, so the
     destination must bind that key or the first reply opens an empty session (#112918)."""
     room_id = "!ops:example.org"

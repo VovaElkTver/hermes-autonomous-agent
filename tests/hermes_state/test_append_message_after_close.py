@@ -1,8 +1,8 @@
 """Regression tests for #94736 — append_message after close() raced a live writer.
 
-Subagent/cron sessions were dying mid-run with ``Session DB append_message
+Subagent/scheduled sessions were dying mid-run with ``Session DB append_message
 failed: 'NoneType' object has no attribute 'execute'``: a teardown owner
-(cron ``run_job``'s ``finally`` block, a delegate timeout owner abandoning
+(scheduled ``run_job``'s ``finally`` block, a delegate timeout owner abandoning
 its worker, ``AIAgent.close()``) called ``SessionDB.close()`` — which nulls
 ``_conn`` — while a still-unwinding worker thread had one more transcript
 flush to land. ``_execute_write`` then hit ``None.execute`` and the
@@ -77,7 +77,7 @@ class TestAppendAfterClose:
         assert len(rows) == 1
 
     def test_concurrent_close_during_flush_loses_no_writes(self, tmp_path):
-        """Race a teardown close() against a worker mid-flush (the cron
+        """Race a teardown close() against a worker mid-flush (the scheduled
         inactivity-timeout shape): every append must land or raise loudly —
         never vanish into a swallowed NoneType error."""
         db = SessionDB(db_path=tmp_path / "state.db")

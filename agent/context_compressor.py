@@ -514,7 +514,7 @@ _MERGED_PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new
 _MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
 
 # Prefixes the copy of a still-running user task that compaction re-states after
-# the handoff boundary (#100818). A cron run's only user turn is the job prompt
+# the handoff boundary (#100818). A scheduled run's only user turn is the job prompt
 # in the protected head, so compaction leaves it BEFORE the summary — and
 # SUMMARY_PREFIX tells the model to do nothing when no user message follows.
 # When the task is merged onto a carrier (the carrier ends the list, so a
@@ -934,7 +934,7 @@ _LEAN_USER_MESSAGES_HEADING = "## User Messages (verbatim, newest first)"
 _LEAN_RECOVERY_HEADING = "## Context Recovery"
 _SYNTHETIC_USER_ROW_PREFIXES = (
     "[System:", "[CONTEXT", "[PRIOR CONTEXT", "[IMPORTANT: Background", "[Your active task list",
-    "[Planning state preserved", "[ASYNC DELEGATION", "[OUT-OF-BAND", "Cronjob Response:",
+    "[Planning state preserved", "[ASYNC DELEGATION", "[OUT-OF-BAND", "Scheduled job Response:",
 )
 
 
@@ -1931,7 +1931,7 @@ def _sum_template(template: str, **defaults):
     ``content_len`` and the result's outcome.
 
     Every mutation routed through here lost its outcome, so a refused read, a rate-limited search, a
-    rejected cronjob or a silent ``memory`` write compressed into the same stub as the success it
+    rejected scheduled job or a silent ``memory`` write compressed into the same stub as the success it
     never was, and the post-compaction agent reported the success (#131244).
     """
     def summarize(name, args, content, content_len, line_count):
@@ -2123,7 +2123,7 @@ If no outstanding task exists, write "None."]""",
 Do not write "User asked:" or any translated equivalent anywhere in the summary.
 Describe agent/tool work only as completed actions, state, or historical work.]""",
         "goal": (
-            "[Historical cron/agent objective inferred only from assistant and "
+            "[Historical scheduled/agent objective inferred only from assistant and "
             "tool activity. Never call it a user goal.]"
         ),
         "constraints": (
@@ -4704,7 +4704,7 @@ Write only the summary body. Do not include any preamble or prefix."""
     ) -> Optional[dict[str, Any]]:
         """Return the user turn that is still awaiting completion, or ``None``.
 
-        Scans the WHOLE transcript, not just the compressible region: a cron
+        Scans the WHOLE transcript, not just the compressible region: a scheduled
         run's only user turn is the job prompt sitting in the protected head
         (``protect_first_n`` keeps system + first user), which is exactly the
         turn ``_find_last_user_message_idx`` cannot see (#100818).
@@ -5366,7 +5366,7 @@ Write only the summary body. Do not include any preamble or prefix."""
         spare_pending_images: bool, pruned_count: int = 0,
     ) -> list[dict[str, Any]]:
         """Post-assembly cleanup: orphan pairs, media, savings, markers, replay prune, mem trim."""
-        # Single-prompt cron shape: the only live instruction sits in the protected head, BEFORE the
+        # Single-prompt scheduled shape: the only live instruction sits in the protected head, BEFORE the
         # handoff, and SUMMARY_PREFIX reads that as "nothing to do" — restate it past the boundary
         # (#100818). Sanitize FIRST: the trailing-in-flight exemption (#79278) walks back from the list
         # end, and a replay user row there would strip a genuinely pending assistant(tool_calls).

@@ -2532,7 +2532,7 @@ def _resolve_hermes_argv() -> list[str]:
     """Resolve the ``hermes`` invocation as argv for ``Popen``: ``$HERMES_BIN``
     (path-like -> absolute; bare names keep PATH semantics, never a
     same-directory file), then the running interpreter's ``sys.executable -m
-    hermes_cli.main`` (exactly this install; also covers shim-less cron,
+    hermes_cli.main`` (exactly this install; also covers shim-less scheduled,
     systemd ``User=``, launchd), then ``which("hermes")`` (Windows: safe PATH
     search, batch shims fall back to the module form) only when ``hermes_cli``
     is not importable. The module argv must win over PATH: a PATH-first lookup
@@ -2717,7 +2717,7 @@ def _restart_safe_worker_argv(task: Task, command: list[str]) -> list[str]:
     """Wrap a systemd-hosted dispatcher's worker in the shared restart-safe scope.
 
     Kanban workers are long-lived agentic runs that outlive the dispatcher
-    tick, so they never take cron's degraded mode under the managed gateway:
+    tick, so they never take scheduled's degraded mode under the managed gateway:
     ``require_restart_safe_scope=True`` makes the helper raise
     ``RestartSafeScopeUnavailable`` there (an infrastructure spawn failure the
     dispatcher does not charge to the card). Under any other systemd unit
@@ -2864,7 +2864,7 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     # bootstrap. The routed-profile scrub above strips Hermes-owned PYTHONPATH entries (user
     # children must not see our tree), so a PYTHONPATH-launched dispatcher spawned a child that
     # died on `No module named 'hermes_cli'` before it ever reached the owner. Same pin as the
-    # excised cron external worker (#112729): applied to the sanitized env, after every other
+    # excised scheduled external worker (#112729): applied to the sanitized env, after every other
     # decision stands.
     from hermes_cli.worker_env_pin import pin_hermes_tree_on_pythonpath
     env = pin_hermes_tree_on_pythonpath(env, Path(__file__).resolve().parent.parent)

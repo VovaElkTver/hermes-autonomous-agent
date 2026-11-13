@@ -288,7 +288,7 @@ def test_active_work_verb_counts_a_profiles_side_agent_and_reads_it_on_the_loop(
     from tools import async_delegation
     monkeypatch.setattr(async_delegation, "list_async_delegations", list)
     on_loop = []
-    authority = SimpleNamespace(_managed_workers={}, _cron_cancellations={},
+    authority = SimpleNamespace(_managed_workers={}, _scheduled_cancellations={},
                                 _side_agents={object(): [object()]})
     reads = []
     registry = SimpleNamespace(for_home=lambda home: reads.append(on_loop[-1]) or authority)

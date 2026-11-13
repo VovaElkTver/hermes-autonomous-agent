@@ -1,4 +1,4 @@
-"""Tools & system / slash / insights / rollback / plugins / cron / skills / MCP JSON-RPC handlers.
+"""Tools & system / slash / insights / rollback / plugins / scheduled / skills / MCP JSON-RPC handlers.
 
 Rebound onto server.py's globals at install time (``method_ctx.bind_module``), so
 bodies reference server globals bare (``_ok``, ``_err``, ``_sessions``, ...).
@@ -1268,12 +1268,12 @@ def _configure_session_tools(rid, params: dict, sid: str, session) -> dict:
         "missing_servers": sorted(missing_servers), "reset": bool(session), "unknown": unknown})
 
 
-# ─── Cron / learning / skills ────────────────────────────────────────────────
-@_scoped_rpc("cron.manage", 5023)
+# ─── Scheduled / learning / skills ────────────────────────────────────────────────
+@_scoped_rpc("scheduled.manage", 5023)
 def _(rid, params: dict) -> dict:
-    """cron.manage RPC: the cronjob tools went with the cron package."""
+    """scheduled.manage RPC: the scheduled job tools went with the scheduled package."""
     del params
-    return _err(rid, 4016, "cron was excised from this branch")
+    return _err(rid, 4016, "scheduled was excised from this branch")
 
 
 @_rpc("learning.frames", 5000, "learning.frames failed: ")

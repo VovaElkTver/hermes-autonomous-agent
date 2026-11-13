@@ -50,7 +50,6 @@ def _runtime(tmp_path, monkeypatch, failing):
 
     monkeypatch.setattr("gateway.run_api.start_gateway_api", fake_api)
     monkeypatch.setattr("gateway.session_bot.recover_bot_deliveries", recover_bot)
-    monkeypatch.setattr("gateway.session_cron.unbind_owner", lambda authority: None)
     monkeypatch.setattr(run_runtime, "_record_parked_profiles", lambda value: parked.update(value))
     return runner, launch, homes, recovered, parked
 
@@ -76,9 +75,9 @@ def test_a_secondary_whose_recovery_fails_is_parked_and_the_rest_start(tmp_path,
 
 def test_a_secondary_whose_retirement_times_out_keeps_its_lock_but_is_never_started(tmp_path, monkeypatch):
     """A writer that outlives Stop keeps the profile's lock and retiring authority (shutdown still
-    settles it), but nothing later in boot may serve it: no adapters, no served status, no cron
+    settles it), but nothing later in boot may serve it: no adapters, no served status, no scheduled
     ticks, no native-session recovery, no hosted-room service."""
-    from gateway.run import GatewayRunner, _cron_tick_profile_homes
+    from gateway.run import GatewayRunner, _scheduled_tick_profile_homes
     from gateway.runtime_ownership import process_ownership
     from gateway.session_authorities import all_authorities
     runner, launch, homes, _recovered, parked = _runtime(
@@ -117,7 +116,7 @@ def test_a_secondary_whose_retirement_times_out_keeps_its_lock_but_is_never_star
         asyncio.run(host._start_secondary_profile_adapters())
         assert started == ["gamma"]
         assert published["served_profiles"] == ["default", "gamma"]
-        assert "beta" not in {name for name, _home in _cron_tick_profile_homes(runner.config)}
+        assert "beta" not in {name for name, _home in _scheduled_tick_profile_homes(runner.config)}
 
         # Native-session recovery and hosted-room service creation cover only serving profiles.
         local, hosted = [], []

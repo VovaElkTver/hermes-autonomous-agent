@@ -74,7 +74,7 @@ def multiplex_on(monkeypatch):
     """Simulate a multiplexed deployment: scoped misses fail closed.
 
     With multiplexing off, a scope miss deliberately falls through to
-    os.environ (the cron-overlay contract) — the cross-profile leak only
+    os.environ (the scheduled-overlay contract) — the cross-profile leak only
     exists while the multiplexer is active, which is exactly the #93522
     scenario.
     """

@@ -7299,7 +7299,7 @@ def register(ctx) -> None:
         # into ``DISCORD_*`` env vars that the adapter reads via ``os.getenv()``. Replaces the hardcoded
         # block that used to live in ``gateway/config.py``. Hook contract: #24836.
         apply_yaml_config_fn=_apply_yaml_config,
-        cron_deliver_env_var="DISCORD_HOME_CHANNEL",
+        scheduled_deliver_env_var="DISCORD_HOME_CHANNEL",
         # Out-of-process scheduled delivery via REST, else ``deliver=discord`` jobs fail with "No live adapter".
         standalone_sender_fn=_standalone_send,
         max_message_length=2000,

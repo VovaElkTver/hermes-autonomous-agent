@@ -2,7 +2,7 @@
 
 Real git repos, real processes, no mocks: an idle dirty/unpushed tree past its tier is removed
 only after a restorable archive exists (I1/I4); live, kanban and young trees are never touched
-(I2/I3); ``archive_dirty: false`` keeps the classic never-delete-dirty pruner (I6); the cron sweep
+(I2/I3); ``archive_dirty: false`` keeps the classic never-delete-dirty pruner (I6); the scheduled sweep
 visits the repos the ACTIVE profile registered (I7); a non-interactive exit never prompts (I5).
 """
 
@@ -404,13 +404,13 @@ def test_archive_dirty_false_keeps_the_classic_never_delete_dirty_pruner(repo):
 def test_cron_sweep_visits_only_the_active_profiles_registered_repos(repo, tmp_path, monkeypatch):
     """I7: a worktree made under profile A registers its repo for A's sweep only, and a
     registered repo that was deleted drops out."""
-    import cron.scheduler as sched
+    import scheduled.scheduler as sched
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
     home_a, home_b = tmp_path / "home-a", tmp_path / "home-b"
     home_a.mkdir()
     home_b.mkdir()
-    monkeypatch.setattr("cron.jobs.load_jobs", list)
+    monkeypatch.setattr("scheduled.jobs.load_jobs", list)
     token = set_hermes_home_override(str(home_a))
     try:
         assert worktree_ops._setup_worktree(repo_root=str(repo), sync_base=False, name="reg") is not None

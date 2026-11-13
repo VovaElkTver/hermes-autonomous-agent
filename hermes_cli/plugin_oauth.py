@@ -473,7 +473,7 @@ def _cli_add(args: Any, client: OAuthClient, key: str) -> bool:
 
     if _unattended():
         raise SystemExit(f"`hermes auth add {key}` signs you in through a browser; run it in your own terminal, "
-                         "not from a gateway, cron job or agent session.")
+                         "not from a gateway, scheduled job or agent session.")
     secret = " and the client secret" if client.client_secret_env else ""
     print(f"Plugin '{key.rsplit(':', 1)[0]}' signs in to {client.id} at {urlparse(client.authorize_url).hostname}. "
           f"The sign-in code{secret} go to {urlparse(client.token_url).hostname}; the token is sent only to "

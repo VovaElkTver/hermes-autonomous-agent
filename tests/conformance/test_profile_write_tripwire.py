@@ -5,7 +5,7 @@ Invariant under test
 When a non-default profile is active (``HERMES_HOME`` points at
 ``<root>/profiles/testprof``), NO subsystem write may land anywhere under the
 default profile's tree — ``<root>/state.db``, ``<root>/config.yaml``,
-``<root>/memories/``, ``<root>/cron/``, or any other path directly under
+``<root>/memories/``, ``<root>/scheduled/``, or any other path directly under
 ``<root>`` outside the ``profiles/`` subtree.
 
 This is a recurring bug *class*, not a single bug.  Recent regressions:
@@ -15,7 +15,7 @@ This is a recurring bug *class*, not a single bug.  Recent regressions:
   so the only symptom was the desktop listing them under the default bot).
 * #92662 / #89190 — settings and API keys saved while a profile was active
   were written to the base profile's ``config.yaml`` / ``.env``.
-* #89625 — cron listing/writing the default profile's jobs.json because the
+* #89625 — scheduled listing/writing the default profile's jobs.json because the
   store paths were frozen at import time.
 * #92156 — terminal env cache leaked across profiles (same import-time-
   snapshot shape of bug).
@@ -116,7 +116,7 @@ def profile_tripwire(tmp_path, monkeypatch):
     Sets up:
 
     1. A temp hermes root acting as the *default* profile, seeded with the
-       files a real install has (config.yaml, memories/, cron/jobs.json) so
+       files a real install has (config.yaml, memories/, scheduled/jobs.json) so
        both "new file created" and "existing file modified" leaks are
        detectable.
     2. ``HERMES_HOME`` (env var AND the context-local override) pointed at
@@ -208,8 +208,8 @@ def _exercise_memory_store(tripwire: ProfileTripwire) -> None:
 
 
 def _exercise_cron_store(tripwire: ProfileTripwire) -> None:
-    """cron save_jobs()/load_jobs() store resolution (#89625)."""
-    from cron.jobs import load_jobs, save_jobs
+    """scheduled save_jobs()/load_jobs() store resolution (#89625)."""
+    from scheduled.jobs import load_jobs, save_jobs
 
     job = {
         "id": "tripwire-job",
@@ -221,7 +221,7 @@ def _exercise_cron_store(tripwire: ProfileTripwire) -> None:
     save_jobs([job])
     jobs_file = tripwire.profile / "cron" / "jobs.json"
     assert jobs_file.exists(), (
-        "save_jobs() did not write the active profile's cron/jobs.json"
+        "save_jobs() did not write the active profile's scheduled/jobs.json"
     )
     loaded = load_jobs()
     assert any(j.get("id") == "tripwire-job" for j in loaded), (
@@ -252,7 +252,7 @@ def test_no_default_profile_writes(profile_tripwire, exercise):
 
     Regression tripwire for the cross-profile write bug class:
     #88532 (sessions in root state.db), #92662/#89190 (settings/API keys in
-    the base profile), #89625 (cron using the default profile's store),
+    the base profile), #89625 (scheduled using the default profile's store),
     #92156 (terminal env cache leaking cross-profile).
     """
     exercise(profile_tripwire)

@@ -18,7 +18,7 @@ turns and Stop act on it alone and its replies reach its app viewers only, never
 (Teknium's ruling: a chat's ``/new`` never locks the apps out of its old conversation). A compression continuation is never
 mounted under its physical id: the lane's turns publish to the lineage root (``logical_owner``), so
 ``session.resume`` maps it to that root, as normal admission does. Rows without a ``session_key`` (subagents) have nothing to rebuild a lane
-from. LOCAL rows (cron, CLI, TUI) restore from their private receipt and API rows from their binding
+from. LOCAL rows (scheduled, CLI, TUI) restore from their private receipt and API rows from their binding
 (``restore_api_session``); neither is ever mounted here. The mount semantics are the first inbound's
 ``_publish_route``: a row that ended for a recoverable reason (``agent_close``, ``ws_orphan_reap``,
 ...) is mounted live too, as the lane's next message would reopen it.
@@ -31,7 +31,7 @@ from gateway.config import Platform
 
 def _messaging_platform(label):
     """The messaging ``Platform`` a row's ``source`` label names; None for the API transport (its
-    own restore) and for labels no platform answers to (the CLI/TUI/cron local labels)."""
+    own restore) and for labels no platform answers to (the CLI/TUI/scheduled local labels)."""
     try:
         platform = Platform(label)
     except ValueError:

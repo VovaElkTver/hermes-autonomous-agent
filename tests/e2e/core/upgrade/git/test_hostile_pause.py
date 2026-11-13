@@ -1,7 +1,7 @@
 """Linux/macOS ``hermes update`` pauses this install's gateways before the first checkout move.
 
 One real HEAD install (``_git_world``: the real ``scripts/install.sh`` over real smart HTTP, every
-command in a ``bwrap`` sandbox) is shared by the cells. A credential-free, platform-less (cron-only)
+command in a ``bwrap`` sandbox) is shared by the cells. A credential-free, platform-less (scheduled-only)
 ``hermes gateway run`` lives in the same PID namespace as the updater (``handoff._nshost``), as on a
 user's machine. What is asserted is what the user sees: which gateway process serves the checkout
 (its control-socket ``identify``: pid + ``code_sha``), the update's exit code and transcript, HEAD,

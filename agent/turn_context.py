@@ -211,7 +211,7 @@ def append_notes_to_multimodal_content(content: Any, notes: Optional[str]) -> bo
     return False
 
 
-# Cron sessions are never auto-titled: cron names its own session and its opener is a delivery hint.
+# Scheduled sessions are never auto-titled: scheduled names its own session and its opener is a delivery hint.
 # Subagent runs get a cheap ``Subagent: <goal>`` title instead of a model call (apply_subagent_title).
 _UNTITLED_PLATFORMS = frozenset({"cron"})
 

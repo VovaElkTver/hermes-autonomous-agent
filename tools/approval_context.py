@@ -164,9 +164,9 @@ def _get_session_platform() -> str:
     return _session_env("HERMES_SESSION_PLATFORM")
 
 
-def _is_cron_approval_context() -> bool:
+def _is_scheduled_approval_context() -> bool:
     """True when the current approval decision is running under the legacy scheduled-session marker."""
-    return is_truthy_value(_session_env("HERMES_CRON_SESSION"))
+    return is_truthy_value(_session_env("HERMES_SCHEDULED_SESSION"))
 
 
 # Programmatic/unattended platforms: no human can answer a prompt and the adapter has no ``send_exec_approval`` /
@@ -216,7 +216,7 @@ def _is_single_query_approval_context() -> bool:
 def _no_user_can_answer() -> bool:
     """True in single-query (-q), scheduled-run and unattended-platform sessions. `hermes chat -q` still registers the
     CLI panel callback, so a prompt that only checks for a callback would wait the full timeout for nobody."""
-    return (_is_single_query_approval_context() or _is_cron_approval_context()
+    return (_is_single_query_approval_context() or _is_scheduled_approval_context()
             or _is_unattended_platform_approval_context())
 
 
@@ -235,7 +235,7 @@ def _is_gateway_approval_context() -> bool:
     human who can resolve it (#37284, 87509). Their dangerous-command handling is governed by
     ``approvals.unattended_mode`` config (default deny), mirroring the scheduled gate.
     """
-    if _is_cron_approval_context() or _is_unattended_platform_approval_context():
+    if _is_scheduled_approval_context() or _is_unattended_platform_approval_context():
         return False
     return env_var_enabled("HERMES_GATEWAY_SESSION") or bool(_get_session_platform())
 
@@ -354,9 +354,9 @@ def _binary_approval_mode(key: str) -> str:
         return "deny"
 
 
-def _get_cron_approval_mode() -> str:
+def _get_scheduled_approval_mode() -> str:
     """Read the scheduled-run approval mode from config. Returns 'deny' or 'approve'."""
-    return _binary_approval_mode("cron_mode")
+    return _binary_approval_mode("scheduled_mode")
 
 
 def _get_single_query_approval_mode() -> str:

@@ -71,7 +71,7 @@ FIRST_TASKS: tuple[FirstTask, ...] = (
             "this chat called.",
             "Screen 2, learning: a procedure becomes a skill that loads next time; memory keeps facts across chats. "
             "Use the skills this chat loaded.",
-            "Screen 3, out in the world: cron jobs, connectors and messaging, one example each built on their apps.",
+            "Screen 3, out in the world: scheduled jobs, connectors and messaging, one example each built on their apps.",
         ),
         output="One HTML file in ~/hermes-first-task/, three screens that each fill the pane with one animated "
                "graphic; open in the preview pane.",
@@ -142,7 +142,7 @@ FIRST_TASKS: tuple[FirstTask, ...] = (
             "Check the connected apps with manage_connections(action=\"status\").",
             "Read today from them: mail, calendar, messages, tasks. Read only.",
             "Show a first version early, then fill it in: what needs attention, what changed, what is next.",
-            "Offer a morning cron job that sends the brief. Schedule it only on yes.",
+            "Offer a morning scheduled job that sends the brief. Schedule it only on yes.",
         ),
         output="One designed HTML page in ~/hermes-first-task/, open in the preview pane.",
         quality="Every item comes from a connected app and says which one. Nothing invented.",
@@ -165,9 +165,9 @@ FIRST_TASKS: tuple[FirstTask, ...] = (
         steps=(
             "Ask in one clarify what the reminder and the note should be, with three concrete suggestions.",
             "Make the reminder in Reminders and the note in Notes with the skills.",
-            "Propose a morning routine as a cron job: what it does and when. Schedule it only on yes.",
+            "Propose a morning routine as a scheduled job: what it does and when. Schedule it only on yes.",
         ),
-        output="The reminder and note in their apps and the cron job, each named in chat.",
+        output="The reminder and note in their apps and the scheduled job, each named in chat.",
         quality="Real items they asked for. No test items.",
         done="The reminder and note exist, and the morning job is set up or declined."),
     FirstTask(
@@ -217,9 +217,9 @@ FIRST_TASKS: tuple[FirstTask, ...] = (
         steps=(
             "Ask what to watch in one clarify, with three concrete options from what you know about them.",
             "Run the first check now and report it with sources.",
-            "Propose a daily cron job: when it runs and what it reports. Schedule it only on yes.",
+            "Propose a daily scheduled job: when it runs and what it reports. Schedule it only on yes.",
         ),
-        output="The first report in chat, and the daily cron job.",
+        output="The first report in chat, and the daily scheduled job.",
         quality="Every finding has a source link. Nothing invented.",
         done="The first report is shown and the daily job is set up or declined."),
     FirstTask(

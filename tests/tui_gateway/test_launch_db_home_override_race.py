@@ -2,7 +2,7 @@
 
 The launch backend's lazy ``_get_db()`` handle must bind to the import-time
 launch home, not whatever ``get_hermes_home()`` resolves to at first-touch
-time. The desktop multiplex cron ticker installs per-profile override windows
+time. The desktop multiplex scheduled ticker installs per-profile override windows
 at startup; if the first ``session.*`` RPC races into a foreign window, the
 backend permanently serves the wrong profile's state.db.
 """

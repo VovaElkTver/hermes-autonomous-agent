@@ -83,10 +83,10 @@ from hermes_cli.web_server_lifecycle import (
 )
 
 
-def _start_desktop_cron_ticker(stop_event: threading.Event, interval: int = 60) -> None:
+def _start_desktop_ticker_seam(stop_event: threading.Event, interval: int = 60) -> None:
     """No-op keeper of the desktop-backend ticker seam.
 
-    The cron scheduler it used to drive was excised with the ``cron`` package;
+    The periodic-job scheduler it used to drive was excised from this fork;
     the desktop backend still calls this on boot so donor-parity forks that
     re-add a scheduler have one hook to restore."""
     del stop_event, interval
@@ -757,12 +757,12 @@ app.include_router(_oauth_routes.router)
 app.include_router(_sessions_routes.manage_router)
 app.include_router(_status_routes.logs_router)
 try:
-    from tools.fork_mode import cron_runtime_enabled as _fork_cron_on
+    from tools.fork_mode import scheduled_runtime_enabled as _fork_scheduled_on
 except Exception:
-    def _fork_cron_on() -> bool:
+    def _fork_scheduled_on() -> bool:
         return True
-# The dashboard's cron REST surface (/api/jobs, /api/cron/fire) was excised together with
-# the cron package; even in donor-parity mode there is no scheduler to serve.
+# The dashboard's scheduled REST surface (/api/jobs, /api/scheduled/fire) was excised together with
+# the scheduled package; even in donor-parity mode there is no scheduler to serve.
 app.include_router(_mcp_routes.router)
 app.include_router(_ops_routes.router)
 app.include_router(_skills_routes.hub_router)
@@ -1412,7 +1412,7 @@ def start_server(
     # LAST boot step, deliberately. One host process serves every profile and this one can be asked
     # for any of them via ``?profile=``, so the decision is made here instead of on the first such
     # request — activation is one-way, and everything the backend had already done by then
-    # (idle-reaper flushes, hosted rooms, cron) stayed on single-profile assumptions. It runs after
+    # (idle-reaper flushes, hosted rooms, scheduled) stayed on single-profile assumptions. It runs after
     # the keepalive / auth gate / uvicorn build because activation FREEZES ``os.environ`` as the
     # launch profile's credentials, and that snapshot is the only source for launch keys with no
     # ``.env`` to rebuild from (systemd ``Environment=``, ``op run``, Compose): anything injected or

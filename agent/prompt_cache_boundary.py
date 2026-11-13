@@ -1,6 +1,6 @@
 """Builder-declared stable prefixes for Anthropic prompt caching.
 
-Skill/webhook/cron builders concatenate a large static scaffold with a small volatile
+Skill/webhook/scheduled builders concatenate a large static scaffold with a small volatile
 tail into one user-message string. Only the builder knows where the tail begins, so it
 registers the stable prefix here and the cache planner places a breakpoint at that
 boundary. Re-parsing marker strings at request time is deliberately avoided: markers
@@ -41,7 +41,7 @@ def find_stable_prefix(content: str) -> Optional[str]:
 
     The tail must be non-whitespace so the split never yields an empty text
     block (Anthropic rejects it with HTTP 400). A hit refreshes the entry's LRU
-    position so a scaffold fired every minute by cron is not evicted by a
+    position so a scaffold fired every minute by scheduled is not evicted by a
     burst of one-off skill invocations.
     """
     with _lock:

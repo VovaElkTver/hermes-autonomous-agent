@@ -23,7 +23,7 @@ class TestLifecycleGuardLaunchctlParity:
     layer already treats as gateway lifecycle.
 
     These two layers are not interchangeable. In ``tools/terminal_tool.py``
-    under ``_HERMES_GATEWAY == "1"``, the ``cron.lifecycle_guard`` block is
+    under ``_HERMES_GATEWAY == "1"``, the ``scheduled.lifecycle_guard`` block is
     documented as applying unconditionally ("force=True cannot help here"),
     while ``detect_dangerous_command`` below it is explicitly skipped when
     ``force=True``. A verb covered only by the approval layer is therefore

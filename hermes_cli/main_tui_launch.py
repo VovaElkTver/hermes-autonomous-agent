@@ -419,7 +419,7 @@ def _remove_idle_clean_tui_worktree(wt_info: dict) -> bool:
 
     Kept when the gateway has queued or started work for a session inside it (quitting only
     detaches the viewer), still schedules work for one (an active loop, heartbeat or goal
-    continuation, or a cron job bound to it), another viewer still holds one, or another process
+    continuation, or a scheduled job bound to it), another viewer still holds one, or another process
     still works in it; and by ``_cleanup_worktree`` when it is dirty, holds unpushed commits or
     something no branch keeps.
     """
@@ -588,7 +588,7 @@ def _launch_tui(
         env["TERMINAL_CWD"] = wt_info["path"]
 
     # A local interactive session starts where the user launched (or in the --worktree), the
-    # classic CLI's rule; terminal.cwd stays the default for gateway, cron and remote backends.
+    # classic CLI's rule; terminal.cwd stays the default for gateway, scheduled and remote backends.
     # HERMES_TUI_CWD is what the TUI sends on session.create, which beats the configured cwd (#84015).
     if str(env.get("TERMINAL_ENV") or "local") == "local":
         env["TERMINAL_CWD"] = env["HERMES_TUI_CWD"] = env["HERMES_CWD"]
@@ -708,7 +708,7 @@ def _resolve_use_tui(args) -> bool:
     ``HERMES_TUI=1`` → TUI; ``display.interface`` config; default classic.
 
     The TTY gate is load-bearing: ambient preferences must never hijack a piped
-    ``hermes chat -q`` (kanban workers, cron) — the Ink no-TTY bail-out exits 0 and
+    ``hermes chat -q`` (kanban workers, scheduled) — the Ink no-TTY bail-out exits 0 and
     the worker dies with a protocol violation. Explicit ``--tui`` still bails out.
     """
     if getattr(args, "cli", False):

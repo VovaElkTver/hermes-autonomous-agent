@@ -6938,7 +6938,7 @@ def register(ctx) -> None:
         # env vars that the adapter reads via os.getenv(). Replaces the hardcoded block in
         # gateway/config.py. Hook contract: #24849.
         apply_yaml_config_fn=_apply_yaml_config,
-        cron_deliver_env_var="SLACK_HOME_CHANNEL",
+        scheduled_deliver_env_var="SLACK_HOME_CHANNEL",
         # Out-of-process scheduled delivery; without it deliver=slack scheduled sends fail with
         # "No live adapter" when the sender runs apart from the gateway.
         standalone_sender_fn=_standalone_send,

@@ -1,7 +1,7 @@
 """PYTHONPATH pin for Hermes-spawned worker children (kanban dispatch et al.).
 
-Relocated from the excised ``cron/scheduler_worker_env.py`` (keep the same
-behaviour; the cron external worker it was written for is gone, but kanban
+Relocated from the excised ``scheduled/scheduler_worker_env.py`` (keep the same
+behaviour; the scheduled external worker it was written for is gone, but kanban
 workers need the identical pin, #112729).
 
 The shared subprocess sanitizer strips Hermes-owned PYTHONPATH entries because user

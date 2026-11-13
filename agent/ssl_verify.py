@@ -147,7 +147,7 @@ def certifi_bundle_path() -> Optional[str]:
     never an exception.
 
     The repair, and its warning, happen ONCE per dead path: a gateway builds clients
-    per turn, per cron run and per model-metadata fetch, so an un-cached reload here
+    per turn, per scheduled run and per model-metadata fetch, so an un-cached reload here
     would re-execute third-party module code and re-log on every client it builds.
 
     Returns a bundle path that exists on disk, else ``None``.

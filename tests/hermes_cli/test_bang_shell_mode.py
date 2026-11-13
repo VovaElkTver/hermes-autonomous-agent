@@ -64,21 +64,21 @@ class TestBangDetection:
         assert parse_bang_command(text) == expected
 
 class TestBangContextGating:
-    """Bang mode is CLI-only — gateway/cron users have their own shells."""
+    """Bang mode is CLI-only — gateway/scheduled users have their own shells."""
 
     def test_enabled_in_plain_cli(self, monkeypatch):
-        for var in ("HERMES_GATEWAY_SESSION", "HERMES_CRON_SESSION",
+        for var in ("HERMES_GATEWAY_SESSION", "HERMES_SCHEDULED_SESSION",
                     "HERMES_SESSION_PLATFORM"):
             monkeypatch.delenv(var, raising=False)
         assert bang_shell_enabled() is True
 
     @pytest.mark.parametrize("var,value", [
         ("HERMES_GATEWAY_SESSION", "1"),
-        ("HERMES_CRON_SESSION", "true"),
+        ("HERMES_SCHEDULED_SESSION", "true"),
         ("HERMES_SESSION_PLATFORM", "discord"),
     ])
     def test_disabled_in_non_cli_contexts(self, monkeypatch, var, value):
-        for v in ("HERMES_GATEWAY_SESSION", "HERMES_CRON_SESSION",
+        for v in ("HERMES_GATEWAY_SESSION", "HERMES_SCHEDULED_SESSION",
                   "HERMES_SESSION_PLATFORM"):
             monkeypatch.delenv(v, raising=False)
         monkeypatch.setenv(var, value)

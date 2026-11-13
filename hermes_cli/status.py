@@ -250,13 +250,13 @@ def _load_json(path: Path, encoding: str = "utf-8"):
         return json.load(f)
 
 
-def _cron_summary() -> str:
+def _scheduled_summary() -> str:
     """``N active, M total`` jobs line, shared by the full and short status renderers."""
     jobs_file = get_hermes_home() / "cron" / "jobs.json"
     if not jobs_file.exists():
         return "0"
     try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs — Windows editors may leave a UTF-8 BOM
+        # utf-8-sig: same dialect as scheduled/jobs.load_jobs — Windows editors may leave a UTF-8 BOM
         # that plain utf-8 json.load rejects.
         jobs = _load_json(jobs_file, "utf-8-sig").get("jobs", [])
         return f"{sum(1 for j in jobs if j.get('enabled', True))} active, {len(jobs)} total"
@@ -266,7 +266,7 @@ def _cron_summary() -> str:
 
 def _render_cron(ctx):
     _section("Scheduled Jobs")
-    _kv("Jobs:", _cron_summary())
+    _kv("Jobs:", _scheduled_summary())
 
 
 def _render_sessions(ctx):
@@ -404,7 +404,7 @@ def _render_summary(ctx):
     except Exception:
         _kv("Gateway:", "unknown")
     _summary_row("Platforms:", _connected_platform_labels, "none configured")
-    _kv("Jobs:", _cron_summary())
+    _kv("Jobs:", _scheduled_summary())
     _banner(("  Run 'hermes status --full' for every section",), Colors.DIM)
     print()
 

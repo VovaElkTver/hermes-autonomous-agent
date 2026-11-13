@@ -958,7 +958,7 @@ def test_named_custom_provider_filters_capabilities_at_lookup_boundary(monkeypat
 def test_bare_custom_resolves_providers_dict_entry_named_custom(monkeypatch):
     """A request for bare ``provider="custom"`` must resolve a literal
     ``providers.custom`` entry (e.g. a cliproxy endpoint) instead of falling
-    through to the global default. Regression for cron jobs stored with
+    through to the global default. Regression for scheduled jobs stored with
     ``provider: "custom"`` failing with ``auth_unavailable: providers=codex``.
     """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

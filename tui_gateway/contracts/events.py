@@ -858,7 +858,7 @@ class ChangeSignalPayload(OpenPayload):
     """``change_watcher._CHANGE_WATCHES`` payload fn — ``{}`` for every watch except pet.changed."""
 
 
-event("cron.changed", ChangeSignalPayload, doc="cron/jobs.json moved; refetch the cron list.")
+event("scheduled.changed", ChangeSignalPayload, doc="scheduled/jobs.json moved; refetch the scheduled list.")
 event("sessions.changed", ChangeSignalPayload, doc="state.db moved; refetch the session list.")
 event("platforms.changed", ChangeSignalPayload, doc="gateway_state.json moved; refetch platform status.")
 event("projects.changed", ChangeSignalPayload, doc="projects.db moved; refetch the project list + tree.")

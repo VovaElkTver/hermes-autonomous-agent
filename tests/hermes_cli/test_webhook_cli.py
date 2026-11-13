@@ -195,11 +195,11 @@ class TestSubscribe:
         ) == new_state
 
 class TestCronJobSubscribe:
-    """--cron-job: event-triggered cron jobs."""
+    """--scheduled-job: event-triggered scheduled jobs."""
 
     def test_valid_job_ref_stored_as_id(self, monkeypatch):
-        # resolve_job_ref is imported inside _cmd_subscribe from cron.jobs
-        import cron.jobs as jobs_mod
+        # resolve_job_ref is imported inside _cmd_subscribe from scheduled.jobs
+        import scheduled.jobs as jobs_mod
 
         monkeypatch.setattr(
             jobs_mod, "resolve_job_ref",
@@ -211,7 +211,7 @@ class TestCronJobSubscribe:
         assert _load_subscriptions()["ev"]["cron_job"] == "job-abc123"
 
     def test_unknown_job_rejected(self, monkeypatch, capsys):
-        import cron.jobs as jobs_mod
+        import scheduled.jobs as jobs_mod
 
         monkeypatch.setattr(jobs_mod, "resolve_job_ref", lambda ref: None)
         webhook_command(_make_args(

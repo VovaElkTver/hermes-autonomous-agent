@@ -182,14 +182,14 @@ class TestGatewayLifecyclePattern:
 
     @pytest.mark.parametrize("text", [
         "restart the server application",
-        "hermes cron list",
+        "hermes scheduled list",
         "hermes update",
         "hermes config set model claude",
-        "echo 'just a normal cron job'",
+        "echo 'just a normal scheduled job'",
         "run the backup script",
         "gateway is running fine",
         # `hermes gateway start` is benign — starting a gateway from inside a
-        # gateway is a no-op / "already running", and a legit cron job may
+        # gateway is a no-op / "already running", and a legit scheduled job may
         # start a sibling profile's gateway. Only restart/stop/kill are the
         # foot-gun (#30719 lists only those).
         "hermes gateway start",
@@ -200,14 +200,14 @@ class TestGatewayLifecyclePattern:
         "launchctl unload ai.hermes.update-checker.plist",
         "launchctl restart ai.hermes.daemon",
         # `submit` on an unrelated launchd label must not match the text
-        # pattern (a cron PROMPT is prose fed to an LLM). The execution-aware
+        # pattern (a scheduled PROMPT is prose fed to an LLM). The execution-aware
         # `contains_launchctl_submit_command` handles neutral-label submits
-        # at the terminal/cron-script chokepoints instead.
+        # at the terminal/scheduled-script chokepoints instead.
         "launchctl submit -l com.example.backup -- /bin/sh backup.sh",
         "systemctl restart hermes-meta.service",
-        "systemctl restart hermes-cron-helper",
+        "systemctl restart hermes-scheduled-helper",
         # Regression (#30728 follow-up): legit prompts that merely mention an
-        # unrelated gateway + a restart must NOT be blocked. The cron prompt is
+        # unrelated gateway + a restart must NOT be blocked. The scheduled prompt is
         # fed to an LLM, not a shell, so substring detection on English text is
         # a high-FP no-op — only concrete command shapes trigger the block.
         "Summarize the API gateway logs and report any restart events from last night",
@@ -905,7 +905,7 @@ class TestLifecycleGuardModule:
 
 
     @pytest.mark.parametrize("line", [
-        # #62891: neutral labels defeat any label-anchored regex, so cron
+        # #62891: neutral labels defeat any label-anchored regex, so scheduled
         # scripts get the same label-independent submit/bootstrap block.
         "launchctl submit -l com.foo -- /path/gateway",
         "launchctl bootstrap gui/501 /tmp/com.foo.plist",
@@ -945,7 +945,7 @@ class TestLifecycleGuardModule:
             check_gateway_lifecycle("daily", "restart.sh")
 
     def test_python_script_with_pathlib_division_not_blocked(self, tmp_path):
-        """#77131: a .py cron script using pathlib division (Path.home() /
+        """#77131: a .py scheduled script using pathlib division (Path.home() /
         ".hermes") must NOT be blocked.
 
         Before the fix, the shell-script reference walk tokenized Python
@@ -1096,7 +1096,7 @@ class TestLifecycleGuardModule:
     def test_cron_script_scan_blocks_cloud_script_without_opening(
         self, tmp_path, monkeypatch
     ):
-        """The cron-script scan path (_read_script_for_scanning via
+        """The scheduled-script scan path (_read_script_for_scanning via
         check_gateway_lifecycle) must also refuse a cloud-resident script
         without opening it, and the surfaced reason must attribute the
         refusal to the cloud-synced path — not to a lifecycle command."""
@@ -1121,7 +1121,7 @@ class TestLifecycleGuardModule:
 
         def reject_cloud_open(path, flags, *args, **kwargs):
             if str(path) == str(script):
-                pytest.fail("cron-script scan opened a cloud-resident script")
+                pytest.fail("scheduled-script scan opened a cloud-resident script")
             return real_open(path, flags, *args, **kwargs)
 
         monkeypatch.setattr(lifecycle_guard.os, "open", reject_cloud_open)
@@ -1136,7 +1136,7 @@ class TestLifecycleGuardModule:
 
 
     def test_tilde_nul_candidate_does_not_crash_cron_script_resolution(self):
-        """T2: the same ``expanduser`` crash via the cron ``script`` path
+        """T2: the same ``expanduser`` crash via the scheduled ``script`` path
         (``_resolve_script_path`` / ``check_gateway_lifecycle``)."""
         from tools.lifecycle_guard import check_gateway_lifecycle
 
@@ -1230,7 +1230,7 @@ class TestLifecycleGuardModule:
     def test_cron_guard_total_when_home_unresolvable(self, monkeypatch):
         """`get_hermes_home()` falls back to Path.home(), which raises
         RuntimeError when neither HERMES_HOME nor HOME resolves
-        (arbitrary-UID containers, launchd). The cron entry point must
+        (arbitrary-UID containers, launchd). The scheduled entry point must
         treat a relative script value as unresolvable — nothing to scan —
         not crash."""
         from pathlib import Path
@@ -1262,7 +1262,7 @@ class TestDotSourceIsScannedLikeSource:
     `Path(".").name` is "" — pathlib has no name component for a pure-path
     token — so keying the sourced-script branch on it left the `.` spelling
     unreachable. `source ./helper.sh` was scanned while `. ./helper.sh`
-    walked straight past both the cron guard and the in-gateway terminal
+    walked straight past both the scheduled guard and the in-gateway terminal
     guard, carrying whatever the sourced script contained.
     """
 

@@ -243,8 +243,8 @@ def _backdate(u, name: str, days: int, *, use_count: int = 1):
 
 
 def test_unreferenced_skill_is_still_archived(curator_env):
-    """Guard against over-protecting: with cron excised there is no protection
-    set, so previously cron-referenced skills age out like any other."""
+    """Guard against over-protecting: with scheduled excised there is no protection
+    set, so previously scheduled-referenced skills age out like any other."""
     c = curator_env["curator"]
     u = curator_env["usage"]
     skills_dir = curator_env["home"] / "skills"

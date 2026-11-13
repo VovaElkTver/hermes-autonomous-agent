@@ -62,7 +62,7 @@ def parked_profile_refusal(runner, profile, route_config, admission_source):
     rejected target gets the answer the immediate route gives when admission refuses it.
     ``admission_source`` returns the ``SessionSource`` admission builds for this delivery
     (``WebhookAdapter._admission_source``), so ``profile_routes`` match here exactly as there. Answered
-    before the delivery id is recorded: coalesced, ``deliver_only`` and ``cron_job`` routes act before
+    before the delivery id is recorded: coalesced and ``deliver_only`` routes act before
     (or without) an admission, so the in-memory id is their only replay guard, and a recorded id would
     answer the provider's retry as a duplicate once the profile is served again."""
     from aiohttp import web

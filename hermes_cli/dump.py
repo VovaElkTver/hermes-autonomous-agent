@@ -120,13 +120,13 @@ def _count_skills(hermes_home: Path) -> int:
     return sum(1 for item in skills_dir.rglob("SKILL.md") if not is_excluded_skill_path(item)) if skills_dir.is_dir() else 0
 
 
-def _cron_summary(hermes_home: Path) -> str:
-    """Return cron jobs summary."""
+def _scheduled_summary(hermes_home: Path) -> str:
+    """Return scheduled jobs summary."""
     jobs_file = hermes_home / "cron" / "jobs.json"
     if not jobs_file.exists():
         return "0"
     try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs — Windows editors may leave a UTF-8 BOM.
+        # utf-8-sig: same dialect as scheduled/jobs.load_jobs — Windows editors may leave a UTF-8 BOM.
         with open(jobs_file, encoding="utf-8-sig") as f:
             jobs = json.load(f).get("jobs", [])
         active = sum(1 for j in jobs if j.get("enabled", True))
@@ -335,7 +335,7 @@ def run_dump(args):
         f"  memory_provider:    {config.get('memory', {}).get('provider', '') or 'built-in'}",
         f"  gateway:            {_gateway_status()}",
         f"  platforms:          {', '.join(platforms) if platforms else 'none'}",
-        f"  cron_jobs:          {_cron_summary(hermes_home)}",
+        f"  scheduled_jobs:     {_scheduled_summary(hermes_home)}",
         f"  skills:             {_count_skills(hermes_home)}",
     ]
     overrides = _config_overrides(config)

@@ -1153,7 +1153,7 @@ def collect_fleet_versions(
     """Snapshot every profile's gateway code identity vs. the current tree.
 
     ``self_restart_pending`` — pids of gateways that are ancestors of this updater and accepted a
-    self-restart request (cron update inside the gateway tree, #100179). They can only restart after
+    self-restart request (scheduled update inside the gateway tree, #100179). They can only restart after
     this process exits, so their pre-update ``code_sha`` is expected: such a row is
     ``restart_pending`` instead of ``stale`` and does not fail the matrix (#119597). Every other
     live gateway on the old sha keeps its ``stale`` verdict.

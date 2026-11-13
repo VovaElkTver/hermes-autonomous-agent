@@ -40,8 +40,8 @@ _PRELUDE = "import json, os, sys\nsys.path.insert(0, os.getcwd())\n"
 # PR -> (extra env, script). A script prints ``open`` while the defect reproduces, ``fixed`` once
 # it no longer does; anything else (including a crash) fails the cell that asked.
 PROBES: dict[int, tuple] = {}
-# Entry for PR #119970 (cron DST next-run drift) was removed together with the
-# cron package; probes only get added back when a live defect needs one.
+# Entry for PR #119970 (scheduled DST next-run drift) was removed together with the
+# scheduled package; probes only get added back when a live defect needs one.
 
 
 @functools.cache

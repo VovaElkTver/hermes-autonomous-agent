@@ -9,7 +9,7 @@ release and breaks something that runs AFTER the checkout moved, for real:
     itself lives under ``scripts/build``, plus a new file under ``web/``) so ``freshness.mjs`` reports
     the web UI stale and the updater must build it. A config migration is owed too
     (``_config_version`` lowered by one): one failed step must not skip later independent ones.
-(b) a gateway that refuses to restart: a credential-free, platform-less (cron-only) ``hermes
+(b) a gateway that refuses to restart: a credential-free, platform-less (scheduled-only) ``hermes
     gateway run`` lives in the same PID namespace as the updater (``handoff._nshost``). The release
     makes ``hermes_cli.gateway.run_gateway`` exit 1 before booting while
     ``$HOME/.e2e-break-gateway-boot`` exists. The updater drains the OLD gateway (pre-update code,
@@ -405,7 +405,7 @@ def test_gateway_that_cannot_reboot_is_an_owed_restart_not_a_failed_update(w):
             before_sha = w.head()
             try:
                 ident = H.wait_for(lambda: _serving(w, before_sha), timeout=240, interval=1.0,
-                                   what="the cron-only gateway's control-socket identify")
+                                   what="the scheduled-only gateway's control-socket identify")
             except AssertionError as exc:
                 raise AssertionError(f"premise: the gateway never came up: {exc}\n{_gateway_logs(w)[-4000:]}\n"
                                      f"{host.ps_text()}") from None

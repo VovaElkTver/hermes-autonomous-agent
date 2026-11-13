@@ -268,7 +268,7 @@ class GatewayInboundHooksMixin:
         command arguments, with the messaging dash repair of ``get_command_args``."""
         # The agent-turn path binds HERMES_SESSION_* via _set_session_env; this dispatch
         # sits before it, so a handler reading get_session_env() would see an empty or a
-        # foreign (cron agent's os.environ) session (#108698). A local session's command
+        # foreign (scheduled agent's os.environ) session (#108698). A local session's command
         # passes its live *session_entry* (key and id, as its turns bind them); a messaging
         # message has none yet, so session_key is derived from source. Sync handlers run on the
         # gateway pool (contextvars carried), never the loop thread: blocking I/O there starves

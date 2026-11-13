@@ -3,13 +3,13 @@ blocks must classify as ``content_policy_blocked``, be non-retryable, and
 trigger the ``is_client_error`` abort path so the loop jumps straight to a
 configured fallback or surfaces a clear policy-block message — instead of
 burning ``api_max_retries`` paid attempts on a deterministic refusal and
-delivering "API failed after 3 retries" to Telegram/cron with no provider
+delivering "API failed after 3 retries" to Telegram/scheduled with no provider
 context.
 
 Real-world symptom from the issue:
     ``API call failed after 3 retries — This content was flagged for
     possible cybersecurity risk... | provider=openai-codex model=gpt-5.5``
-repeating across cron jobs and gateway sessions, with the user unable to
+repeating across scheduled jobs and gateway sessions, with the user unable to
 tell whether the gateway was broken, the model was down, or their prompt
 was the problem.
 """

@@ -2,7 +2,7 @@
 
 Script-friendly Codex / Anthropic / OpenRouter quota view (issue #33094): same fetch and renderer as
 ``/usage`` (``agent.account_usage``), same credential resolution as a session with no live agent, plus
-``--json`` for cron jobs and shell loops. Slim redo of #81819 (@himanusia).
+``--json`` for scheduled jobs and shell loops. Slim redo of #81819 (@himanusia).
 """
 
 from __future__ import annotations

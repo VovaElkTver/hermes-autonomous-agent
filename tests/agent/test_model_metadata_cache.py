@@ -1,6 +1,6 @@
 """Concurrent writers of ``context_length_cache.yaml`` (race audit lostupdate-7).
 
-Every agent (CLI, gateway sessions, cron jobs, subagents) persists probed context windows with a
+Every agent (CLI, gateway sessions, scheduled jobs, subagents) persists probed context windows with a
 load -> mutate -> write cycle; an unserialized pair rewrites a stale snapshot and drops the other
 writer's entry, so the next session re-probes or overflows its context on the first call.
 """

@@ -319,7 +319,7 @@ def skills_list(category: str | None = None, task_id: str | None = None) -> str:
 
 def _legacy_portable_skill_name(pm, namespace, bare):
     """Portable plugin skills were named ``agent-plugin-<slug>-<sha8>:<skill>`` before they took the
-    plugin's own name; prompts and cron jobs saved since then may still carry that form. Resolved
+    plugin's own name; prompts and scheduled jobs saved since then may still carry that form. Resolved
     through what that exact plugin registered, so a skill it lost to a name clash is not found."""
     if not namespace.startswith("agent-plugin-"):
         return None

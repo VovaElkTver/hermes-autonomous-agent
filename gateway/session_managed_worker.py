@@ -416,7 +416,7 @@ def _worker_env(authority):
     from agent.secret_scope import build_profile_secret_scope
     from tools.environments.local import _scrub_credentials, build_subprocess_env, strip_launch_profile_env
     # The scrub removes credentials, not settings: the launch profile's TERMINAL_* policy and
-    # its ``.env`` settings would otherwise reach the secondary's worker (cron/kanban rule).
+    # its ``.env`` settings would otherwise reach the secondary's worker (scheduled/kanban rule).
     # Strip the RAW environ before the constructor injects this turn's own session/bridge context:
     # a launch ``.env`` name (HERMES_SESSION_ID...) must not erase a value derived for this turn.
     env = build_subprocess_env(base=strip_launch_profile_env(os.environ.copy(), home), scrub_secrets=True)

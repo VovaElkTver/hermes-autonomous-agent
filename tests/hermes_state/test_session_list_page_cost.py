@@ -1,7 +1,7 @@
 """A recency-ordered session page pays the row projection only for its own rows (#119403).
 
 The sidebar asks ``list_sessions_rich(order_by_last_active=True)`` for a small page of a store
-that can hold tens of thousands of sessions (cron runs). Ranking must look at every admitted
+that can hold tens of thousands of sessions (scheduled runs). Ranking must look at every admitted
 row, but the projection (``s.*``, the resolved prompt, the preview subquery over message
 content) belongs to the page alone: when it ran for every admitted row before ``LIMIT``, a
 35k-session store took 121 s per sidebar refresh.

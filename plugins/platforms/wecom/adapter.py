@@ -857,7 +857,7 @@ def register(ctx) -> None:
         dashboard_required_env=("WECOM_BOT_ID",),
         is_connected=_is_connected, validate_config=_is_connected, required_env=["WECOM_BOT_ID", "WECOM_SECRET"],
         setup_fn=interactive_setup,
-        cron_deliver_env_var="WECOM_HOME_CHANNEL", standalone_sender_fn=_standalone_send, max_message_length=4000, **common,
+        scheduled_deliver_env_var="WECOM_HOME_CHANNEL", standalone_sender_fn=_standalone_send, max_message_length=4000, **common,
         platform_hint=_WECOM_PLATFORM_HINT,
         display_tier="low",
         # Non-editable, but its native "stream" msgtype gives a typing animation + cumulative updates.

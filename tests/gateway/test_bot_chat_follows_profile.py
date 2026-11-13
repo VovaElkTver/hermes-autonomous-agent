@@ -1,6 +1,6 @@
 """A Bot Chat follows its profile's current route, whoever creates it.
 
-Desktop's create asks for ``follow_profile_config``. The Bot/cron delivery door, a peer DM
+Desktop's create asks for ``follow_profile_config``. The Bot/scheduled delivery door, a peer DM
 create, a CLI ``chat -c "Bot Chat" --create-if-missing`` and the adoption of a pre-upgrade
 Bot Chat used to freeze the route of that moment. Desktop later reuses the chat by title, so
 a profile change never reached it, and retiring the old key broke it. A session that is not

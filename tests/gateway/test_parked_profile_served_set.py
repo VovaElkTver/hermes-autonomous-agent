@@ -21,7 +21,6 @@ async def test_still_retiring_profile_leaves_the_served_set(tmp_path, monkeypatc
     agent = _Agent(honours_stop=False)
     db, authority, execute, returned = _authority(tmp_path, agent)
     monkeypatch.setattr(session_finite, 'execute_finite_admission', execute)
-    monkeypatch.setattr('gateway.session_cron.unbind_owner', lambda authority: None)
     launch = SimpleNamespace(profile_id=str(tmp_path / 'launch'), retiring=False)
     registry = SessionAuthorities(launch.profile_id)
     registry.add(launch.profile_id, launch)

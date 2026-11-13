@@ -1481,7 +1481,7 @@ class TestReplyContextResolution:
 
     @pytest.mark.asyncio
     async def test_reply_to_bot_sent_image_attaches_the_file(self, tmp_path):
-        """The bot sends an uncaptioned image (a cron job delivering a chart); the user quotes it
+        """The bot sends an uncaptioned image (a scheduled job delivering a chart); the user quotes it
         and asks "what is this?". Meta's ``context`` carries only the wamid, so the bytes must come
         from the outbound index written at send time — otherwise the agent never sees the image."""
         adapter = _make_adapter()
@@ -1527,7 +1527,7 @@ def test_plugin_register_shape():
     assert captured["required_env"] == ["WHATSAPP_CLOUD_PHONE_NUMBER_ID", "WHATSAPP_CLOUD_ACCESS_TOKEN"]
     assert captured["allowed_users_env"] == "WHATSAPP_CLOUD_ALLOWED_USERS"
     assert captured["allow_all_env"] == "WHATSAPP_CLOUD_ALLOW_ALL_USERS"
-    assert captured["cron_deliver_env_var"] == "WHATSAPP_CLOUD_HOME_CHANNEL"
+    assert captured["scheduled_deliver_env_var"] == "WHATSAPP_CLOUD_HOME_CHANNEL"
     assert callable(captured["setup_fn"]) and callable(run_whatsapp_cloud_setup)
     from gateway.config import PlatformConfig
     is_connected = captured["is_connected"]

@@ -1,9 +1,9 @@
-"""Each standalone config loader (gateway, TUI/desktop, cron) must honor managed scope.
+"""Each standalone config loader (gateway, TUI/desktop, scheduled) must honor managed scope.
 
 These loaders build their own config dict instead of routing through
 hermes_cli.config.load_config, so the managed overlay has to be wired into each.
 This is the regression guard for the whole bug class (a managed display.skin was
-silently ignored by the TUI; the same gap existed in the gateway and cron).
+silently ignored by the TUI; the same gap existed in the gateway and scheduled).
 """
 import textwrap
 

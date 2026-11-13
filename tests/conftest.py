@@ -410,7 +410,7 @@ def _hermetic_environment(tmp_path, tmp_path_factory, monkeypatch):
 
     # 4b. Disable AWS IMDS lookups. Without this, any test that ends up
     #     calling has_aws_credentials() / resolve_aws_auth_env_var()
-    #     (e.g. provider auto-detect, status command, cron run_job) burns
+    #     (e.g. provider auto-detect, status command, scheduled run_job) burns
     #     ~2s waiting for the metadata service at 169.254.169.254 to time
     #     out. Tests don't run on EC2 — IMDS is always unreachable here.
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")

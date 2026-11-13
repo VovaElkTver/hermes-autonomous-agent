@@ -881,7 +881,7 @@ def _restart_launchd_gateway_after_update(
     if not supervision_verify:
         return [current_label], []
     if old_pid is not None and _is_pid_ancestor_of_current_process(old_pid):
-        # launchd_restart() handed the restart to the gateway this updater runs INSIDE (cron job in
+        # launchd_restart() handed the restart to the gateway this updater runs INSIDE (scheduled job in
         # the gateway tree, #100179): it exits only after this process does, so no fresh supervised
         # pid can appear while we wait. Record it as pending for the fleet matrix (#119597).
         if self_restart_pending is not None:
@@ -1110,8 +1110,8 @@ def _drain_or_signal_gateway_for_update(
     """Three-way triage (shared by systemd and bare-process paths) for handing a
     running gateway over to new code. Returns True when signalled/stopped.
 
-    1. Gateway is an ancestor of this process (auto-update cron inside the gateway
-       tree): waiting is circular (gateway waits on in-flight work → cron session
+    1. Gateway is an ancestor of this process (auto-update scheduled inside the gateway
+       tree): waiting is circular (gateway waits on in-flight work → scheduled session
        waits on update → update waits on gateway) and the 1800s force-drain cap burns.
        So fire-and-forget: signal restart and return; it completes once THIS process exits.
        The pid lands in ``self_restart_pending`` so the fleet matrix can tell "restart
@@ -1120,7 +1120,7 @@ def _drain_or_signal_gateway_for_update(
     2. Event loop provably wedged: SIGUSR1 can never drain it; bounded SIGTERM→SIGKILL.
     3. Live out-of-tree gateway: graceful SIGUSR1 drain up to ``drain_budget``.
 
-    The wedged-loop probe cannot break it: the cron session posts activity every ~180s (process-tool poll
+    The wedged-loop probe cannot break it: the scheduled session posts activity every ~180s (process-tool poll
     return), so it is "actively waiting forever" and never marked wedged — the gateway burns the full
     force-drain cap (1800s) before killing its own updater's session. See #86684.
     """
@@ -1132,7 +1132,7 @@ def _drain_or_signal_gateway_for_update(
         print(
             f"  → {label}: update is running inside this gateway's "
             "process tree — signalling restart and letting the gateway "
-            "drain itself (avoids the cron-update deadlock, #100179)"
+            "drain itself (avoids the scheduled-update deadlock, #100179)"
         )
         accepted = _request_gateway_self_restart(pid)
         if accepted and self_restart_pending is not None:

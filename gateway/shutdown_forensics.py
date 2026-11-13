@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from gateway.restart import DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, resolve_systemd_timeout_stop_sec
+from gateway.restart import DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT, resolve_systemd_timeout_stop_sec
 import contextlib
 
 _SIGNAL_NAME_BY_NUM: dict[int, str] = {
@@ -199,7 +199,7 @@ def context_as_json(ctx: dict[str, Any]) -> str:
 
 
 def check_systemd_timing_alignment(
-    drain_timeout: float, cron_drain_timeout: float = DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT
+    drain_timeout: float, scheduled_drain_timeout: float = DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT
 ) -> Optional[dict[str, Any]]:
     """At startup, sanity-check that systemd's TimeoutStopSec covers stop. A stale unit file
     (upgraded without re-running ``hermes setup``) can have ``TimeoutStopSec`` below the stop
@@ -220,9 +220,9 @@ def check_systemd_timing_alignment(
     if (timeout_us := _systemd_timeout_stop_us(unit_name) if unit_name else None) is None:
         return None
     timeout_stop_sec = timeout_us / 1_000_000.0
-    expected = float(resolve_systemd_timeout_stop_sec(drain_timeout, cron_drain_timeout))
+    expected = float(resolve_systemd_timeout_stop_sec(drain_timeout, scheduled_drain_timeout))
     return {"unit": unit_name, "timeout_stop_sec": timeout_stop_sec, "drain_timeout": drain_timeout,
-            "cron_drain_timeout": cron_drain_timeout, "expected_min": expected,
+            "scheduled_drain_timeout": scheduled_drain_timeout, "expected_min": expected,
             "mismatch": timeout_stop_sec < expected}
 
 

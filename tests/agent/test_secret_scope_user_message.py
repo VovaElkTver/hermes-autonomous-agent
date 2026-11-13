@@ -1,4 +1,4 @@
-"""UnscopedSecretError reaches end users verbatim (compression-aborted replies, cron notices), so
+"""UnscopedSecretError reaches end users verbatim (compression-aborted replies, scheduled notices), so
 `str(exc)` must be the one actionable sentence; the developer diagnosis stays in `__notes__`/logs.
 """
 

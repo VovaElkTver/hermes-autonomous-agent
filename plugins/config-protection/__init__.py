@@ -28,7 +28,7 @@ _TEXT_TOOLS = {"terminal", "execute_code"}
 FALLBACK_PROTECTED = [
     "~/.hermes*/config.yaml",
     "~/.hermes*/topics.yaml",
-    "~/.hermes*/cron/jobs.json",
+    "~/.hermes*/scheduled/jobs.json",
 ]
 
 

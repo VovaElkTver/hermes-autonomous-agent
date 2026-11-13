@@ -1,4 +1,4 @@
-"""User-facing message contracts for `hermes skills/plugins/mcp/cron/doctor` failure paths.
+"""User-facing message contracts for `hermes skills/plugins/mcp/scheduled/doctor` failure paths.
 
 Every failure line must say what happened and name an existing command to type next; none may
 lead with a raw exception, a status literal, or a hardcoded ``~/.hermes`` path (UX message audit,
@@ -21,7 +21,7 @@ def test_plugin_clone_failure_leads_with_next_steps_and_escapes_git_output():
 
 # ── MCP ───────────────────────────────────────────────────────────────────────────────────────
 
-# ── cron ──────────────────────────────────────────────────────────────────────────────────────
+# ── scheduled ──────────────────────────────────────────────────────────────────────────────────────
 
 # ── doctor / advisories / paths ───────────────────────────────────────────────────────────────
 

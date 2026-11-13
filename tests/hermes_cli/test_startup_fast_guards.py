@@ -43,7 +43,7 @@ _FORBIDDEN_MODULES = (
 
 @pytest.mark.platforms("linux")
 def test_cli_starts_from_a_deleted_cwd(tmp_path):
-    """A child spawned into a directory that was removed since (a cron delivery from a reaped
+    """A child spawned into a directory that was removed since (a scheduled delivery from a reaped
     kanban workspace) must still reach argv parsing: a relative ``sys.path`` entry made
     ``ensure_project_root_on_path`` die in ``realpath`` → ``getcwd`` (#102941)."""
     home = tmp_path / ".hermes"

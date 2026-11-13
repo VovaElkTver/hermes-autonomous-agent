@@ -52,7 +52,7 @@ def platform():
     tokens = []
 
     def bind(name):
-        tokens.extend(set_session_vars(platform=name, cron_session=""))
+        tokens.extend(set_session_vars(platform=name, scheduled_session=""))
 
     yield bind
     clear_session_vars(tokens)

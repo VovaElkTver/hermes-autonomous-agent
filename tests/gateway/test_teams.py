@@ -940,7 +940,7 @@ class TestTeamsBotFrameworkAttachments:
         assert warn.called, "silent drop of invalid BF image bytes must log a warning"
 
 
-# ── _standalone_send (out-of-process cron delivery) ──────────────────────
+# ── _standalone_send (out-of-process scheduled delivery) ──────────────────────
 
 
 class _FakeAiohttpResponse:
@@ -1010,7 +1010,7 @@ class TestTeamsStandaloneSend:
         result = await _teams_mod._standalone_send(
             PlatformConfig(enabled=True, extra={}),
             "19:abc@thread.skype",
-            "hello cron",
+            "hello scheduled",
         )
 
         assert result == {"success": True, "message_id": "msg-99"}
@@ -1027,7 +1027,7 @@ class TestTeamsStandaloneSend:
         assert "smba.trafficmanager.net" in activity_url
         assert "/v3/conversations/19:abc@thread.skype/activities" in activity_url
         assert activity_kwargs["headers"]["Authorization"] == "Bearer the-token"
-        assert activity_kwargs["json"]["text"] == "hello cron"
+        assert activity_kwargs["json"]["text"] == "hello scheduled"
         assert activity_kwargs["json"]["type"] == "message"
 
 

@@ -2,7 +2,7 @@
 
 Regression coverage for issue #14944: the background memory/skill review used
 to re-surface tool results that were already present in the conversation
-history before the review started (e.g. an earlier "Cron job '...' created.").
+history before the review started (e.g. an earlier "Scheduled job '...' created.").
 """
 
 import json
@@ -20,7 +20,7 @@ def _tool_msg(tool_call_id, payload):
 
 def test_skips_prior_tool_messages_by_tool_call_id():
     """Stale 'created' tool result from prior history must not be re-surfaced."""
-    prior_payload = {"success": True, "message": "Cron job 'remind-me' created."}
+    prior_payload = {"success": True, "message": "Scheduled job 'remind-me' created."}
     new_payload = {
         "success": True,
         "message": "Entry added",
@@ -39,7 +39,7 @@ def test_skips_prior_tool_messages_by_tool_call_id():
 
     actions = _summarize(review_messages, snapshot)
 
-    assert "Cron job 'remind-me' created." not in actions
+    assert "Scheduled job 'remind-me' created." not in actions
     assert "User profile updated" in actions
 
 def test_includes_genuinely_new_actions():
@@ -55,7 +55,7 @@ def test_includes_genuinely_new_actions():
 
 def test_falls_back_to_content_equality_when_tool_call_id_missing():
     """If a tool message has no tool_call_id, match prior entries by content."""
-    payload = {"success": True, "message": "Cron job 'X' created."}
+    payload = {"success": True, "message": "Scheduled job 'X' created."}
     raw = json.dumps(payload)
     prior_msg = {"role": "tool", "content": raw}  # no tool_call_id
     review_messages = [
@@ -65,7 +65,7 @@ def test_falls_back_to_content_equality_when_tool_call_id_missing():
 
     actions = _summarize(review_messages, [prior_msg])
 
-    assert "Cron job 'X' created." not in actions
+    assert "Scheduled job 'X' created." not in actions
     assert "Skill created." in actions
 
 def test_handles_non_json_tool_content_gracefully():

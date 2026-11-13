@@ -83,7 +83,7 @@ def test_every_provider_fanout_scrubs_secrets_without_touching_the_live_transcri
 
 
 def test_scrub_holds_with_redact_secrets_off(monkeypatch):
-    # Provider egress follows chat/cron egress: redact_secrets governs local logs, not what leaves the agent.
+    # Provider egress follows chat/scheduled egress: redact_secrets governs local logs, not what leaves the agent.
     monkeypatch.setattr("agent.redact._REDACT_ENABLED", False)
     mgr, provider = _manager()
     mgr.sync_all("hi", _LEAK)

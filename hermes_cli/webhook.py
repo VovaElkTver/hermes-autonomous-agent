@@ -229,7 +229,7 @@ def _cmd_subscribe(args):
         route["deliver_only"] = True
     if getattr(args, "mirror_to_session", False):
         route["mirror_to_session"] = True
-    # The --cron-job subscription mode was excised together with the cron package.
+    # The --scheduled-job subscription mode was excised together with the scheduled package.
     script = (getattr(args, "script", "") or "").strip()
     if script:
         route["script"] = script

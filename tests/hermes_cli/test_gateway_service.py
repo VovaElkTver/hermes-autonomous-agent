@@ -21,7 +21,7 @@ import hermes_cli.gateway as gateway_cli
 from hermes_cli.gateway_launchd import launchd_program_arguments
 from gateway import status
 from gateway.restart import (
-    DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
+    DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT,
     DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT,
     GATEWAY_FATAL_CONFIG_EXIT_CODE,
     GATEWAY_SERVICE_RESTART_EXIT_CODE,
@@ -251,36 +251,36 @@ class TestUninstallRefusesForeignUnit:
 
 class TestGetPeriodicDrainTimeout:
     def test_missing_config_falls_back_to_default(self, monkeypatch):
-        monkeypatch.delenv("HERMES_CRON_DRAIN_TIMEOUT", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_DRAIN_TIMEOUT", raising=False)
         monkeypatch.setattr(gateway_cli, "read_raw_config", dict)
         assert (
-            gateway_cli._get_periodic_drain_timeout() == DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT
+            gateway_cli._get_scheduled_drain_timeout() == DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT
         )
 
     def test_zero_in_config_is_opt_out(self, monkeypatch):
-        monkeypatch.delenv("HERMES_CRON_DRAIN_TIMEOUT", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_DRAIN_TIMEOUT", raising=False)
         monkeypatch.setattr(
             gateway_cli,
             "read_raw_config",
-            lambda: {"agent": {"cron_drain_timeout": 0}},
+            lambda: {"agent": {"scheduled_drain_timeout": 0}},
         )
-        assert gateway_cli._get_periodic_drain_timeout() == 0.0
+        assert gateway_cli._get_scheduled_drain_timeout() == 0.0
 
     def test_env_overrides_config(self, monkeypatch):
-        monkeypatch.setenv("HERMES_CRON_DRAIN_TIMEOUT", "45")
+        monkeypatch.setenv("HERMES_SCHEDULED_DRAIN_TIMEOUT", "45")
         monkeypatch.setattr(
             gateway_cli,
             "read_raw_config",
             lambda: {"agent": {"cron_drain_timeout": 90}},
         )
-        assert gateway_cli._get_periodic_drain_timeout() == 45.0
+        assert gateway_cli._get_scheduled_drain_timeout() == 45.0
 
 
 class TestGeneratedSystemdUnits:
     def _expected_timeout_stop_sec(self) -> str:
         timeout = resolve_systemd_timeout_stop_sec(
             DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT,
-            DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
+            DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT,
         )
         return f"TimeoutStopSec={timeout}"
 
@@ -289,17 +289,17 @@ class TestGeneratedSystemdUnits:
         floor plus cleanup reserve. The old max(60, drain+30)=60 unit
         SIGKILLed that in-budget drain."""
         monkeypatch.delenv("HERMES_RESTART_DRAIN_TIMEOUT", raising=False)
-        monkeypatch.delenv("HERMES_CRON_DRAIN_TIMEOUT", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_DRAIN_TIMEOUT", raising=False)
         monkeypatch.setattr(gateway_cli, "_get_restart_drain_timeout", lambda: 0.0)
         monkeypatch.setattr(
             gateway_cli,
-            "_get_periodic_drain_timeout",
-            lambda: DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
+            "_get_scheduled_drain_timeout",
+            lambda: DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT,
         )
 
         unit = gateway_cli.generate_systemd_unit(system=False)
         expected = resolve_systemd_timeout_stop_sec(
-            0.0, DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT
+            0.0, DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT
         )
         assert f"TimeoutStopSec={expected}" in unit
         assert expected > 60
@@ -310,7 +310,7 @@ class TestGeneratedSystemdUnits:
         self, monkeypatch
     ):
         monkeypatch.setattr(gateway_cli, "_get_restart_drain_timeout", lambda: 0.0)
-        monkeypatch.setattr(gateway_cli, "_get_periodic_drain_timeout", lambda: 0.0)
+        monkeypatch.setattr(gateway_cli, "_get_scheduled_drain_timeout", lambda: 0.0)
 
         unit = gateway_cli.generate_systemd_unit(system=False)
         assert "TimeoutStopSec=60" in unit
@@ -1550,7 +1550,7 @@ class TestSystemUnitRefreshSyncsHermesHome:
         # Correct installed unit (operator's HERMES_HOME + drain timeout).
         monkeypatch.setenv("HERMES_HOME", str(alice_hermes))
         good_unit = gateway_cli.generate_systemd_unit(system=True, run_as_user="alice")
-        assert f"TimeoutStopSec={resolve_systemd_timeout_stop_sec(180.0, DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)}" in good_unit
+        assert f"TimeoutStopSec={resolve_systemd_timeout_stop_sec(180.0, DEFAULT_GATEWAY_SCHEDULED_DRAIN_TIMEOUT)}" in good_unit
         unit_path.write_text(good_unit, encoding="utf-8")
 
         # Simulate sudo without inherited HERMES_HOME (falls back to root).
@@ -2784,7 +2784,7 @@ class TestTimeoutStopSecCoversBackgroundFloor:
     """#94759: TimeoutStopSec must cover the FULL stop budget.
 
     resolve_background_drain_budget() can hold the shutdown drain for
-    agent.cron_drain_timeout plus BACKGROUND_DRAIN_CLEANUP_RESERVE_S on top of
+    agent.scheduled_drain_timeout plus BACKGROUND_DRAIN_CLEANUP_RESERVE_S on top of
     (as a max of) the restart drain, so the unit leash is sized from
     max(restart_drain, background_floor) + 30 — not the restart drain alone."""
 
@@ -2794,7 +2794,7 @@ class TestTimeoutStopSecCoversBackgroundFloor:
         (hermes / "config.yaml").write_text(config_yaml, encoding="utf-8")
         monkeypatch.setenv("HERMES_HOME", str(hermes))
         monkeypatch.delenv("HERMES_RESTART_DRAIN_TIMEOUT", raising=False)
-        monkeypatch.delenv("HERMES_CRON_DRAIN_TIMEOUT", raising=False)
+        monkeypatch.delenv("HERMES_SCHEDULED_DRAIN_TIMEOUT", raising=False)
         monkeypatch.setattr(gateway_cli.shutil, "which", lambda cmd: None)
         monkeypatch.setattr(
             gateway_cli, "_build_user_local_paths", lambda home, existing: []
@@ -2807,7 +2807,7 @@ class TestTimeoutStopSecCoversBackgroundFloor:
         unit = self._unit_with_config(
             tmp_path,
             monkeypatch,
-            "agent:\n  restart_drain_timeout: 0\n  cron_drain_timeout: 120\n",
+            "agent:\n  restart_drain_timeout: 0\n  scheduled_drain_timeout: 120\n",
         )
         expected = resolve_systemd_timeout_stop_sec(0.0, 120.0)
         assert f"TimeoutStopSec={expected}" in unit
@@ -2828,7 +2828,7 @@ class TestTimeoutStopSecCoversBackgroundFloor:
             tmp_path,
             monkeypatch,
             "agent:\n  restart_drain_timeout: 0\n",
-            env={"HERMES_CRON_DRAIN_TIMEOUT": "200"},
+            env={"HERMES_SCHEDULED_DRAIN_TIMEOUT": "200"},
         )
         assert f"TimeoutStopSec={resolve_systemd_timeout_stop_sec(0.0, 200.0)}" in unit
 

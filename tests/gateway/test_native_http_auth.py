@@ -122,7 +122,7 @@ def test_native_http_grants_are_single_use_and_bound_to_daemon(tmp_path):
                                    headers={**headers(ticket(home, descriptor)), 'Content-Type': content_type})
             assert response.status_code == 403, (content_type, response.text)
         for path in ('/api/profiles/sessions', '/api/profiles/sessions/sidebar',
-                     '/api/profiles/projects/tree', '/api/cron/jobs'):
+                     '/api/profiles/projects/tree', '/api/scheduled/jobs'):
             assert client.get(path, headers=headers(ticket(home, descriptor))).status_code == 403
         assert sibling_config.read_bytes() == sibling_before
         assert client.get('/api/config?profile=default',

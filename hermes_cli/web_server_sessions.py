@@ -87,7 +87,7 @@ def _session_mutation_context(request, profile):
     from fastapi import HTTPException
     from gateway.session_contract import SessionActor
     from hermes_cli.web_server import _has_valid_session_token
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
     from hermes_state import _default_db_path
 
     native = getattr(request.state, 'native_http_principal', None)
@@ -104,7 +104,7 @@ def _session_mutation_context(request, profile):
     else:
         raise HTTPException(status_code=401, detail='Unauthorized')
     authority = getattr(request.app.state, 'session_authority', None)
-    home = Path(_cron_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
+    home = Path(_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
     capabilities = frozenset({'session:read', 'session:control', 'session:create', 'session:operator'})
     if authority is None:
         if getattr(request.app.state, 'gateway_runner', None) is not None:
@@ -216,10 +216,10 @@ async def _mutate_via_gateway_owner(profile, actor, params):
     from hermes_cli.gateway_client import GatewayClientError, GatewayRPCError, connect_gateway
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
     from hermes_cli.gateway_runtime_discovery import DiscoveryError
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
     from hermes_state import _default_db_path
 
-    home = Path(_cron_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
+    home = Path(_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
     # Discovery is read-only and never starts a gateway.
     discovery = await asyncio.to_thread(discover_gateway_endpoint, home, timeout=1.5)
     endpoint = discovery.endpoint
@@ -322,10 +322,10 @@ def _with_session_maintenance(profile, operation, *args):
     """Offline bulk actions reserve the exact owner lock through final DB close."""
     from fastapi import HTTPException
     from gateway.runtime_ownership import OwnershipConflict, exclusive_maintenance
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
     from hermes_state import _default_db_path
 
-    home = Path(_cron_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
+    home = Path(_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
     try:
         with exclusive_maintenance([home]):
             return operation(*args)
@@ -421,11 +421,11 @@ def _open_session_db_at_path(db_path: Path, *, read_only: bool):
 
 def _session_db_path_for_profile(profile: Optional[str]) -> Path:
     """state.db path for ``profile`` (None/empty = this process's own)."""
-    from hermes_cli.web_server_cron import _cron_profile_home
+    from hermes_cli.web_server_profile_homes import _profile_home
     from hermes_state import _default_db_path
 
     if profile:
-        _name, home = _cron_profile_home(profile)
+        _name, home = _profile_home(profile)
         return Path(home) / "state.db"
     return Path(_default_db_path())
 

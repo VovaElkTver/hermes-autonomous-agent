@@ -8,7 +8,7 @@ approval gate. A -q run has NO user waiting to answer approval prompts, so a
 dangerous command just waited the full timeout (300s) then failed closed — and
 the agent was effectively forced to work around the block (often silently
 auto-approving via ``execute_code``, which auto-approves in non-gateway mode).
-``approvals.single_query_mode`` (default ``deny``, mirror of cron_mode) makes
+``approvals.single_query_mode`` (default ``deny``, mirror of scheduled_mode) makes
 that decision deterministic and explicit.
 """
 
@@ -101,7 +101,7 @@ class TestSingleQueryContextDetection:
 
     def test_blank_session_context_masks_leaked_env(self, monkeypatch):
         monkeypatch.setenv("HERMES_SINGLE_QUERY_SESSION", "1")
-        tokens = set_session_vars(cron_session="")
+        tokens = set_session_vars(scheduled_session="")
         try:
             # Session context engaged: get_session_env returns "" because the
             # single-query var lives outside _VAR_MAP — but the legacy env

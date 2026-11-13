@@ -94,7 +94,7 @@ def finish_result(db, *, epoch, row, response, outcome, result=None, prepared=No
     # in this same write, so a viewer that reconnects after the restart reads why (#134889 GW-21);
     # the live ``message.complete.warning`` carries the same copy. A retry that finds the row
     # terminal returns above, so the notice is written once.
-    # A gateway-owned refusal (a message typed into a cron session) commits its explanation and
+    # A gateway-owned refusal (a message typed into a scheduled session) commits its explanation and
     # error card as the transcript's failed-turn boundary in this same write too: the admission
     # result is not history, so a reopened chat would otherwise show nothing about the refusal.
     from gateway.session_settlement_recovery import gateway_refusal_boundary, owner_stop_notice

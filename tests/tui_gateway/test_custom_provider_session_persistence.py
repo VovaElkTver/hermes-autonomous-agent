@@ -174,7 +174,7 @@ class TestResumeRoundTrip:
 
 class TestMakeAgentForwardsProviderRequestBody:
     """#103738 hole 1: the resolver lifts a custom entry's ``extra_body`` onto ``request_overrides``; the
-    TUI/Desktop build must hand it to AIAgent like the CLI and cron do, or a proxy that requires a body field
+    TUI/Desktop build must hand it to AIAgent like the CLI and scheduled do, or a proxy that requires a body field
     (``user``) 400s in the app while ``hermes chat`` works."""
 
     def test_entry_extra_body_reaches_agent(self, monkeypatch):

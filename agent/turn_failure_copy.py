@@ -60,7 +60,7 @@ PARTIAL_FAILED_TURN_NOTICE = (
     "This turn did not complete. Some actions may already have run; verify their effects "
     "before resending."
 )
-# A turn no person sent (a cron run, a process completion, a webhook delivery) lost across a gateway
+# A turn no person sent (a scheduled run, a process completion, a webhook delivery) lost across a gateway
 # restart, or fenced inside the running owner (a lost managed worker): it settles interrupted and is
 # never re-run, so nobody is asked to resend it (#134889 GW-10). Neutral: not every path restarted.
 AUTOMATION_INTERRUPTED_NOTICE = (
@@ -122,7 +122,7 @@ def provider_label_for(provider: Any) -> str:
 class ExitFailure(NamedTuple):
     """Verdict for a loop exit. ``fails_turn`` False = advisory: the descriptor fields are
     stamped so Desktop/TUI show a specific code, but ``failed``/``completed`` keep the values
-    the loop chose — cron silence, the kanban dispatcher breaker and gateway transcript
+    the loop chose — scheduled silence, the kanban dispatcher breaker and gateway transcript
     persistence all key on ``failed`` and must not change because a code was added."""
 
     reason: str
@@ -133,7 +133,7 @@ class ExitFailure(NamedTuple):
 # (exit-reason prefix, failure_reason, retryable, fails_turn). Prefix match: several reasons
 # carry a parenthesised detail (``local_processing_error(...)``).
 _EXIT_REASON_FAILURES: tuple[tuple[str, str, bool, bool], ...] = (
-    # Advisory: the reasoning-only text may literally be the answer, and cron stays silent.
+    # Advisory: the reasoning-only text may literally be the answer, and scheduled stays silent.
     ("empty_response_exhausted", "empty_response", True, False),
     ("all_retries_exhausted_no_response", FailoverReason.server_error.value, True, True),
     # #55316/#54756: the loop stopped on a tool tail with no follow-up text; the
@@ -188,7 +188,7 @@ def exit_reason_failure(turn_exit_reason: Any) -> Optional[ExitFailure]:
 def is_max_iteration_handoff(result: Any) -> bool:
     """A non-failed, non-interrupted ``max_iterations_reached(N/N)`` result that still carries a
     summary. ``completed`` is False because the work did not finish in that turn, but the turn
-    itself is a resumable boundary — not a failure — so cron delivers the summary and an active
+    itself is a resumable boundary — not a failure — so scheduled delivers the summary and an active
     ``/goal`` may judge it (#102213). Provider/API failures never match (cf. #63180)."""
     if not isinstance(result, dict):
         return False
@@ -282,7 +282,7 @@ CONTENT_POLICY_NEXT_STEPS = (
     "new chat with /new (in a Bot Chat, Archive it from its tab menu)."
 )
 
-# ---- one reason → "what happened" gloss, shared by cron, subagent and chat notices ------------
+# ---- one reason → "what happened" gloss, shared by scheduled, subagent and chat notices ------------
 
 # FailoverReason / site code → one clause (no HTTP codes, no "provider" jargon). ``{subject}``
 # is who was asking ("the job", "it"), ``{possessive}`` its possessive ("the job's", "its").

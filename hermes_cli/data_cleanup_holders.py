@@ -89,7 +89,7 @@ def _refuse_backend_writers(home: Path) -> None:
             raise RuntimeError(f"backend PID {pid} still owns {home}; close its desktop/dashboard before retrying")
 
 
-def _refuse_cron_writers(home: Path) -> None:
+def _refuse_scheduled_writers(home: Path) -> None:
     from contextlib import closing
     import sqlite3
     from gateway.status import get_process_start_time, _pid_exists
@@ -99,25 +99,25 @@ def _refuse_cron_writers(home: Path) -> None:
         path.stat()
     except FileNotFoundError:
         return
-    # Importing cron initializes scheduler/config defaults. A deletion probe
+    # Importing scheduled initializes scheduler/config defaults. A deletion probe
     # must only read the existing ledger, not recreate the data being removed.
     try:
         with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.25)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT * FROM executions WHERE status IN ('claimed','running')").fetchall()
     except sqlite3.Error as exc:
-        raise RuntimeError(f"cannot inspect cron owners in {path}: {exc}") from exc
+        raise RuntimeError(f"cannot inspect scheduled owners in {path}: {exc}") from exc
     for raw in rows:
         row = dict(raw)
         pid = row["pid"]
         if row.get("handoff_pending"):
-            raise RuntimeError(f"cron execution {row['id']} is being handed to a worker; wait for it to finish")
+            raise RuntimeError(f"scheduled execution {row['id']} is being handed to a worker; wait for it to finish")
         if not _pid_exists(pid):
             continue
         current = get_process_start_time(pid)
         recorded = row.get("process_started_at")
         if current is None or recorded is None or current == recorded:
-            raise RuntimeError(f"cron execution {row['id']} still owns {home} (PID {pid}); stop it before retrying")
+            raise RuntimeError(f"scheduled execution {row['id']} still owns {home} (PID {pid}); stop it before retrying")
 
 
 def _refuse_multiplexer(home: Path) -> None:
@@ -164,5 +164,5 @@ def quiescent_home(home: Path):
             handle = stack.enter_context(path.open("a+b"))
             if not _lock(handle.fileno(), wait=False):
                 raise RuntimeError(f"an active writer still owns {path}")
-        _refuse_cron_writers(home)
+        _refuse_scheduled_writers(home)
         yield

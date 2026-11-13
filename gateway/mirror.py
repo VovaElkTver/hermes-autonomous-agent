@@ -1,8 +1,8 @@
 """Session mirroring for cross-platform message delivery.
 
-When a message is sent to a platform (send_message or cron delivery), append a
+When a message is sent to a platform (send_message or scheduled delivery), append a
 "delivery-mirror" record to the target session's transcript so the receiving-side
-agent knows what was sent.  Standalone: works from CLI, cron and gateway contexts.
+agent knows what was sent.  Standalone: works from CLI, scheduled and gateway contexts.
 """
 
 import json
@@ -40,9 +40,9 @@ def mirror_to_session(
     """Append a delivery-mirror message to the target session's SQLite transcript.
 
     Pass ``session_id`` when the caller already holds the exact session (e.g. the
-    cron in_channel seed) to skip the origin scan, which refuses to guess on a
+    scheduled in_channel seed) to skip the origin scan, which refuses to guess on a
     populated chat (flat + N thread sessions per chat_id) and would drop the mirror.
-    Text that is NOT the agent speaking (e.g. a cron brief) must pass
+    Text that is NOT the agent speaking (e.g. a scheduled brief) must pass
     ``role="user"``: ``mirror`` metadata is dropped at the SQLite boundary, so an
     assistant-role mirror replays as a real turn and yields assistant→assistant
     pairs that break strict-alternation providers, while a user-role mirror
@@ -68,7 +68,7 @@ def mirror_to_session(
         logger.debug("Mirror: wrote to session %s (from %s)", session_id, source_label)
         return True
     except Exception as e:
-        # WARNING, not debug: a silent mirror drop is the cron continuation-amnesia bug.
+        # WARNING, not debug: a silent mirror drop is the scheduled continuation-amnesia bug.
         logger.warning("Mirror failed for %s:%s thread=%s user=%s session=%s: %s", platform, chat_id, thread_id, user_id, session_id, e)
         return False
 

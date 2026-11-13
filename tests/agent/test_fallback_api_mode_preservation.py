@@ -218,7 +218,7 @@ class TestPlainFallbackUnchanged:
         """Named custom providers resolve api.anthropic.com from config, not
         the fallback entry — post-resolve detection must still catch it
         (#32243, #49247)."""
-        fbs = [{"provider": "cron-anthropic", "model": "claude-opus-4-6", "api_key": "k"}]
+        fbs = [{"provider": "scheduled-anthropic", "model": "claude-opus-4-6", "api_key": "k"}]
         agent = _make_agent(fallback_model=fbs)
         _activate(agent, "https://api.anthropic.com/v1", "claude-opus-4-6")
         assert agent.api_mode == "anthropic_messages"

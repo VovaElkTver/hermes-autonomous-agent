@@ -1,6 +1,6 @@
-"""Tests for the dashboard skill editor endpoints and cron skill attachment.
+"""Tests for the dashboard skill editor endpoints and scheduled skill attachment.
 
-The Skills page can now create/edit custom skills (SKILL.md) and the Cron
+The Skills page can now create/edit custom skills (SKILL.md) and the Scheduled
 page can attach skills to jobs — closing the "SSH + nano is the only way"
 gap for headless/VPS users. These tests pin:
 
@@ -8,8 +8,8 @@ gap for headless/VPS users. These tests pin:
 - POST /api/skills creates a skill through the same validated write path
   as the agent's ``skill_manage`` tool (frontmatter validation enforced).
 - PUT /api/skills/content rewrites an existing SKILL.md (404 on unknown).
-- POST /api/cron/jobs accepts ``skills`` and persists it on the job;
-  PUT /api/cron/jobs/{id} can update the list.
+- POST /api/scheduled/jobs accepts ``skills`` and persists it on the job;
+  PUT /api/scheduled/jobs/{id} can update the list.
 """
 import pytest
 
@@ -190,7 +190,7 @@ class TestEditorEndpointsAuth:
 class TestCronJobSkills:
     def test_create_job_with_skills(self, client, isolated_profiles):
         resp = client.post(
-            "/api/cron/jobs",
+            "/api/scheduled/jobs",
             json={
                 "prompt": "do work",
                 "schedule": "every 1h",
@@ -203,19 +203,19 @@ class TestCronJobSkills:
         assert job["skills"] == ["dashboard-skill"]
 
         # Round-trip: the list endpoint carries the skills field too.
-        listed = client.get("/api/cron/jobs", params={"profile": "default"}).json()
+        listed = client.get("/api/scheduled/jobs", params={"profile": "default"}).json()
         match = [j for j in listed if j["id"] == job["id"]]
         assert match and match[0]["skills"] == ["dashboard-skill"]
 
     def test_update_job_skills(self, client, isolated_profiles):
         job = client.post(
-            "/api/cron/jobs",
+            "/api/scheduled/jobs",
             json={"prompt": "do work", "schedule": "every 1h"},
         ).json()
         assert job.get("skills") in (None, [])
 
         resp = client.put(
-            f"/api/cron/jobs/{job['id']}",
+            f"/api/scheduled/jobs/{job['id']}",
             json={"updates": {"skills": ["dashboard-skill", "worker-skill"]}},
             params={"profile": "default"},
         )
@@ -224,7 +224,7 @@ class TestCronJobSkills:
 
         # Clearing works too.
         resp = client.put(
-            f"/api/cron/jobs/{job['id']}",
+            f"/api/scheduled/jobs/{job['id']}",
             json={"updates": {"skills": []}},
             params={"profile": "default"},
         )

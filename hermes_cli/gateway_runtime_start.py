@@ -12,7 +12,7 @@ from hermes_cli.gateway_runtime_service import RuntimeStartError, remaining
 
 
 # One launch's policy and pins, never the shared daemon's: hook consent would become daemon-lifetime
-# auto-approval for messaging/cron, and a Kanban worker's or terminal's pins would retarget every later
+# auto-approval for messaging/scheduled, and a Kanban worker's or terminal's pins would retarget every later
 # session's board, cwd and source. The behaviour values main's CLI read per process (ephemeral prompt,
 # prefill file, provider request, project plugins) ride each session's ``client_env`` instead
 # (agent.session_client_env); an operator-started gateway keeps its own environment.
@@ -23,7 +23,7 @@ DAEMON_STRIPPED_ENV = (
     "HERMES_KANBAN_CLAIM_LOCK", "HERMES_KANBAN_CLAIM_TTL_SECONDS", "HERMES_KANBAN_GOAL_MODE",
     "HERMES_KANBAN_GOAL_MAX_TURNS", "HERMES_KANBAN_DB", "HERMES_KANBAN_WORKSPACES_ROOT",
     "HERMES_KANBAN_BOARD", "HERMES_TENANT", "HERMES_SESSION_SOURCE_EXPLICIT", "HERMES_TURN_AUTHOR",
-    # Human-presence/one-shot markers: inherited, every messaging/cron turn would read as attended or -q.
+    # Human-presence/one-shot markers: inherited, every messaging/scheduled turn would read as attended or -q.
     "HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_SINGLE_QUERY_SESSION",
     "HERMES_EPHEMERAL_SYSTEM_PROMPT", "HERMES_PREFILL_MESSAGES_FILE", "HERMES_INFERENCE_PROVIDER",
     "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_TUI_CLIENT_ENV",
@@ -46,7 +46,7 @@ def spawn_unmanaged_gateway(profile_home: Path, *, deadline: float, idle_exit: b
 
     No --replace, persistence, login changes, elevation, shell, or inherited stdio.
     The gateway runtime's own exclusive ownership fence arbitrates racing starts.
-    ``idle_exit``: the daemon ends itself once idle (a chat/TUI/cron client's own start; never
+    ``idle_exit``: the daemon ends itself once idle (a chat/TUI/scheduled client's own start; never
     Desktop's ``gateway ensure``, which keeps its attached gateway for the app's lifetime).
     ``force``: a ``gateway restart --force --detach`` replacement keeps the ``--force`` its old owner
     needed (a named profile under a multiplexer), or it exits on the run-side guard.

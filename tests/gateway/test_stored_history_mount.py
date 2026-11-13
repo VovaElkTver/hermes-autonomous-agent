@@ -1,6 +1,6 @@
 """Old stored chats no loader restores open read-only for their owner (#143547 RT-30b, RT-48, RT-49, RT-54).
 
-Pre-update cron runs, subagent transcripts, API rows without a binding, WebUI rows and rows the
+Pre-update scheduled runs, subagent transcripts, API rows without a binding, WebUI rows and rows the
 foreign-session importer wrote answered ``not_found`` on ``session.resume`` and on delete. They
 now mount read-only: the profile's owner reads and deletes them, a submit is refused by name, and
 a caller that is not the owner still finds nothing.
@@ -200,16 +200,16 @@ async def test_session_info_answers_on_a_mount(tmp_path, monkeypatch, sid):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('selected', ['tip', 'root'])
 async def test_a_compressed_cron_history_deletes_as_one_chat(tmp_path, monkeypatch, selected):
-    """Deleting one segment of an old cron run's compression chain removed that segment only: the
+    """Deleting one segment of an old scheduled run's compression chain removed that segment only: the
     other came back as its own chat, or stayed as a detached one."""
     conn, ref = await _connect(tmp_path, monkeypatch, 'cron_job1_20261001_120000')
     db, root = conn.authority.db, ref.session_id
     db._write_sql("UPDATE sessions SET end_reason='compression', ended_at=1 WHERE id=?", (root,))
-    db.create_session('cron-tip', source='cron', model='m-old', parent_session_id=root)
-    target = SessionRef(ref.profile_id, 'cron-tip' if selected == 'tip' else root)
+    db.create_session('scheduled-tip', source='cron', model='m-old', parent_session_id=root)
+    target = SessionRef(ref.profile_id, 'scheduled-tip' if selected == 'tip' else root)
     await conn.resume(target, {})
     await _mutate(conn, target, 'delete', 'delete', {})
-    assert [sid for sid in (root, 'cron-tip') if db.get_session(sid) is not None] == []
+    assert [sid for sid in (root, 'scheduled-tip') if db.get_session(sid) is not None] == []
 
 
 @pytest.mark.asyncio

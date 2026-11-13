@@ -32,7 +32,7 @@ def adoptable_sessions(path) -> list[dict]:
     db = SessionDB(db_path=path, read_only=True)
     try:
         # Local surfaces' labels, or any label a client app chose (not a platform, automation or
-        # foreign writer): validate_legacy_row judges each row; the filter keeps cron/subagent bulk out.
+        # foreign writer): validate_legacy_row judges each row; the filter keeps scheduled/subagent bulk out.
         local = tuple(sorted(LEGACY_LOCAL_SOURCES))
         refused = tuple(sorted(not_client_labels()))
         with db._read_ctx() as conn:

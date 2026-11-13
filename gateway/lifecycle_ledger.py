@@ -185,7 +185,7 @@ def detect_unclean_exit(home: Optional[Path] = None) -> Optional[dict[str, Any]]
 # ``PRAGMA quick_check(1)`` is one monolithic SQLite operation and per-call leases
 # clamp at 900s, so a single entry lease cannot cover a multi-thousand-second healthy
 # check on a huge store — without renewal the watchdog kills the attempt with exit 75
-# and the restart loop never reaches the cron ticker. The progress handler below renews
+# and the restart loop never reaches the scheduled ticker. The progress handler below renews
 # a phase-owned lease for as long as SQLite is making progress; without a deadline it
 # always returns 0 so it never aborts the check, and the ok/absent/first-complaint
 # verdicts stay fail-closed. When an explicit ``deadline_at`` is supplied the

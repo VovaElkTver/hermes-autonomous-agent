@@ -1,6 +1,6 @@
 """Regression for #80646: the ``agent_context`` handed to memory providers follows the platform
-(``cron`` / ``subagent`` skip writes per the ``MemoryProvider.initialize`` contract) instead of a
-hardcoded ``"primary"`` that let cron turns land in stores configured to skip them.
+(``scheduled`` / ``subagent`` skip writes per the ``MemoryProvider.initialize`` contract) instead of a
+hardcoded ``"primary"`` that let scheduled turns land in stores configured to skip them.
 """
 
 from types import SimpleNamespace
@@ -46,7 +46,7 @@ class _Store:
         ({"sess-80646": {"message_count": 12}}, {"sess-80646"}, (True, 12)),  # continuing a stored transcript
         ({"sess-80646": {"message_count": 1}}, (), (False, 1)),   # TUI stored the prompt being submitted
         ({"sess-80646": {"message_count": 0}}, (), (False, 0)),   # row created, nothing said yet
-        ({}, (), (False, 0)),                                     # new session id (subagent, cron run)
+        ({}, (), (False, 0)),                                     # new session id (subagent, scheduled run)
     ],
 )
 def test_initialize_is_told_whether_it_continues_a_stored_session(rows, answered, expected):

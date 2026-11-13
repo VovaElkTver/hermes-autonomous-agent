@@ -170,7 +170,7 @@ def _setup_telegram():
         "TELEGRAM_ALLOWED_USERS", "Allowed user IDs (comma-separated, leave empty for open access)",
         "Telegram allowlist configured - only listed users can use the bot",
         "⚠️  No allowlist set - anyone who finds your bot can use it!", preset=allowed_users)
-    _info(None, "📬 Home Channel: where Hermes delivers cron job results,",
+    _info(None, "📬 Home Channel: where Hermes delivers scheduled job results,",
           "   cross-platform messages, and notifications.",
           "   For Telegram DMs, this is your user ID (same as above).")
     first_user_id = allowed_users.split(",")[0].strip() if allowed_users else ""
@@ -245,7 +245,7 @@ def _warn_missing_home_channels() -> None:
         return
     print()
     print_warning(f"No home channel set for: {', '.join(missing_home)}")
-    _info("   Without a home channel, cron jobs and cross-platform",
+    _info("   Without a home channel, scheduled jobs and cross-platform",
           "   messages can't be delivered to those platforms.",
           "   Set one later with /set-home in your chat, or:",
           *(f"     hermes config set {plat.upper()}_HOME_CHANNEL <channel_id>" for plat in missing_home))
@@ -314,7 +314,7 @@ def setup_gateway(config: dict):
         print_success("Messaging platforms configured!")
         _warn_missing_home_channels()
 
-    # Offer optional persistence even with no messaging platforms: cron can run alone.
+    # Offer optional persistence even with no messaging platforms: scheduled can run alone.
     from hermes_cli.gateway import _is_service_running, supports_systemd_services
     from hermes_cli.gateway_setup_service import ensure_gateway_service
     supports_systemd = supports_systemd_services()

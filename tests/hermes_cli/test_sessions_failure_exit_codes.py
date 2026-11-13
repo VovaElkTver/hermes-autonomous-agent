@@ -1,5 +1,5 @@
 """`hermes sessions` exit status tracks the outcome: a subcommand that fails, refuses, or could not ask for
-its confirmation exits non-zero, so cron/CI wrappers and `hermes sessions repair && ...` chains can tell."""
+its confirmation exits non-zero, so scheduled/CI wrappers and `hermes sessions repair && ...` chains can tell."""
 
 import sqlite3
 import sys
@@ -96,7 +96,7 @@ def test_failed_or_refused_subcommand_exits_1_where_the_valid_form_exits_0(
     (_old_ended_session, ["prune", "--older-than", "30"]),
 ], ids=["optimize-storage", "delete", "archive", "prune"])
 def test_confirmation_nobody_can_answer_exits_1_and_changes_nothing(monkeypatch, tmp_path, capsys, build, argv):
-    """No TTY (cron, a wrapper): EOF at the prompt is not a decline. An explicit "n" still exits 0."""
+    """No TTY (scheduled, a wrapper): EOF at the prompt is not a decline. An explicit "n" still exits 0."""
     db_path = _store(monkeypatch, tmp_path, build)
 
     def snapshot():

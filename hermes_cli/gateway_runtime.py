@@ -428,7 +428,7 @@ def ensure_gateway_runtime(profile_home: str | Path, *, timeout: float | None = 
     A successful service command or Popen is not session readiness. After an
     owner/start request is observed this invocation never launches another.
     ``idle_exit``: an unmanaged daemon this call starts ends itself once idle (client entrypoints:
-    chat, TUI, cron/kanban/ACP clients). A gateway that is ending that way reports ``draining``
+    chat, TUI, scheduled/kanban/ACP clients). A gateway that is ending that way reports ``draining``
     (``idle_exit``); this call waits for it to go and starts the replacement transparently.
     """
     import time

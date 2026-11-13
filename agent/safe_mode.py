@@ -2,7 +2,7 @@
 
 ``/reset-safe`` force-quits the node and arms a one-shot boot flag; the next
 gateway boot consumes it and comes up as the SAFE identity: owner transport
-only — cron, controller pump, MCP discovery and background tool watchers stay
+only — scheduled, controller pump, MCP discovery and background tool watchers stay
 off, replies carry a banner. ``/reset`` force-quits and disarms the flag, so
 the next boot is the ordinary autonomous one. No snapshots, no undo: each
 button *is* the next boot's identity, quit means quit.

@@ -7,7 +7,7 @@ Contract under test:
 - Slack chats: explicit booleans are stamped; omitted keys are absent.
 - Non-Slack chats: never stamped (metadata not polluted cross-platform).
 - Non-boolean values (hostile/hand-edited config) are dropped.
-- The scheduled/cron lane (send_for_platform) stamps too.
+- The scheduled/scheduled lane (send_for_platform) stamps too.
 """
 
 import pytest
@@ -41,7 +41,7 @@ class _CaptureTransport:
         self.sent = None
         self.sent_platform = None
         # Advertise a slack identity so fronts_platform() passes for the
-        # send_for_platform (cron) lane.
+        # send_for_platform (scheduled) lane.
         self._identities = [("slack", None)]
 
     def set_inbound_handler(self, h):

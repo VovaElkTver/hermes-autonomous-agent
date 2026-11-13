@@ -7,7 +7,7 @@ Covers the canonical fix for issues #4146, #27303, #30882, #33057:
      threads, and clears the callbacks on teardown.
   2. Local and remote file-RPC carry the cell's authority in real processes.
   3. tools.approval.check_execute_code_guard — the entry-point guard decision
-     matrix (isolated backends, yolo/off, cron-deny, headless-local,
+     matrix (isolated backends, yolo/off, scheduled-deny, headless-local,
      gateway approve/deny/timeout/missing-notify, smart mode).
   4. tools.code_execution_env._scrub_child_env — broad HERMES_ prefix dropped,
      operational allowlist kept, DSN/WEBHOOK blocked, passthrough precedence.
@@ -144,7 +144,7 @@ def gw_session(monkeypatch):
     key, and isolated gateway queues/callbacks. Yields the session_key."""
     monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
-    monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+    monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
     # Force manual mode regardless of host config and disable any process-level
     # yolo inherited from the developer's live environment.
@@ -207,7 +207,7 @@ def test_guard_headless_local_approved(monkeypatch):
     # Documented #30882 limitation: no approval surface → preserve auto-run.
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
-    monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+    monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     assert A.check_execute_code_guard("import os", "local")["approved"] is True
@@ -215,11 +215,11 @@ def test_guard_headless_local_approved(monkeypatch):
 
 def test_guard_cron_deny_blocks(monkeypatch):
     monkeypatch.setattr(A, "_YOLO_MODE_FROZEN", False)
-    monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
+    monkeypatch.delenv("HERMES_SCHEDULED_SESSION", raising=False)
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
-    tokens = set_session_vars(cron_session="1")
+    monkeypatch.setattr(approval_context, "_get_scheduled_approval_mode", lambda: "deny")
+    tokens = set_session_vars(scheduled_session="1")
     try:
         res = A.check_execute_code_guard("import os", "local")
     finally:
@@ -230,13 +230,13 @@ def test_guard_cron_deny_blocks(monkeypatch):
 
 def test_guard_explicit_non_cron_masks_leaked_env(monkeypatch):
     monkeypatch.setattr(A, "_YOLO_MODE_FROZEN", False)
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
-    tokens = set_session_vars(cron_session="")
+    monkeypatch.setattr(approval_context, "_get_scheduled_approval_mode", lambda: "deny")
+    tokens = set_session_vars(scheduled_session="")
     try:
         res = A.check_execute_code_guard("import os", "local")
     finally:
@@ -248,10 +248,10 @@ def test_guard_explicit_non_cron_masks_leaked_env(monkeypatch):
 def test_guard_legacy_env_cron_still_blocks(monkeypatch):
     reset_session_vars()
     monkeypatch.setattr(A, "_YOLO_MODE_FROZEN", False)
-    monkeypatch.setenv("HERMES_CRON_SESSION", "1")
+    monkeypatch.setenv("HERMES_SCHEDULED_SESSION", "1")
     monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
+    monkeypatch.setattr(approval_context, "_get_scheduled_approval_mode", lambda: "deny")
     res = A.check_execute_code_guard("import os", "local")
     assert res["approved"] is False
     assert res["outcome"] == "blocked"

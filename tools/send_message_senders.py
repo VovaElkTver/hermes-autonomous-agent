@@ -74,7 +74,7 @@ def _adapter_media_method(ext, voice, force_document=False):
 
 
 def _live_adapter(platform, *, lookup_failed_warning=None):
-    """``(runner, adapter)`` for the in-process gateway; ``(None, None)`` standalone (cron);
+    """``(runner, adapter)`` for the in-process gateway; ``(None, None)`` standalone (scheduled);
     ``(runner, None)`` when the lookup fails — logged when a warning is given, never silently
     swallowed (a silent fall-through could recreate a reconnect storm).
 
@@ -192,7 +192,7 @@ async def _resolve_slack_user_target(token, chat_id):
 async def _send_matrix_via_adapter(pconfig, chat_id, message, media_files=None, thread_id=None):
     """Matrix adapter send (native media preserved). Prefer the live gateway adapter's persistent
     olm/megolm session: ephemeral per-send connects re-init E2EE and claim one-time keys, which
-    under bursts exhausts recipient OTKs and silently drops messages — ephemeral is cron-only.
+    under bursts exhausts recipient OTKs and silently drops messages — ephemeral is scheduled-only.
 
     When a live gateway adapter is available (i.e. the tool runs inside a running gateway), the persistent
     connection is reused — one olm/megolm session for all sends. This avoids per-message E2EE re-init storms

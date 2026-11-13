@@ -2,7 +2,7 @@
 
 A turn lost across an owner restart is fenced ``unknown`` and pauses its session's FIFO, because
 only the person who sent it knows whether to resend it. An automation delivery has no such person:
-a cron run (``CRON_PRINCIPAL_ID``), a process completion or heartbeat (``automation:<route>``,
+a scheduled run (``CRON_PRINCIPAL_ID``), a process completion or heartbeat (``automation:<route>``,
 ``local_automation_v1``, a native envelope's ``automation`` block) or a webhook delivery
 (``webhook_delivery``) or a Kanban card attempt (``kanban_card_v1``, set by the dispatcher). Pausing on it stalls every message queued behind it until an operator
 notices (a Bot Chat sat ten hours behind one).

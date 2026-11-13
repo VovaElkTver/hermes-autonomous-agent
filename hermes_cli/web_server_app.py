@@ -29,7 +29,7 @@ def _unlink_pty_markers(app: FastAPI) -> None:
 async def standalone_lifespan(app: "FastAPI"):
     from hermes_cli.web_server import (
         _eager_reconcile_own_session_db, _warm_gateway_module,
-        _start_desktop_cron_ticker, _dashboard_selftest_loop,
+        _start_desktop_ticker_seam, _dashboard_selftest_loop,
         _auto_archive_ticker_loop, _terminate_desktop_managed_gateway,
     )
     from hermes_cli.web_server_chat import PTY_REGISTRY
@@ -99,12 +99,12 @@ async def standalone_lifespan(app: "FastAPI"):
     )
     hosted_room_start_thread.start()
 
-    # Desktop-spawned backends fire cron jobs themselves, since the app has no
+    # Desktop-spawned backends fire scheduled jobs themselves, since the app has no
     # gateway running the scheduler. Server `hermes dashboard` is unaffected —
     # it relies on its own gateway.
     from hermes_cli.process_identity import is_desktop_owned_backend
-    cron_stop: threading.Event | None = None
-    cron_thread: threading.Thread | None = None
+    ticker_stop: threading.Event | None = None
+    ticker_thread: threading.Thread | None = None
     desktop_owned = is_desktop_owned_backend()
     if desktop_owned:
         # Reap an orphaned gateway from an abnormal previous exit (reparented to
@@ -121,14 +121,14 @@ async def standalone_lifespan(app: "FastAPI"):
         except Exception:
             logger.exception("Desktop startup: orphan gateway reap failed")
 
-        cron_stop = threading.Event()
-        cron_thread = threading.Thread(
-            target=_start_desktop_cron_ticker,
-            args=(cron_stop,),
+        ticker_stop = threading.Event()
+        ticker_thread = threading.Thread(
+            target=_start_desktop_ticker_seam,
+            args=(ticker_stop,),
             daemon=True,
-            name="desktop-cron-ticker",
+            name="desktop-scheduled-ticker",
         )
-        cron_thread.start()
+        ticker_thread.start()
 
     # Reap idle/dead keep-alive PTY sessions (30-min TTL). The registry is process-wide and
     # close_all() refuses new spawns, so a re-entered lifespan reopens it first.
@@ -171,8 +171,8 @@ async def standalone_lifespan(app: "FastAPI"):
         hosted_room_start_cancel.set()
         _hosted_groups.stop_hosted_room_service(timeout=5.0)
         hosted_room_start_thread.join(timeout=1.0)
-        if cron_stop is not None:
-            cron_stop.set()
+        if ticker_stop is not None:
+            ticker_stop.set()
         pty_reaper_task.cancel()
         selftest_task.cancel()
         auto_archive_task.cancel()

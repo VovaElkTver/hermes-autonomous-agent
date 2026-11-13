@@ -26,7 +26,7 @@ CLI_FAMILY_SOURCES = frozenset({"cli", ONESHOT_SOURCE})
 # someone else's chat even when a local backend builds its agent.
 DAYBREAK_SOURCES = UI_TRANSPORT_SOURCES | {"cli"}
 
-# A person reads the turn as it runs: not cron, batch, a messaging chat, or a one-shot run.
+# A person reads the turn as it runs: not scheduled, batch, a messaging chat, or a one-shot run.
 ATTENDED_SOURCES = UI_TRANSPORT_SOURCES | {"cli", "acp"}
 
 
@@ -50,7 +50,7 @@ def session_source_for(platform: Optional[str]) -> str:
 def turn_daybreak_surface() -> Optional[bool]:
     """The gateway's verdict on whether the agent running this turn serves the owner's own chat, for code with no
     agent in hand (a delegation backend's ``route_task``): ``True`` or ``False`` when the gateway judged it (a turn
-    it runs, a ``/bg`` task), ``None`` when nothing did (classic CLI, the TUI backend, cron). A gateway-hosted chat's
+    it runs, a ``/bg`` task), ``None`` when nothing did (classic CLI, the TUI backend, scheduled). A gateway-hosted chat's
     platform is the ``local`` transport, and a ``/bg`` task binds no session (it reads as ``cli``), so ``False``
     must refuse whatever the session source says."""
     from agent.subagent_lifecycle import get_active_subagent_parent

@@ -265,7 +265,7 @@ def test_session_history_reads_the_continuation_after_a_rotation(monkeypatch, tm
 
 
 def test_out_of_band_probe_reads_the_continuation_after_a_rotation(monkeypatch, tmp_path):
-    """``_adopt_out_of_band_turns`` keyset-probes for foreign rows (a Telegram reply, a cron delivery)
+    """``_adopt_out_of_band_turns`` keyset-probes for foreign rows (a Telegram reply, a scheduled delivery)
     written since the turn started. On a rotated session the parent holds none of them, so the probe
     returns nothing and the model never sees the out-of-band turn — a regression of the contract this
     function exists for (#42962/#86588)."""

@@ -1,10 +1,10 @@
 """Regression: non-retryable API failures must not leak raw HTML pages.
 
-A scheduled cron job fell back to the Codex (``chatgpt.com``) provider, which
+A scheduled job fell back to the Codex (``chatgpt.com``) provider, which
 returned a Cloudflare *challenge* page (HTTP 403) instead of a normal API
 response.  The conversation loop classified this as a non-retryable client
 error and returned the failure dict — but the ``error`` field carried
-``str(api_error)``, i.e. the entire ~60 KB Cloudflare HTML page.  The cron
+``str(api_error)``, i.e. the entire ~60 KB Cloudflare HTML page.  The scheduled
 scheduler then delivered that verbatim to Discord, where it was split into
 ~31 messages (the reporter's "31 part discord message which is cloudflares
 challenge page").

@@ -3,7 +3,7 @@
 ``hermes gateway run`` enters through hermes_cli.gateway, not gateway.run.main().
 After graceful teardown it must use the same hard-exit backstop as gateway.run.main()
 so Python finalization does not wait on non-daemon worker threads (for example
-in-flight cron ThreadPoolExecutor jobs) and delay service-managed restarts.
+in-flight scheduled ThreadPoolExecutor jobs) and delay service-managed restarts.
 """
 
 from __future__ import annotations

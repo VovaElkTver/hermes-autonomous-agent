@@ -160,7 +160,7 @@ class TestCodexBuildKwargs:
 
     def test_cache_key_is_content_addressed_not_session_id(self, transport):
         """prompt_cache_key is content-addressed from the static prefix
-        (instructions + tools), not the session_id. This keeps recurring cron
+        (instructions + tools), not the session_id. This keeps recurring scheduled
         jobs — whose session_id carries a per-fire timestamp — on a stable warm
         cache key. The key is a 'pck_' hash and must NOT equal session_id."""
         messages = [{"role": "user", "content": "Hi"}]
@@ -173,7 +173,7 @@ class TestCodexBuildKwargs:
         assert pck != "cron_job42_20260624_143000"
 
     def test_cache_key_stable_across_session_ids(self, transport):
-        """Same static prefix + different session_id (e.g. two cron fires of the
+        """Same static prefix + different session_id (e.g. two scheduled fires of the
         same job) must yield the same prompt_cache_key — the whole point of the
         fix: repeated fires reuse the warm prefix instead of going cold."""
         messages = [{"role": "user", "content": "Hi"}]
@@ -190,7 +190,7 @@ class TestCodexBuildKwargs:
     def test_cache_key_differs_across_unrelated_sessions(self, transport):
         """#78941: two unrelated sessions (different users/conversations)
         sharing the same static prefix must NOT collapse onto the same
-        prompt_cache_key — session_id scopes the hash unless it is a cron
+        prompt_cache_key — session_id scopes the hash unless it is a scheduled
         per-fire id, which is normalized to its stable job prefix instead."""
         messages = [{"role": "user", "content": "Hi"}]
         kw1 = transport.build_kwargs(
@@ -385,7 +385,7 @@ class TestCodexBuildKwargs:
         )
         assert "prompt_cache_key" not in kw
         # Body-level prompt_cache_key is content-addressed (pck_ hash), not the
-        # raw session_id, so recurring cron fires stay on a stable warm key.
+        # raw session_id, so recurring scheduled fires stay on a stable warm key.
         eb_pck = kw.get("extra_body", {}).get("prompt_cache_key", "")
         assert eb_pck.startswith("pck_")
         assert eb_pck != "conv-xai-1"
@@ -895,8 +895,8 @@ class TestCodexBuildKwargs:
         assert len(headers["x-client-request-id"]) <= 64
 
     def test_codex_cache_scope_headers_normalize_cron_session_id(self, transport):
-        """x-client-request-id shares a cache scope across cron re-fires of the
-        same job (cron per-fire timestamp stripped, same as prompt_cache_key),
+        """x-client-request-id shares a cache scope across scheduled re-fires of the
+        same job (scheduled per-fire timestamp stripped, same as prompt_cache_key),
         while session_id stays the raw per-fire physical id (#57012)."""
         first_run = transport.build_kwargs(
             model="gpt-5.4",

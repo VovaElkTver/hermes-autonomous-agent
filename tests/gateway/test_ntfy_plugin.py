@@ -8,7 +8,7 @@ Most tests target the adapter class directly. The plugin-shape tests
 (``register()``, ``_env_enablement``, ``_standalone_send``, registry
 presence) replace the core-file grep tests from the original PR — the
 ntfy adapter no longer modifies ``gateway/config.py``, ``gateway/run.py``,
-``cron/scheduler.py``, ``toolsets.py``, etc.  Everything routes through
+``scheduled/scheduler.py``, ``toolsets.py``, etc.  Everything routes through
 the ``platform_registry``.
 """
 
@@ -376,7 +376,7 @@ class TestEnvEnablement:
 
 
 # ---------------------------------------------------------------------------
-# 10. _standalone_send() — out-of-process cron delivery
+# 10. _standalone_send() — out-of-process scheduled delivery
 # ---------------------------------------------------------------------------
 
 
@@ -392,7 +392,7 @@ class TestStandaloneSend:
 
 
     def test_emits_echo_tag_header(self, monkeypatch):
-        """Out-of-process cron / send_message deliveries also carry the echo
+        """Out-of-process scheduled / send_message deliveries also carry the echo
         tag, so a gateway subscribed to the same topic skips them too."""
         monkeypatch.setenv("NTFY_TOPIC", "hermes-in")
         pconfig = MagicMock()

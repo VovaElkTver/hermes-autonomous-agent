@@ -6,7 +6,7 @@ opaque token. A token buys ONE side request shared by every plugin that receives
 redemption pops the lease whether it succeeds or not. It expires after ``LEASE_TTL_SECONDS`` or
 as soon as the parent agent starts its next turn. The captured ``contextvars`` context binds the
 owning profile and secret scope on whatever thread redeems the token, and only a plugin context
-of that same profile can redeem it. Unattended turns (cron jobs, delegated subagents) get no
+of that same profile can redeem it. Unattended turns (scheduled jobs, delegated subagents) get no
 token: nobody is there to read an answer bought with the main model's tokens.
 """
 
@@ -65,14 +65,14 @@ def _purge_locked(now: float, agent: Any = None) -> None:
 
 
 def is_unattended_turn(agent: Any) -> bool:
-    """A turn nobody is waiting on: a persistence-detached fork, a cron run, a delegated child."""
+    """A turn nobody is waiting on: a persistence-detached fork, a scheduled run, a delegated child."""
     return (getattr(agent, "_persist_disabled", False) or getattr(agent, "platform", None) == "cron"
             or getattr(agent, "_delegate_depth", 0) > 0)
 
 
 def issue_side_question_token(agent: Any, messages: list[dict[str, Any]], turn_id: str) -> Optional[str]:
     """Capture the finished turn and lease it under a fresh token; None (nothing captured) for an
-    unattended turn (fork, cron run, subagent) or when no consented plugin is loaded. Turn thread
+    unattended turn (fork, scheduled run, subagent) or when no consented plugin is loaded. Turn thread
     only: the captured context and profile are the turn's."""
     from hermes_constants import hermes_home_key
 
