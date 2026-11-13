@@ -288,3 +288,16 @@ def test_owner_answer_empty_and_unsure(tmp_path, monkeypatch):
     out = rm.handle_command(run.chat_key, "какая-то ерунда без темы?", "", agent=None)
     # пустой ответ без proposal → просьба имени, прогон не погиб
     assert run.stage == "TOPIC_CONFIRM" or "Назови тему" in str(out)
+
+
+def test_registry_append_from_empty_creates_topics_header(tmp_path, monkeypatch):
+    """Первая тема создаёт валидный topics:-заголовок (иначе гейт fail-open молчит)."""
+    reg = tmp_path / "memories" / "topics.yaml"
+    monkeypatch.setattr(rm, "_registry_path", lambda: reg)
+    rm._registry_append("Новая Тема 1")
+    rm._registry_append("Новая Тема 1")   # идемпотентность
+    txt = reg.read_text(encoding="utf-8")
+    assert txt.startswith("topics:")
+    from tools.memory_topic_gate import load_registry
+    rules = [r_.name for r_ in load_registry(reg)]
+    assert rules == ["Новая Тема 1"]

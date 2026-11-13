@@ -409,10 +409,16 @@ def _registry_append(topic_name: str) -> Path:
            f"      - 're:^{re.escape(topic_name)}\\b'\n"
            f"    store: '{store}'\n"
            f"    pointer: 'Канон темы {topic_name} — {{store}}'\n")
-    txt = reg_path.read_text(encoding="utf-8") if reg_path.exists() else "topics:\n"
+    if not reg_path.exists():
+        reg_path.parent.mkdir(parents=True, exist_ok=True)
+        reg_path.write_text("topics:\n", encoding="utf-8")
+    txt = reg_path.read_text(encoding="utf-8")
     if not txt.endswith("\n"):
         txt += "\n"
-    if "\n" + f"  - name: {topic_name}" not in txt and not txt.startswith(f"topics:\n  - name: {topic_name}"):
+    # идемпотентность по нормализованному имени (учёт кавычек/пробелов в заголовке)
+    already = ("\n" + f"  - name: {topic_name}\n") in ("\n" + txt)
+    already = already or txt.lstrip().startswith(f"- name: {topic_name}")
+    if not already and f"  - name: {topic_name}" not in txt:
         with reg_path.open("a", encoding="utf-8") as fh:
             fh.write(row)
     # прогрев кэша гейта новым mtime не нужен: gate перечитывает по mtime сам.
