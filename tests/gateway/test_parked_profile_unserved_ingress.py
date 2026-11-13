@@ -61,7 +61,7 @@ async def test_a_coalesced_webhook_profile_routes_send_to_a_parked_profile_is_re
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['coalesce', 'deliver_only', 'cron_job'])
+@pytest.mark.parametrize('mode', ['coalesce', 'deliver_only'])
 async def test_a_webhook_prefix_with_no_serving_authority_is_retried(tmp_path, monkeypatch, mode):
     """``/p/beta/`` while beta is on disk but not served and not parked (its own gateway still runs,
     or the watcher has not picked it up): the live registry, not the parked map, decides."""

@@ -2,8 +2,7 @@
 Svix, Linear, generic), renders payloads into agent prompts, and routes responses back (github_comment
 or any gateway platform). Routes live under platforms.webhook.extra.routes: events (header filter),
 secret (REQUIRED; "INSECURE_NO_AUTH" skips validation, loopback only), prompt template, skills,
-deliver/deliver_extra, deliver_only (rendered prompt IS the message), cron_job (fire an existing cron
-job per event; the rendered prompt is transient per-run context; exclusive with deliver_only), mirror_to_session
+deliver/deliver_extra, deliver_only (rendered prompt IS the message), mirror_to_session
 (opt-in: a delivered response is also written into the target chat's transcript so follow-ups there have
 context). Per-route rate limiting,
 idempotency cache, body-size caps checked before reading. Generic HMAC V2 binds a timestamp for
@@ -253,6 +252,10 @@ class WebhookAdapter(BasePlatformAdapter):
 
     # --- Lifecycle ---
 
+    # Route mode removed with the scheduled-jobs excision: subscriptions still declaring the legacy
+    # key must fail loudly at load time instead of 503-ing at delivery time.
+    _LEGACY_TRIGGER_KEY = "cron_job"
+
     def _validate_route(self, name: str, route: dict) -> None:
         """Startup validation: secret required; INSECURE_NO_AUTH only on loopback (crash early on a public footgun)."""
         secret = route.get("secret", self._global_secret)
@@ -264,15 +267,14 @@ class WebhookAdapter(BasePlatformAdapter):
             raise ValueError(f"[webhook] Route '{name}' uses INSECURE_NO_AUTH secret but is bound to non-loopback "
                              f"host '{self._host}'. INSECURE_NO_AUTH is for local testing only. "
                              f"Refusing to start to prevent accidental exposure.")
+        if route.get(self._LEGACY_TRIGGER_KEY):
+            raise ValueError(f"[webhook] Route '{name}' declares '{self._LEGACY_TRIGGER_KEY}': an excised feature; "
+                             f"use event-driven routes (deliver/deliver_only/coalesce) instead.")
         if route.get("deliver_only"):
             deliver = route.get("deliver", "log")
             if not deliver or deliver == "log":
                 raise ValueError(f"[webhook] Route '{name}' has deliver_only=true but deliver is '{deliver}'. Direct "
                                  f"delivery requires a real target (telegram, discord, slack, github_comment, etc.).")
-            if route.get("cron_job"):
-                raise ValueError(f"[webhook] Route '{name}' sets both deliver_only and cron_job. They are mutually "
-                                 f"exclusive: deliver_only pushes the rendered template as a message, cron_job fires "
-                                 f"an existing cron job (which handles its own delivery).")
         validate_coalesce_config(name, route)
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -318,7 +320,7 @@ class WebhookAdapter(BasePlatformAdapter):
                    metadata: Optional[dict[str, Any]] = None) -> SendResult:
         """Deliver the agent's response to the destination stored for its opaque ``chat_id`` —
         read with ``.get()``, never popped."""
-        # Autonomous lane (no human reader): the loose marker matcher shared with cron (marker on its own
+        # Autonomous lane (no human reader): the loose marker matcher (marker on its own
         # first/last line), because models add a sentence explaining why they stayed quiet, which the
         # interactive exact-match rule would deliver.
         if is_autonomous_silence_response(content):
@@ -417,6 +419,11 @@ class WebhookAdapter(BasePlatformAdapter):
     def _dynamic_route_allowed(self, name: str, route: dict) -> bool:
         """Reject dynamic routes whose effective secret is missing, blank, or not a string
         (_is_usable_secret); INSECURE_NO_AUTH is loopback-only."""
+        if route.get(self._LEGACY_TRIGGER_KEY):
+            logger.warning("[webhook] Dynamic route '%s' skipped: '%s' is an excised feature; "
+                           "use event-driven routes (deliver/deliver_only/coalesce) instead.",
+                           name, self._LEGACY_TRIGGER_KEY)
+            return False
         effective_secret = route.get("secret", self._global_secret)
         if not _is_usable_secret(effective_secret):
             logger.warning("[webhook] Dynamic route '%s' skipped: 'secret' is missing, blank, or not a string. "
@@ -593,20 +600,6 @@ class WebhookAdapter(BasePlatformAdapter):
                        delivery["deliver"], result.error)
         return web.json_response(failed, status=502)
 
-    def _handle_cron_trigger(self, prompt: str, route_config: dict, route_name: str, event_type: str,
-                             delivery_id: str, profile: Optional[str] = None) -> web.Response:
-        """Legacy ``cron_job`` route mode: fail closed — there is no scheduler left to fire into.
-
-        The cron worker/execute path was excised with the cron package; historical
-        subscriptions carrying ``cron_job`` get an explicit 503 instead of a silent drop."""
-        del prompt, profile  # kept for call-site stability across route handlers
-        logger.warning("[webhook] cron-trigger route=%s refused: cron package excised", route_name)
-        return web.json_response(
-            {"error": "cron is disabled (excised)"},
-            status=503,
-            headers={"Retry-After": "3600"},
-        )
-
     def _resolve_route(self, request: web.Request) -> tuple[str, Optional[dict], Any, Optional[web.Response]]:
         """Route + profile lookup for a POST; ``(route_name, route_config, profile, error_response)``."""
         self._reload_dynamic_routes()  # hot-reload dynamic subscriptions (stat-gated, lock-free)
@@ -699,22 +692,18 @@ class WebhookAdapter(BasePlatformAdapter):
                 payload = transformed_payload or payload
             prompt = (render_mcp_event_prompt(self, route_config, payload, event_type, route_name)
                       or self._render_prompt(route_config.get("prompt", ""), payload, event_type, route_name))
-            # cron_job routes: the job's own skills apply; the rendered prompt is only per-run context.
-            if (skills := route_config.get("skills", [])) and not route_config.get("cron_job"):
+            if skills := route_config.get("skills", []):
                 prompt = self._apply_skills(prompt, skills)
         now = time.time()  # idempotency: skip duplicate deliveries (webhook retries)
         delivery_identity = _WebhookDeliveryIdentity.from_parts(profile, route_name, delivery_id)
         coalesce = route_config.get("coalesce")
-        # deliver_only, cron_job and coalesced events act before (or without) a durable admission, so
+        # deliver_only and coalesced events act before (or without) a durable admission, so
         # the ledger cannot dedupe a provider retry or a replayed signed delivery; the route-scoped
         # in-memory guard is their only replay defence (main dedupes every route here).
-        non_durable = bool(route_config.get("deliver_only") or route_config.get("cron_job")
-                           or isinstance(coalesce, dict))
+        non_durable = bool(route_config.get("deliver_only") or isinstance(coalesce, dict))
         if non_durable and not self._record_delivery_id(delivery_identity, now):
             logger.info("[webhook] Skipping duplicate delivery %s on route %s", delivery_id, route_name)
             return web.json_response({"status": "duplicate", "delivery_id": delivery_id}, status=200)
-        if route_config.get("cron_job"):
-            return self._handle_cron_trigger(prompt, route_config, route_name, event_type, delivery_id, profile)
         if route_config.get("deliver_only"):
             return await self._handle_deliver_only(prompt, payload, route_config, route_name, event_type, delivery_id,
                                                    profile)
@@ -1034,10 +1023,10 @@ class WebhookAdapter(BasePlatformAdapter):
         """Best-effort mirror of a delivered response into the TARGET chat's session transcript, so a
         follow-up there ("so he's out?") sees what the webhook run just told the user. Without this the
         text only lives in the ephemeral opaque per-delivery webhook session and the target chat's
-        agent has no idea it sent anything. Same path and USER-role convention as cron briefs
-        (``cron.scheduler_delivery._maybe_mirror_cron_delivery``, #2221): the text is not the target
+        agent has no idea it sent anything. Same path and USER-role convention as mirrored automation
+        briefs (#2221): the text is not the target
         session's agent speaking, and a labelled user turn merges safely on strict-alternation providers.
-        Opt-in per route (``mirror_to_session: true``), default off like cron's ``mirror_delivery``: the text
+        Opt-in per route (``mirror_to_session: true``), default off: the text
         lands with user authority in a chat the route author may not own, and on ``deliver_only`` routes it is
         the raw rendered payload. Called inside the routed profile's scope so the lookup hits THAT profile's
         state.db — a DM chat_id is the user's id on every bot, so an unscoped mirror lands in another

@@ -1,11 +1,9 @@
-"""Root-flag gating of cron (Вл 09.11): «все наши придумки под отдельным корневым
-конфиг флагом». autonomous_mode=true (fork default) ⇒ NO cron anywhere:
-no toolset registration, no ticker in bootstrap, REST/webhook surfaces fail closed.
-autonomous_mode=false → donor upstream parity — except cron itself, which was excised."""
+"""Root-flag gating of scheduled jobs (Вл 09.11): «все наши придумки под отдельным корневым
+конфиг флагом». autonomous_mode=true (fork default) ⇒ donor surfaces run on their own
+posture. autonomous_mode=false → donor upstream parity — except the scheduled-jobs package,
+which was excised everywhere."""
 
 from __future__ import annotations
-
-import importlib
 
 import pytest
 
@@ -19,45 +17,34 @@ def fork_cfg(monkeypatch):
 
 def test_cron_gate_mirrors_root_flag(fork_cfg) -> None:
     from tools.fork_mode import cron_runtime_enabled
-    assert cron_runtime_enabled() is False  # fork default: autonomous ON → cron OFF
+    assert cron_runtime_enabled() is False  # fork default: autonomous ON → jobs OFF
     fork_cfg["autonomous_mode"] = False
     assert cron_runtime_enabled() is True   # donor parity posture
 
 
-def test_api_server_cron_surface_fails_closed_under_flag(fork_cfg, monkeypatch) -> None:
-    """_CRON_AVAILABLE must follow the root flag so /api/jobs/* and /api/cron/fire
-    fail closed in the autonomous posture."""
+def test_api_server_jobs_surface_is_gone() -> None:
+    """The REST surface died with the package: not even fail-closed stubs remain."""
     import gateway.platforms.api_server as api
 
-    # Cron was excised: the REST surface stays fail-closed in every posture.
-    fork_cfg.clear()  # autonomous default
-    mod = importlib.reload(api)
-    assert mod._CRON_AVAILABLE is False
+    for gone in ("_CRON_AVAILABLE", "_cron_list", "_cron_get", "_cron_create", "_cron_update",
+                 "_cron_remove", "_cron_pause", "_cron_resume", "_cron_trigger",
+                 "_scan_cron_prompt", "_notify_cron_provider_jobs_changed",
+                 "_CronSchedulerRegistrationError"):
+        assert not hasattr(api, gone), f"api_server still carries {gone!r}"
+    for method in ("_cron_request_guard", "_cron_error_response", "_validate_cron_prompt",
+                   "_handle_list_jobs", "_handle_create_job", "_handle_get_job",
+                   "_handle_update_job", "_handle_delete_job", "_handle_pause_job",
+                   "_handle_resume_job", "_handle_run_job", "_cron_origin_from_request"):
+        assert not hasattr(api.APIServerAdapter, method), f"APIServerAdapter still has {method!r}"
 
-    fork_cfg["autonomous_mode"] = False  # donor-parity posture, still no cron package
-    mod = importlib.reload(api)
-    assert mod._CRON_AVAILABLE is False
 
-
-def test_webhook_cron_trigger_refuses_under_flag(fork_cfg, monkeypatch) -> None:
-    """The webhook cron_job route must never reach cron machinery while frozen."""
-    from aiohttp import web as aio_web
-
-    fork_cfg.clear()
+def test_webhook_legacy_trigger_route_fails_validation(monkeypatch, tmp_path) -> None:
+    """A subscription still declaring the legacy trigger key fails loudly at load time."""
+    from gateway.config import PlatformConfig
     from gateway.platforms.webhook import WebhookAdapter
-    method = WebhookAdapter._handle_cron_trigger
-    # Minimal self stub: only the guard path runs before any platform attribute use.
-    calls = {}
 
-    class _Resp:
-        def __init__(self, status):
-            self.status = status
-
-    monkeypatch.setattr(
-        "gateway.platforms.webhook.web.json_response",
-        lambda payload, status=200, headers=None: calls.setdefault("resp", _Resp(status)))
-    self_stub = object()
-    result = method(self_stub, prompt="p", route_config={"cron_job": "job-x"},
-                    route_name="r", event_type="ping", delivery_id="d1")
-    assert calls["resp"].status == 503 and result is not None
-    assert isinstance(result, aio_web.Response | dict) or result is calls["resp"]
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    adapter = WebhookAdapter(PlatformConfig(enabled=True, extra={"host": "127.0.0.1", "port": 0}))
+    stale_route = {"secret": "s", "prompt": "x", "cron_job": "job1"}
+    with pytest.raises(ValueError, match="excised feature"):
+        adapter._validate_route("legacy", stale_route)
