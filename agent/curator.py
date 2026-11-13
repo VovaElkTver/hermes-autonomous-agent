@@ -1,6 +1,6 @@
 """Curator — background skill maintenance orchestrator.
 
-Inactivity-triggered (no cron daemon): when the agent is idle and the last run is older than ``interval_hours``,
+Inactivity-triggered (no scheduler daemon): when the agent is idle and the last run is older than ``interval_hours``,
 ``maybe_run_curator()`` auto-transitions lifecycle states from activity timestamps, optionally forks an AIAgent that
 may pin/archive/consolidate/patch skills via skill_manage, and persists scheduler state in ``.curator_state``.
 Invariants: only curator-managed skills are touched; never delete, only archive (recoverable); pinned skills bypass
@@ -181,10 +181,10 @@ def should_run_now(now: Optional[datetime] = None) -> bool:
 
 # --- Automatic state transitions (pure function, no LLM) ---
 
-def _cron_referenced_skills() -> set[str]:
-    """Skill names referenced by any cron job (incl. paused/disabled).
+def _scheduled_job_skills() -> set[str]:
+    """Skill names referenced by any scheduled job (incl. paused/disabled).
 
-    Cron was excised from this branch (no ``cron`` package), so no job can
+    The scheduler was excised from this branch (no scheduler package), so no job can
     reference a skill; always empty.
     """
     return set()
@@ -214,9 +214,9 @@ def apply_automatic_transitions(now: Optional[datetime] = None) -> dict[str, int
     now = now or datetime.now(UTC)
     stale_cutoff = now - timedelta(days=get_stale_after_days())
     archive_cutoff = now - timedelta(days=get_archive_after_days())
-    # Cron-referenced skills are in use by definition (usage only bumps when a
+    # Scheduled-job-referenced skills are in use by definition (usage only bumps when a
     # job fires, so paused/rare jobs would age them out). Treat as pinned.
-    protected = _cron_referenced_skills()
+    protected = _scheduled_job_skills()
     counts = {"marked_stale": 0, "archived": 0, "reactivated": 0, "checked": 0, "seeded": 0}
 
     def _set(name: str, state: str, key: str) -> None:
@@ -327,10 +327,10 @@ CURATOR_REVIEW_PROMPT = (
     "back load-bearing UX (slash-command entry points referenced in docs and "
     "tips) and are filtered out of the candidate list below — never resurrect "
     "one as an archive or absorb target.\n"
-    "3c. DO NOT archive or prune any skill marked `cron=yes` in the candidate "
-    "list. A cron job depends on it and will fail to load it on its next "
+    "3c. DO NOT archive or prune any skill marked `scheduled=yes` in the candidate "
+    "list. A scheduled job depends on it and will fail to load it on its next "
     "run. You MAY still consolidate it into an umbrella — but only because "
-    "the curator rewrites cron job skill references to follow consolidations; "
+    "the curator rewrites scheduled-job skill references to follow consolidations; "
     "never simply prune it.\n"
     "4. DO NOT use usage counters as a reason to skip consolidation. The "
     "counters are new and often mostly zero. Judge overlap on CONTENT, "
@@ -430,7 +430,7 @@ CURATOR_REVIEW_PROMPT = (
     "into (the umbrella must already exist). Deletes without a verified "
     "forwarding target are refused — pruning with no absorption target is "
     "the deterministic staleness pass's job, never this one's. "
-    "`absorbed_into` drives cron-job skill-reference migration — "
+    "`absorbed_into` drives scheduled-job skill-reference migration — "
     "guessing from your YAML summary after the fact is fragile.\n"
     "  You have NO terminal access in this pass — every filesystem mutation "
     "goes through skill_manage above so it is ledgered and rollback-able "
@@ -673,13 +673,13 @@ def _build_rename_summary(*, before_names: set[str], after_report: list[dict[str
     return "\n".join(lines)
 
 
-def _rewrite_cron_refs(consolidated: list[dict[str, Any]], pruned: list[dict[str, Any]]) -> dict[str, Any]:
-    """Point cron jobs at the umbrella when the curator consolidated a skill they list.
+def _rewrite_scheduled_refs(consolidated: list[dict[str, Any]], pruned: list[dict[str, Any]]) -> dict[str, Any]:
+    """Point scheduled jobs at the umbrella when the curator consolidated a skill they list.
 
-    Cron was excised from this branch (no ``cron`` package), so there are no job
-    stores left to rewrite; report an empty, successful sweep.
+    The scheduler was excised from this branch (no scheduler package), so there are no job
+    references to rewrite; report an empty, successful sweep.
     """
-    del consolidated, pruned  # kept for signature stability; nothing to rewrite without cron
+    del consolidated, pruned  # kept for signature stability; nothing to rewrite without the scheduler
     return {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
 
 
@@ -728,8 +728,8 @@ def _write_run_report(
     states = ((n, (before_by_name.get(n) or {}).get("state"), (after_by_name.get(n) or {}).get("state")) for n in sorted(diff.after_names & before_names))
     transitions = [{"name": n, "from": b, "to": a} for n, b, a in states if b and a and b != a]
     tc_counts: dict[str, int] = dict(Counter(tc.get("name", "unknown") for tc in tool_calls))
-    cron_rewrites = _rewrite_cron_refs(diff.consolidated, diff.pruned)
-    jobs_updated = int(cron_rewrites.get("jobs_updated", 0))
+    scheduled_rewrites = _rewrite_scheduled_refs(diff.consolidated, diff.pruned)
+    jobs_updated = int(scheduled_rewrites.get("jobs_updated", 0))
     payload = {
         "started_at": started_at.isoformat(), "duration_seconds": round(elapsed_seconds, 2),
         "model": llm_meta.get("model", ""), "provider": llm_meta.get("provider", ""), "auto_transitions": auto_counts,
@@ -737,17 +737,17 @@ def _write_run_report(
             "before": len(before_names), "after": len(diff.after_names), "delta": len(diff.after_names) - len(before_names),
             "archived_this_run": len(diff.removed), "added_this_run": len(diff.added),
             "consolidated_this_run": len(diff.consolidated), "pruned_this_run": len(diff.pruned),
-            "state_transitions": len(transitions), "cron_jobs_rewritten": jobs_updated, "tool_calls_total": sum(tc_counts.values()),
+            "state_transitions": len(transitions), "scheduled_jobs_rewritten": jobs_updated, "tool_calls_total": sum(tc_counts.values()),
         },
         "tool_call_counts": tc_counts, "archived": diff.removed, "consolidated": diff.consolidated, "pruned": diff.pruned,
-        "pruned_names": [p["name"] for p in diff.pruned], "added": diff.added, "state_transitions": transitions, "cron_rewrites": cron_rewrites,
+        "pruned_names": [p["name"] for p in diff.pruned], "added": diff.added, "state_transitions": transitions, "scheduled_rewrites": scheduled_rewrites,
         "llm_final": llm_meta.get("final", ""), "llm_summary": llm_meta.get("summary", ""),
         "llm_error": llm_meta.get("error"), "tool_calls": llm_meta.get("tool_calls", []),
     }
     _write_file(run_dir / "run.json", "run.json", payload)
     _write_file(run_dir / "REPORT.md", "REPORT.md", lambda: _render_report_markdown(payload))
     if jobs_updated > 0:  # only when a job was touched, to keep no-op run dirs uncluttered
-        _write_file(run_dir / "cron_rewrites.json", "cron_rewrites.json", cron_rewrites)
+        _write_file(run_dir / "scheduled_rewrites.json", "scheduled_rewrites.json", scheduled_rewrites)
     return run_dir
 
 
@@ -770,7 +770,7 @@ def _pruned_lines(entry: Any) -> list[str]:
     return [f"- `{entry.get('name', '?')}`" + _reason_suffix(entry) if isinstance(entry, dict) else f"- `{entry}`"]
 
 
-def _cron_rewrite_lines(entry: dict[str, Any]) -> list[str]:
+def _scheduled_rewrite_lines(entry: dict[str, Any]) -> list[str]:
     job_name = entry.get("job_name") or entry.get("job_id") or "?"
     head = f"- `{job_name}`: `{', '.join(entry.get('before') or [])}` → `{', '.join(entry.get('after') or []) or '(none)'}`"
     return ([head] + [f"    - `{old}` → `{new}` (consolidated)" for old, new in (entry.get("mapped") or {}).items()]
@@ -791,9 +791,9 @@ _REPORT_SECTIONS = (
     ("added", "New skills this run", "_Usually these are new class-level umbrellas created via `skill_manage action=create`._\n",
      lambda n: [f"- `{n}`"], None, ""),
     ("state_transitions", "State transitions", None, lambda t: [f"- `{t.get('name')}`: {t.get('from')} → {t.get('to')}"], None, ""),
-    ("cron_rewrites", "Cron job skill references rewritten",
-     "_Cron jobs that referenced a consolidated or pruned skill were updated in-place so they keep loading the right instructions "
-     "on their next run. See `cron_rewrites.json` for the full record._\n", _cron_rewrite_lines, 25, "see `cron_rewrites.json`"),
+    ("scheduled_rewrites", "Scheduled-job skill references rewritten",
+     "_Scheduled jobs that referenced a consolidated or pruned skill were updated in-place so they keep loading the right instructions "
+     "on their next run. See `scheduled_rewrites.json` for the full record._\n", _scheduled_rewrite_lines, 25, "see `scheduled_rewrites.json`"),
 )
 
 
@@ -818,7 +818,7 @@ def _render_report_markdown(p: dict[str, Any]) -> str:
     ]
     for key, title, intro, render, show, hint in _REPORT_SECTIONS:
         items = p.get(key) or []
-        if key == "cron_rewrites":  # lets users audit that the auto-rewrite did the right thing
+        if key == "scheduled_rewrites":  # lets users audit that the auto-rewrite did the right thing
             items = items.get("rewrites") or []
         if not items:
             continue
@@ -861,10 +861,10 @@ def _render_candidate_list() -> str:
     ]
     if not rows:
         return "No agent-created skills to review."
-    cron_referenced = _cron_referenced_skills()
+    scheduled_refs = _scheduled_job_skills()
     return "\n".join([f"Agent-created skills ({len(rows)}):\n"] + [
         f"- {r['name']}  provenance={r.get('provenance', 'agent')}  state={r['state']}  "
-        f"pinned={'yes' if r.get('pinned') else 'no'}  cron={'yes' if r['name'] in cron_referenced else 'no'}  "
+        f"pinned={'yes' if r.get('pinned') else 'no'}  scheduled={'yes' if r['name'] in scheduled_refs else 'no'}  "
         f"activity={r.get('activity_count', 0)}  use={r.get('use_count', 0)}  view={r.get('view_count', 0)}  "
         f"patches={r.get('patch_count', 0)}  last_activity={r.get('last_activity_at') or 'never'}"
         for r in rows

@@ -1,6 +1,6 @@
 """Approval context: who is asking, from where, under which policy.
 
-Session identity and observability contextvars, the interactive/gateway/cron/
+Session identity and observability contextvars, the interactive/gateway/scheduled-run/
 unattended predicates, and the ``approvals.*`` config readers used by every
 gate in :mod:`tools.approval`.
 """
@@ -86,7 +86,7 @@ _LOCAL_INTERACTIVE_SOURCES = frozenset({"cli", "tui", "gui", "acp"})
 
 def is_local_interactive_session() -> bool:
     """True for a classic CLI, TUI, Desktop or ACP session's turn, read from the launch policy the gateway
-    froze at ``session.create`` (never a per-turn client flag). Kanban, cron and forwarded routes keep
+    froze at ``session.create`` (never a per-turn client flag). Kanban, scheduled and forwarded routes keep
     their own sources and stay out."""
     try:
         from gateway.session_policy import active_policy
@@ -149,7 +149,7 @@ def get_current_session_key(default: str = "default") -> str:
 
 
 def _session_env(name: str) -> str:
-    """Session-scoped env value, contextvar-first so one cron/-q job cannot taint
+    """Session-scoped env value, contextvar-first so one scheduled/-q job cannot taint
     unrelated gateway/API/TUI turns in the same process; process env is the
     fallback for CLI tests and older entrypoints."""
     try:
@@ -165,12 +165,12 @@ def _get_session_platform() -> str:
 
 
 def _is_cron_approval_context() -> bool:
-    """True when the current approval decision is running inside cron."""
+    """True when the current approval decision is running under the legacy scheduled-session marker."""
     return is_truthy_value(_session_env("HERMES_CRON_SESSION"))
 
 
 # Programmatic/unattended platforms: no human can answer a prompt and the adapter has no ``send_exec_approval`` /
-# ``/approve`` surface. Governed by ``approvals.unattended_mode`` (default deny), mirroring ``cron_mode`` — never an
+# ``/approve`` surface. Governed by ``approvals.unattended_mode`` (default deny), mirroring the scheduled-mode gate — never an
 # interactive round-trip that blocks for the full timeout with nobody to answer.
 _UNATTENDED_APPROVAL_PLATFORMS = frozenset({"webhook", "msgraph_webhook", "api_server"})
 
@@ -214,7 +214,7 @@ def _is_single_query_approval_context() -> bool:
 
 
 def _no_user_can_answer() -> bool:
-    """True in single-query (-q), cron and unattended-platform sessions. `hermes chat -q` still registers the
+    """True in single-query (-q), scheduled-run and unattended-platform sessions. `hermes chat -q` still registers the
     CLI panel callback, so a prompt that only checks for a callback would wait the full timeout for nobody."""
     return (_is_single_query_approval_context() or _is_cron_approval_context()
             or _is_unattended_platform_approval_context())
@@ -224,8 +224,8 @@ def _is_gateway_approval_context() -> bool:
     """True inside a gateway/API session that can answer an approval.
 
     Legacy integrations set HERMES_GATEWAY_SESSION; concurrent paths bind
-    HERMES_SESSION_PLATFORM via contextvars. Cron is NEVER a gateway approval
-    context even when it originated from a platform (cron binds the platform for
+    HERMES_SESSION_PLATFORM via contextvars. Scheduled runs are NEVER a gateway approval
+    context even when they originated from a platform (they bind the platform for
     delivery routing): falling through would submit a pending approval with no
     listener and block the job indefinitely; unattended platforms likewise.
 
@@ -233,7 +233,7 @@ def _is_gateway_approval_context() -> bool:
     reason: those adapters have no ``send_exec_approval`` and no way to receive ``/approve`` replies.
     Submitting a pending approval there blocks the session for the full approval timeout (60-300 s) with no
     human who can resolve it (#37284, 87509). Their dangerous-command handling is governed by
-    ``approvals.unattended_mode`` config (default deny), mirroring cron.
+    ``approvals.unattended_mode`` config (default deny), mirroring the scheduled gate.
     """
     if _is_cron_approval_context() or _is_unattended_platform_approval_context():
         return False
@@ -355,7 +355,7 @@ def _binary_approval_mode(key: str) -> str:
 
 
 def _get_cron_approval_mode() -> str:
-    """Read the cron approval mode from config. Returns 'deny' or 'approve'."""
+    """Read the scheduled-run approval mode from config. Returns 'deny' or 'approve'."""
     return _binary_approval_mode("cron_mode")
 
 

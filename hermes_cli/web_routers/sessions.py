@@ -35,8 +35,8 @@ list_router = APIRouter()
 search_router = APIRouter()
 manage_router = APIRouter()
 
-_cron_default_profile = late("_cron_default_profile", "hermes_cli.web_server_cron")
-_cron_profile_home = late("_cron_profile_home", "hermes_cli.web_server_cron")
+_SCHEDULED_PROFILE_HOME = late("_cron_profile_home", "hermes_cli.web_server_cron")
+_SCHEDULED_DEFAULT_PROFILE = late("_cron_default_profile", "hermes_cli.web_server_cron")
 _open_session_db_for_profile = late("_open_session_db_for_profile", "hermes_cli.web_server_sessions")
 _session_db_path_for_profile = late("_session_db_path_for_profile", "hermes_cli.web_server_sessions")
 
@@ -88,7 +88,7 @@ def _prune_sessions(body: SessionPrune):
     effective_older_than = body.older_than_days
     if has_window or (attr_filters_set and "older_than_days" not in body.model_fields_set):
         effective_older_than = None
-    profile_home = _cron_profile_home(body.profile)[1] if body.profile else get_hermes_home()
+    profile_home = _SCHEDULED_PROFILE_HOME(body.profile)[1] if body.profile else get_hermes_home()
     db = _open_session_db_for_profile(body.profile, read_only=body.dry_run)
     try:
         filters = {
@@ -152,7 +152,7 @@ def _with_db(profile: Optional[str], fn: Callable, *, read_only: bool):
 def _serving_profile(profile: Optional[str]) -> str:
     """The profile name rows are stamped with: the requested one, else the
     serving process's own — so default-profile rows never circulate unowned."""
-    return _cron_profile_home(profile)[0] if profile else _cron_default_profile()
+    return _SCHEDULED_PROFILE_HOME(profile)[0] if profile else _SCHEDULED_DEFAULT_PROFILE()
 
 
 def _resolve_session_id(db, session_id: str) -> Optional[str]:
@@ -196,15 +196,15 @@ def get_sessions(
             status_code=400, detail="archived must be one of: exclude, only, include")
     if order not in ("created", "recent"):
         raise HTTPException(status_code=400, detail="order must be one of: created, recent")
-    profile_name = _cron_profile_home(profile)[0] if profile else None
+    profile_name = _SCHEDULED_PROFILE_HOME(profile)[0] if profile else None
     try:
         db = _open_session_db_for_profile(profile, read_only=True)
         try:
             min_message_count = max(0, min_messages)
             archived_only = archived == "only"
             include_archived = archived == "include"
-            # Source scoping: the desktop splits recents (exclude=cron) from
-            # the cron-jobs section (source=cron) into two independent lists.
+            # Source scoping: the desktop splits recents (exclude_sources=cron) from
+            # the scheduled-jobs section (source=cron) into two independent lists.
             source_list = _csv(sources)
             include_subagents, exclude_list = subagent_listing_scope(
                 Path(db.db_path).parent, source=source or None, sources=source_list or None,
@@ -225,7 +225,7 @@ def get_sessions(
                 **scope)
             total = db.session_count(exclude_children=True, **scope)
             now = time.time()
-            row_profile = profile_name or _cron_default_profile()
+            row_profile = profile_name or _SCHEDULED_DEFAULT_PROFILE()
             for s in sessions:
                 s["is_active"] = _is_active(s, now)
                 s["profile"] = row_profile
@@ -568,8 +568,8 @@ async def get_session_detail(session_id: str, profile: Optional[str] = None):
         # clients resolve them to whichever gateway happened to be active.
         session["profile"] = _serving_profile(profile)
         session["is_default_profile"] = session["profile"] == "default"
-        # Historical cron-source rows keep their stored identity; the
-        # scheduler-owned liveness stamp was excised with the cron package.
+        # Historical scheduled-source rows keep their stored identity; the
+        # scheduler-owned liveness stamp was excised with the scheduler package.
         if session.get("source") == "cron":
             session.update(db.cron_run_identity(sid) or {})
         return session
@@ -632,9 +632,9 @@ def _with_tool_call_labels(message: dict) -> dict:
 
 def _history_profile_home(profile):
     if profile:
-        return _cron_profile_home(profile)[1]
+        return _SCHEDULED_PROFILE_HOME(profile)[1]
     # An omitted profile reads this process's DB (including custom HERMES_HOME),
-    # not necessarily the registered default profile used by cron routes.
+    # not necessarily the registered default profile used by scheduled-session routes.
     from hermes_cli.config import get_hermes_home
 
     return get_hermes_home()
@@ -883,7 +883,7 @@ def _owner_db_for(request: Request, profile: Optional[str]):
         return None
     from gateway.session_authorities import authority_for_home
     from hermes_state import _default_db_path
-    home = Path(_cron_profile_home(profile)[1]) if profile else Path(_default_db_path()).parent
+    home = Path(_SCHEDULED_PROFILE_HOME(profile)[1]) if profile else Path(_default_db_path()).parent
     authority = authority_for_home(runner, home)
     return getattr(authority, "db", None)
 

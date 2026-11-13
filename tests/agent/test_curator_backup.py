@@ -252,7 +252,7 @@ def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(backup_env):
     assert "parse_warning" not in mf["cron_jobs"]
 
     # Backup copy is decoded text — no BOM survives into the snapshot.
-    backup_bytes = (snap / cb.CRON_JOBS_FILENAME).read_bytes()
+    backup_bytes = (snap / cb.LEGACY_JOB_STORE_COPY).read_bytes()
     assert not backup_bytes.startswith(b"\xef\xbb\xbf")
     assert json.loads(backup_bytes) == json.loads(payload)
 
@@ -267,13 +267,13 @@ def test_rollback_reports_excised_cron_links(backup_env):
     ok, msg, _ = cb.rollback(backup_id=snap.name)
     assert ok, msg
     # No live job store exists any more; the restorer says so instead of failing.
-    report = cb._restore_cron_skill_links(backup_env["home"])
+    report = cb._restore_scheduled_job_links(backup_env["home"])
     assert report == {
         "attempted": False,
         "restored": [],
         "skipped_missing": [],
         "unchanged": 0,
-        "error": "cron excised",
+        "error": "job store excised",
     }
 
 
@@ -281,13 +281,13 @@ def test_restore_cron_skill_links_standalone():
     """The link-restorer reports the structured 'excised' shape unconditionally."""
     from agent import curator_backup
 
-    report = curator_backup._restore_cron_skill_links(Path("/nonexistent-snapshot"))
+    report = curator_backup._restore_scheduled_job_links(Path("/nonexistent-snapshot"))
     assert report == {
         "attempted": False,
         "restored": [],
         "skipped_missing": [],
         "unchanged": 0,
-        "error": "cron excised",
+        "error": "job store excised",
     }
 
 
