@@ -299,7 +299,8 @@ class GatewayGoalCommandsMixin:
             _first, _, _rest = args.partition(" ")
             _first = _first.strip().lower()
             if _first in {"go", "иди", "stop", "стоп", "postpone", "отложи",
-                          "approve", "reject", "status", "resume"}:
+                          "approve", "reject", "status", "resume",
+                          "topic-new", "topic-use"}:
                 reply = _managed_refine_cmd(_ckey, _first, _rest.strip())
                 if reply is not None:
                     return reply
