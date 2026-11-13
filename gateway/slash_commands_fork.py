@@ -47,11 +47,14 @@ class GatewayForkCommandsMixin:
         return await self._fork_impl(event, bound=False)
 
     async def _handle_forkb_command(self, event) -> str:
-        """`/forkb [name]` - lazy branch BOUND to its own chat thread.
+        """`/forkb [name]` - BLOCKING fork bound to its own chat thread.
 
-        Heavy form for branch-own-thread flows and long side-conversations:
-        the branch gets a dedicated Matrix/Telegram thread (Вл 30.10: doing
-        thread-binding for every casual /fork is overkill).
+        Variant A (Вл 13.11, ratified): the `b` is for *blocking*. While a
+        bound branch is open it holds the dialogue focus exclusively — every
+        other branch of its tree stands paused (not one step of execution),
+        and no new `/forkb` may open until `/return`/`/leave` releases the
+        current one. The dedicated thread exists as a CONSEQUENCE of that
+        total blockage, not as a parallel-work convenience.
         """
         return await self._fork_impl(event, bound=True)
 
@@ -59,14 +62,60 @@ class GatewayForkCommandsMixin:
         """The ACTIVE /forkb branch the console on ``session_id`` stands in, if any.
 
         Sticky-lock predicate (Вл 31.10): while a bound branch is open, the thread's route is
-        its own — resume/new/in-place-fork must not repoint it. Only /return and /leave close it;
-        /forkb from inside spawns a NEW thread route and never touches this one."""
+        its own — resume/new/in-place-fork must not repoint it. Under variant A
+        (Вл 13.11) closing via /return or /leave is ALSO what releases tree-wide
+        execution; no new /forkb opens while this row exists."""
         if not self._session_db or not session_id:  # type: ignore[attr-defined]
             return None
         try:
             return await self._session_db.get_bound_active_branch(str(session_id))  # type: ignore[attr-defined]
         except Exception:
             return None
+
+    async def _forkb_focus(self) -> dict | None:
+        """The bound branch that currently HOLDS the dialogue focus, if any.
+
+        Variant A (Вл 13.11): an active thread-bound branch holds the focus while
+        its own thread console is still parked on the bound child. /return closes
+        it; /leave steps out and un-parks the focus, releasing every pause."""
+        if not self._session_db:  # type: ignore[attr-defined]
+            return None
+        try:
+            holder = await self._session_db.get_any_active_bound_branch()  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        if not holder:
+            return None
+        child_id = holder["child_session_id"]
+        try:
+            key = await self._session_db.get_session_key(child_id)  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        if key and self.session_store.peek_session_id(key) == child_id:
+            return holder
+        return None
+
+    async def _forkb_pause_reply(self, session_id: str) -> str | None:
+        """Turn-admission gate for variant A.
+
+        Returns the refusal text when ``session_id`` belongs to the fork tree of
+        an open bound branch but is NOT that bound child itself — other branches
+        must not advance one step of execution. Unrelated sessions get None
+        (the block is tree-scoped) and so does the bound child itself."""
+        focus = await self._forkb_focus()
+        if focus is None:
+            return None
+        child_id = focus["child_session_id"]
+        if session_id == child_id:
+            return None
+        try:
+            same_tree = await self._session_db.same_fork_tree(str(session_id), child_id)  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        if not same_tree:
+            return None
+        return t("gateway.branch.bound_paused",
+                 name=branch_display_name(focus))
 
     def _bound_locked_reply(self, action: str, branch: dict) -> str:
         return t("gateway.branch.bound_locked", action=action,
@@ -84,6 +133,21 @@ class GatewayForkCommandsMixin:
         raw_title = (event.get_command_args() or "").strip()
         fork_title = raw_title or await self._session_db.get_next_title_in_lineage(
             await self._session_db.get_session_title(parent_session_id) or "fork")
+
+        # Variant A (Вл 13.11): while a bound branch holds the focus, the tree is
+        # closed for new forks — /forkb anywhere, /fork from any tree session but
+        # the bound child's own thread (which the sticky-lock path below handles).
+        focus = await self._forkb_focus()
+        if focus is not None:
+            inside_child = parent_session_id == focus["child_session_id"]
+            if bound:
+                return t("gateway.branch.second_forkb_refused",
+                         name=branch_display_name(focus))
+            if not inside_child:
+                same_tree = await self._session_db.same_fork_tree(
+                    parent_session_id, focus["child_session_id"])
+                if same_tree:
+                    return self._bound_locked_reply("/fork", focus)
 
         session_key = self._session_key_for_source(source)
         new_session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
@@ -175,6 +239,13 @@ class GatewayForkCommandsMixin:
             return t("gateway.join.ambiguous", branches=listing)
         else:
             target = branches[0]
+
+        # Variant A (Вл 13.11): with a bound branch holding the focus, merging any
+        # OTHER branch back is work of a paused branch. Joining the bound branch
+        # itself is allowed — that is one of its closers.
+        focus = await self._forkb_focus()
+        if focus is not None and target["branch_id"] != focus["branch_id"]:
+            return t("gateway.join.bound_paused", name=branch_display_name(focus))
 
         strategy = ("append" if "--append" in flags
                     else "discard" if "--discard" in flags else "note")

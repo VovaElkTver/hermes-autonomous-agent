@@ -137,7 +137,9 @@ gateway:
     branched_thread_one: "⑂ Branched to **{title}** in a new thread ({count} message copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     branched_thread_many: "⑂ Branched to **{title}** in a new thread ({count} messages copied)\nThread: {thread}\nOriginal: `{parent}` — this chat stays on it\nBranch: `{new}`\nUse `/branch --here` to branch in this chat instead."
     thread_fallback: "No thread could be created here, so the branch replaced this chat's session."
-    bound_locked: "⛔ {action} cannot switch a bound (/forkb) branch thread off its stream. While branch **{name}** is open this thread stays on it; close it with `/return` (into the parent) or `/leave` (step out, branch stays open). For a side branch: `/forkb` from this thread."
+    bound_locked: "⛔ {action} cannot run while the bound (/forkb) branch **{name}** holds the dialogue focus. Variant A: an open bound branch pauses every other branch of its tree — not one step of execution anywhere else. Work in the bound thread, or release with `/return` (close) / `/leave` (step out)."
+    bound_paused: "⏸ Branch **{name}** (/forkb) is open and holds the dialogue focus — this branch of the tree stands paused: not one step without permission. The dialogue lives in the bound thread; release via `/return` or `/leave` in that thread."
+    second_forkb_refused: "⛔ /forkb refused: **{name}** already holds the focus as an open bound branch. Only one bound branch at a time; close it with `/return` or `/leave` first, then fork."
   fork:
     created: "⑂ Forked to **{title}** (lazy branch `{branch}`, shares history with `{parent}`)\nFork session: `{new}`\nStep back with `/return` (or `/leave` to keep it open); from the parent: `/join {title}`; full copy: `/branch`."
     no_conversation: "Nothing to fork — the parent has no messages yet."
@@ -146,6 +148,7 @@ gateway:
     none_active: "No active forked branches on this session. Start one with /fork."
     not_found: "No such active branch: {arg}. Run /join to list branches by name."
     ambiguous: "Several active branches, name one: {branches}"
+    bound_paused: "⏸ Join deferred: the bound branch **{name}** holds the dialogue focus and keeps every other branch paused. Close it first (`/return` in its thread) or step out (`/leave`)."
     append_unavailable: "--append is only possible while the parent tail after the branch point is uncompressed; use the default work-note join for {branch}."
     joined: "✓ Joined branch {branch} ({strategy})."
     db_unavailable: "Session database not available."
