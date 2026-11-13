@@ -10,6 +10,8 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, "/home/qwen/hermes-agent")
 
 from agent.planning_multistage import (
@@ -171,6 +173,62 @@ def test_review_loop_exhausts_max_revisions_then_needs_revision(tmpdir):
     assert result["status"] == "needs_revision" and result["stage"] == "review"
     review_calls = [c for c in calls if c["role"] == "reviewer"]
     assert len(review_calls) == 3
-    # reviewer of v2 got previous findings attached
-    assert any(isinstance(ri, dict) for ri in calls[6]["user_prompt"]["inputs"].get(
-        "previous_plan", {}).get("tasks", []) or []) or True
+
+
+# ---------------- HermesSubagentRunner wiring (offline, delegate_task faked) ----------------
+
+from agent.planning_multistage import HermesSubagentRunner
+
+import tools.delegate_tool as dt
+import hermes_cli.model_switch as ms
+
+
+class Parent:
+    provider = "openai"
+
+
+def test_runner_passes_stage_prompt_and_resolved_alias(monkeypatch):
+    captured = {}
+
+    def fake_delegate(**kwargs):
+        captured.update(kwargs)
+        return json.dumps({"results": [{"status": "completed", "summary": '{"ok": true}'}]},
+                          ensure_ascii=False)
+
+    monkeypatch.setattr(dt, "delegate_task", fake_delegate)
+    monkeypatch.setattr(ms, "resolve_alias", lambda a, current_provider="":
+                        ("openai", "gpt-resolved", a) if a == "heavy" else None)
+
+    parent = Parent()
+    runner = HermesSubagentRunner(parent_agent=parent, aliases={"planner": "heavy"})
+    out = runner(role="planner", model_alias="heavy", system_prompt="SYS", user_prompt="USER-JSON")
+    assert out == '{"ok": true}'
+    assert "SYS" in captured["context"] and "USER-JSON" in captured["context"]
+    assert captured["credentials_cfg"] == {"model": "gpt-resolved"}
+    assert captured["parent_agent"] is parent
+
+
+def test_runner_unknown_alias_passes_through_and_errors_surface(monkeypatch):
+    def fake_delegate(**kw):
+        return json.dumps({"error": "no route"}, ensure_ascii=False)
+
+    monkeypatch.setattr(dt, "delegate_task", fake_delegate)
+    monkeypatch.setattr(ms, "resolve_alias", lambda a, current_provider="": None)
+    runner = HermesSubagentRunner(parent_agent=Parent(), aliases={})
+    with pytest.raises(RuntimeError, match="no route"):
+        runner(role="reviewer", model_alias="review-alias",
+               system_prompt="S", user_prompt="U")
+
+
+def test_runner_child_failure_and_empty_summary(monkeypatch):
+    cases = [
+        json.dumps({"results": [{"status": "failed", "error": "rate_limit wall"}]}),
+        json.dumps({"results": [{"status": "completed", "summary": "   "}]}),
+        json.dumps({"results": []}),
+    ]
+    monkeypatch.setattr(ms, "resolve_alias", lambda a, current_provider="": None)
+    for i, payload in enumerate(cases):
+        monkeypatch.setattr(dt, "delegate_task", lambda **kw: payload)
+        runner = HermesSubagentRunner(parent_agent=Parent(), aliases={})
+        with pytest.raises(RuntimeError):
+            runner(role="contract", model_alias="x", system_prompt="S", user_prompt="U")

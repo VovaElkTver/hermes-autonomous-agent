@@ -218,23 +218,61 @@ class StageRunner(Protocol):
 
 
 class HermesSubagentRunner:
-    """Runs one stage as a headless one-shot child via tools/delegate_tool aggregation.
+    """Runs one planning stage as a synchronous one-shot child via delegate_task.
 
-    NOTE (honest boundary): construction parameters mirror tools/delegate_tool.py::_spawn_child
-    (AIAgent at line ~299) and final-text extraction mirrors _execute_and_aggregate /
-    delegate_tool_child_run.await_child. Wired in the second commit of this branch; raise until then.
+    Reuses the existing subagent runtime end to end (credential resolution, session db,
+    transcripts): the child is built by tools/delegate_tool._build_child_agent exactly like any
+    delegated task; nothing here spawns a second agent loop. The stage alias is resolved against
+    model_switch's direct-alias registry (falling back to the raw string); provider, base_url and
+    api_key are inherited from the parent via credentials_cfg={"model": ...}.
     """
 
     def __init__(self, *, parent_agent: Any, aliases: dict[str, str], timeout: float = 600.0):
         self.parent_agent = parent_agent
-        self.aliases = aliases
+        self.aliases = dict(aliases)
         self.timeout = timeout
 
+    def _credentials_for(self, model_alias: str) -> dict:
+        from hermes_cli.model_switch import resolve_alias
+
+        resolved_model = model_alias
+        try:
+            resolved = resolve_alias(model_alias, current_provider=getattr(self.parent_agent, "provider", None) or "")
+            if resolved:
+                resolved_model = resolved[1]
+        except Exception:
+            pass  # unknown alias: pass it through verbatim, credential resolver will refuse loudly if broken
+        # Only "model" is pinned: provider/base_url/api_key inherit from the parent agent.
+        return {"model": resolved_model}
+
     def __call__(self, *, role: str, model_alias: str, system_prompt: str, user_prompt: str) -> str:
-        raise NotImplementedError(
-            "HermesSubagentRunner: wire into delegate_tool._execute_and_aggregate "
-            "(tools/delegate_tool.py; child AIAgent at delegate_tool.py:~299, final text via "
-            "delegate_tool_child_run.await_child). See PATCH-MAP.")
+        import json as _json
+
+        from tools.delegate_tool import delegate_task
+
+        goal = f"Planning stage '{role}': return exactly one JSON object per output_schema, no prose around it."
+        context = f"{system_prompt}\n\n=== REQUEST ===\n{user_prompt}"
+        raw = delegate_task(
+            goal=goal,
+            context=context,
+            parent_agent=self.parent_agent,
+            credentials_cfg=self._credentials_for(model_alias),
+        )
+        parsed = _json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"delegate_task вернул не объект: {raw[:200]}")
+        if parsed.get("error"):
+            raise RuntimeError(f"delegate_task: {parsed['error']}")
+        results = parsed.get("results") or []
+        if not results:
+            raise RuntimeError("delegate_task: пустой results")
+        entry = results[0]
+        if entry.get("error"):
+            raise RuntimeError(f"Этап {role}: {entry['error']}")
+        summary = entry.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise RuntimeError(f"Этап {role}: субагент не вернул текст")
+        return summary
 
 
 def format_validation_error(exc: ValidationError) -> list[dict]:
