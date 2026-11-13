@@ -48,15 +48,17 @@ DEFAULT_GATEWAY_POST_INTERRUPT_GRACE_TIMEOUT = 5.0
 # ``restart_drain_timeout``, the force-interrupt budget once ``stop()`` runs (short under TimeoutStopSec).
 DEFAULT_GATEWAY_RESTART_AFTER_TURN_TIMEOUT = float(DEFAULT_CONFIG["agent"]["restart_after_turn_timeout"])
 
-# Floor under the ``stop()`` drain for cron jobs and api_server (/v1) runs. ``restart_drain_timeout``
-# defaults to 0 because interrupting a *chat* turn is cheap and recoverable (user told, session
-# resume_pending); an interrupted *cron* run is a permanent failure in jobs.json and an interrupted
-# /v1 run fails its waiting caller — a 0s drain silently destroys work.
+# Floor under the ``stop()`` drain for api_server (/v1) runs (and, before the fork excised its
+# scheduler, for scheduled background jobs — that part is history; the event-driven tasks/queue
+# processor needs no stop-drain floor). ``restart_drain_timeout`` defaults to 0 because
+# interrupting a *chat* turn is cheap and recoverable (user told, session resume_pending); an
+# interrupted /v1 run fails its waiting caller — a 0s drain silently destroys work. The constant
+# name keeps the pre-fork config-key spelling until the loader-side rename lands.
 DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT = float(DEFAULT_CONFIG["agent"]["cron_drain_timeout"])
 # Watchdog leash held back for post-drain work (interrupt agents, kill subprocesses, mark jobs,
-# disconnect adapters). Waiting for cron past that trades a job killed *and recorded* for one
-# SIGKILLed mid-write and wedged at ``last_status=running`` forever.
-CRON_DRAIN_CLEANUP_RESERVE_S = 10.0
+# disconnect adapters). Waiting past it trades a cleanly-interrupted unit for one SIGKILLed
+# mid-write and wedged forever.
+BACKGROUND_DRAIN_CLEANUP_RESERVE_S = 10.0
 # systemd TimeoutStopSec headroom after the stop-path drain budget, and the floor when that
 # budget is still the default immediate (0s) chat drain. Keep in lockstep with generate_systemd_unit().
 # See #94759.
@@ -308,10 +310,12 @@ def parse_restart_after_turn_timeout(raw: object) -> float:
 
 
 def parse_cron_drain_timeout(raw: object) -> float:
-    """Parse the cron/api_server drain floor (``0`` = opt out; both interrupted on the chat budget).
+    """Parse the background-work drain floor (``0`` = opt out; interrupted on the chat budget).
 
-    ``0`` is a deliberate opt-out — cron and api_server (/v1) work is then interrupted on the same budget as chat work, the
-    pre-#82161 behaviour — and must not fall through to the default, unlike empty/missing input.
+    Covers api_server (/v1) runs today; the name keeps the pre-fork scheduler spelling until the
+    loader-side rename lands. ``0`` is a deliberate opt-out — api_server (/v1) work is then
+    interrupted on the same budget as chat work, the pre-#82161 behaviour — and must not fall
+    through to the default, unlike empty/missing input.
     """
     return _parse_timeout_keeping_zero(raw, DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)
 
@@ -321,51 +325,51 @@ def parse_signal_interrupt_grace_timeout(raw: object) -> float:
     return _parse_timeout_keeping_zero(raw, DEFAULT_GATEWAY_SIGNAL_INTERRUPT_GRACE_TIMEOUT, finite=True)
 
 
-def resolve_cron_drain_budget(
-    drain_timeout: float, cron_drain_timeout: float, *, watchdog_delay: float, elapsed: float = 0.0,
-    cleanup_reserve_s: float = CRON_DRAIN_CLEANUP_RESERVE_S,
+def resolve_background_drain_budget(
+    drain_timeout: float, background_drain_timeout: float, *, watchdog_delay: float, elapsed: float = 0.0,
+    cleanup_reserve_s: float = BACKGROUND_DRAIN_CLEANUP_RESERVE_S,
 ) -> float:
-    """Seconds the stop drain may wait on in-flight cron and api_server (/v1) work.
+    """Seconds the stop drain may wait on in-flight api_server (/v1) work.
 
     Clamped to what this process can honour: the watchdog hard-exits at ``watchdog_delay``,
-    so waiting past that leash minus ``cleanup_reserve_s`` swaps a cleanly-interrupted job
+    so waiting past that leash minus ``cleanup_reserve_s`` swaps a cleanly-interrupted run
     for a SIGKILL that leaves it wedged.  Never less than ``drain_timeout`` (only extends).
     """
     drain = _seconds(drain_timeout)
-    floor = _seconds(cron_drain_timeout)
+    floor = _seconds(background_drain_timeout)
     if floor <= 0.0:
         return drain
-    ceiling = _seconds(watchdog_delay) - _seconds(elapsed) - _seconds(cleanup_reserve_s, CRON_DRAIN_CLEANUP_RESERVE_S)
+    ceiling = _seconds(watchdog_delay) - _seconds(elapsed) - _seconds(cleanup_reserve_s, BACKGROUND_DRAIN_CLEANUP_RESERVE_S)
     return max(drain, min(floor, ceiling))
 
 
 def resolve_systemd_timeout_stop_sec(
-    drain_timeout: float, cron_drain_timeout: float = DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, *,
-    cleanup_reserve_s: float = CRON_DRAIN_CLEANUP_RESERVE_S, headroom_s: float = SYSTEMD_STOP_HEADROOM_S,
+    drain_timeout: float, background_drain_timeout: float = DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, *,
+    cleanup_reserve_s: float = BACKGROUND_DRAIN_CLEANUP_RESERVE_S, headroom_s: float = SYSTEMD_STOP_HEADROOM_S,
     floor_s: float = SYSTEMD_TIMEOUT_STOP_SEC_FLOOR,
 ) -> int:
     """Seconds systemd ``TimeoutStopSec`` must cover: the stop path may first wait
-    ``cron_drain_timeout`` + ``cleanup_reserve_s`` for cron and api_server work, so sizing from the chat drain
-    alone lets systemd SIGKILL an in-budget drain.  A zero cron timeout is an opt-out.
+    ``background_drain_timeout`` + ``cleanup_reserve_s`` for api_server (/v1) work, so sizing from the chat drain
+    alone lets systemd SIGKILL an in-budget drain.  A zero background timeout is an opt-out.
 
     ``restart_drain_timeout`` is only the chat-turn interrupt budget (default 0). See #94759.
     """
     drain = _seconds(drain_timeout)
-    cron = _seconds(cron_drain_timeout)
-    cron_budget = (cron + _seconds(cleanup_reserve_s)) if cron > 0.0 else 0.0
-    return int(max(_seconds(floor_s), max(drain, cron_budget) + _seconds(headroom_s)))
+    background = _seconds(background_drain_timeout)
+    background_budget = (background + _seconds(cleanup_reserve_s)) if background > 0.0 else 0.0
+    return int(max(_seconds(floor_s), max(drain, background_budget) + _seconds(headroom_s)))
 
 
 def resolve_restart_exit_wait_budget(
-    drain_timeout: float, after_turn_timeout: float, cron_drain_timeout: float, *, headroom: float = 15.0,
+    drain_timeout: float, after_turn_timeout: float, background_drain_timeout: float, *, headroom: float = 15.0,
 ) -> float:
     """Seconds a CLI waits for the gateway PID to exit after SIGUSR1: the in-band after-turn
     deferral, then the longest supervisor stop envelope — the one systemd's ``TimeoutStopSec`` is
-    sized from (cron drain + cleanup reserve, supervisor headroom, floor; #94759) — then
+    sized from (background drain + cleanup reserve, supervisor headroom, floor; #94759) — then
     observer ``headroom``.
 
     A non-finite drain means "wait indefinitely", not a crash in the integer envelope.
     """
-    if not all(math.isfinite(_seconds(value)) for value in (drain_timeout, cron_drain_timeout)):
+    if not all(math.isfinite(_seconds(value)) for value in (drain_timeout, background_drain_timeout)):
         return math.inf
-    return _seconds(after_turn_timeout) + resolve_systemd_timeout_stop_sec(drain_timeout, cron_drain_timeout) + _seconds(headroom)
+    return _seconds(after_turn_timeout) + resolve_systemd_timeout_stop_sec(drain_timeout, background_drain_timeout) + _seconds(headroom)

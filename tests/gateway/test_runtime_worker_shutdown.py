@@ -19,7 +19,7 @@ async def test_managed_claims_participate_in_zero_and_nonzero_drain(tmp_path):
     authority = SimpleNamespace(sessions={'s': live}, _managed_workers={
         's': SimpleNamespace(control=lambda frame: stopped.append(frame), closed=threading.Event())})
     runner = SimpleNamespace(session_authority=authority, _running_agents={},
-        _running_agent_count=lambda: 0, _active_cron_job_count=lambda: 0, _active_api_run_count=lambda: 0,
+        _running_agent_count=lambda: 0, _active_api_run_count=lambda: 0,
         _active_deferred_agent_worker_count=lambda: 0, _snapshot_running_agents=dict,
         _update_runtime_status=lambda *a: None)
     runner._drain_work_counts = GatewayShutdownMixin._drain_work_counts.__get__(runner)
@@ -66,15 +66,12 @@ async def test_profile_timeout_keeps_authority_until_physical_worker_exits(tmp_p
     registry.add(beta, authority, name='beta')
     runner = SimpleNamespace(session_authorities=registry, session_runtime_descriptor={},
                              session_ticket_store=SimpleNamespace(profile_ids=registry.profile_ids()))
-    unbound = []
-    monkeypatch.setattr('gateway.session_cron.unbind_owner', lambda a: unbound.append(a))
     authority.runner = runner
     monkeypatch.setattr(run_runtime, 'TURN_SETTLE_SECONDS', 0)
     try:
         assert await run_runtime.unserve_profile_runtime(runner, beta) is False
         assert stopped.is_set() and not done.is_set()
         assert registry.for_home(beta) is authority
-        assert not unbound
         # Kept for its live writer, but it refuses all work: no longer published or ticketed.
         assert str(beta) not in runner.session_ticket_store.profile_ids
         release.set()
@@ -82,7 +79,6 @@ async def test_profile_timeout_keeps_authority_until_physical_worker_exits(tmp_p
         await run_runtime.unserve_profile_runtime(runner, beta)
         assert registry.for_home(beta) is None
         assert str(beta) not in runner.session_ticket_store.profile_ids
-        assert unbound == [authority]
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)

@@ -25,7 +25,7 @@ from agent.i18n import t
 from gateway.config import Platform
 from gateway.restart import (
     DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT, GATEWAY_SERVICE_RESTART_EXIT_CODE,
-    effective_stop_drain_timeout, effective_stop_watchdog_delay, resolve_cron_drain_budget
+    effective_stop_drain_timeout, effective_stop_watchdog_delay, resolve_background_drain_budget
 )
 from gateway.run_common import _UNSET
 from gateway.run_runtime import interrupt_side_agents, managed_turn_count, stop_managed_turns
@@ -196,38 +196,9 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         return (
             self._running_agent_count()
             + managed_turn_count(self)
-            + self._active_cron_job_count()
             + self._active_api_run_count()
             + self._active_deferred_agent_worker_count()
         )
-
-    @staticmethod
-    def _running_cron_job_count() -> int:
-        # The FULL work aggregate, not _running_agent_count(): cron jobs run on the scheduler's own thread
-        # pool and API-server runs live on the adapter — both outside _running_agents (the #60432 blind
-        # spot), so counting agents alone let a suspend land mid-cron-job. Fail-AWAKE accounting: the shared
-        # shutdown-drain counters (_active_cron_job_count/_active_api_run_count) swallow exceptions to 0,
-        # which is fine for a drain but unsafe for a suspend predicate — a transient read failure would make
-        # live work look idle and reopen the mid-job freeze. Here an unreadable source counts as work
-        # (sentinel 1) so the machine stays awake until the source is readable again.
-        # Cron was excised from this branch: no scheduler registry exists any more.
-        return 0
-
-    def _active_cron_job_count(self) -> int:
-        """Cron jobs currently executing — they run outside ``_running_agents``; 0 if cron can't import.
-
-        Cron jobs run through a standalone ``AIAgent`` on the scheduler's own thread pool
-        (``cron/scheduler.py::run_job``), entirely outside ``self._running_agents`` — the dict every OTHER
-        active-work check on this class (``_running_agent_count``, ``_drain_active_agents``) reads. Without
-        this, the shutdown drain is structurally blind to in-flight cron work: it can report
-        ``active_at_start=0`` and proceed straight to killing tool subprocesses while a cron job's terminal
-        command is still running (#60432). Best-effort: returns 0 if the cron module can't be imported (e.g.
-        a minimal test double for this class).
-        """
-        try:
-            return self._running_cron_job_count()
-        except Exception:
-            return 0
 
     def _api_server_hook(self, name: str, *args: Any) -> int:
         """Call the primary API-server adapter's ``name`` hook, clamped >= 0 (0 when the hook is absent).
@@ -247,7 +218,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
     def _active_api_worker_count(self) -> int:
         """API-server executor threads still inside an agent turn (#116535).
 
-        Module-level, like the cron registry above: the handler-side adapter count is already
+        Module-level, like the api-run counter above: the handler-side adapter count is already
         unreachable here (``adapters`` was cleared a phase earlier) and, worse, drops on handler
         cancellation while the worker thread lives on. Read live at the close gate instead of
         snapshotting.
@@ -468,7 +439,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 logger.debug("scale-to-zero: %s unreadable — staying awake", label, exc_info=True)
                 return busy_sentinel
 
-        cron_count = _read_or_awake("cron work count", self._running_cron_job_count, 1)
         api_count = _read_or_awake("api work count", lambda: self._api_server_hook("active_agent_work_count"), 1)
         # An attached dashboard/desktop/TUI client (heartbeat mtime) is inbound activity — folded into
         # the inbound clock, not a conjunct, so a lingering marker cannot pin the box.
@@ -478,7 +448,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         if seen is not None and seen > last_inbound:
             last_inbound = seen
         return is_idle(
-            active_work_count=self._running_agent_count() + cron_count + api_count,
+            active_work_count=self._running_agent_count() + api_count,
             seconds_since_last_inbound=time.time() - last_inbound,
             idle_timeout_seconds=self._scale_to_zero_idle_timeout_seconds(),
             has_live_background_work=self._scale_to_zero_has_live_background_work(),
@@ -742,7 +712,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 # pressure and take every platform heartbeat down.
                 if await asyncio.to_thread(drain_requested):
                     self._enter_external_drain()
-                    # API and cron work live outside messaging's _running_agents map; refresh the
+                    # API-server runs live outside messaging's _running_agents map; refresh the
                     # aggregate while an external caller polls this reversible drain state.
                     self._persist_active_agents()
                 else:
@@ -803,14 +773,14 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
 
     # Drain / interrupt
     def _drain_work_counts(self) -> tuple:
-        """``(agents, cron, api, deferred)`` the drain waits on; a managed-worker turn is a chat turn."""
+        """``(agents, api, deferred)`` the drain waits on; a managed-worker turn is a chat turn."""
         return (
-            self._running_agent_count() + managed_turn_count(self), self._active_cron_job_count(),
+            self._running_agent_count() + managed_turn_count(self),
             self._active_api_run_count(), self._active_deferred_agent_worker_count(),
         )
 
     async def _drain_active_agents(
-        self, timeout: float, cron_timeout: Optional[float] = None
+        self, timeout: float, background_timeout: Optional[float] = None
     ) -> tuple[dict[str, Any], bool]:
         snapshot = self._snapshot_running_agents()
         loop = asyncio.get_running_loop()
@@ -825,21 +795,21 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 self._update_runtime_status("draining")
                 last_counts, last_status_at = counts, now
 
-        # Cron/API/deferred work lives outside ``_running_agents``; fold it in or it is killed unwarned.
+        # API/deferred work lives outside ``_running_agents``; fold it in or it is killed unwarned.
         _maybe_update_status(force=True)
         if not self._running_agents and not any(last_counts):
             return snapshot, False
-        # Cron and api_server runs ride the cron floor: a chat turn is announced+resumable, but a killed
-        # cron run is a permanent failure and a killed /v1 run fails a caller blocked on its result.
+        # api_server runs ride the background floor: a chat turn is announced+resumable, but a killed
+        # /v1 run fails a caller blocked on its result.
         # On ``restart_drain_timeout``'s 0 default they were killed after 0.00s (#82161, #132989).
         started = loop.time()
         deadline = started + timeout
-        cron_deadline = started + (timeout if cron_timeout is None else cron_timeout)
+        bg_deadline = started + (timeout if background_timeout is None else background_timeout)
 
         def _still_draining() -> bool:
             now = loop.time()
-            agents, cron, api, deferred = self._drain_work_counts()
-            return bool(((agents or deferred) and now < deadline) or ((cron or api) and now < cron_deadline))
+            agents, api, deferred = self._drain_work_counts()
+            return bool(((agents or deferred) and now < deadline) or (api and now < bg_deadline))
 
         # Both budgets at 0 = an expired deadline (loop unentered), so timed_out still comes from real state.
         while _still_draining():
@@ -1417,38 +1387,13 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         )
 
     def _wedged_agent_count(self) -> int:
-        """Work units the restart wait may skip: chat agents idle past ``agent.gateway_timeout`` and
-        cron runs older than the scheduler's stale-inflight allowance (#115469).
+        """Work units the restart wait may skip: chat agents idle past ``agent.gateway_timeout``.
 
         API work has no activity clock and pending sentinels are brand-new, so neither counts.
+        (Pre-fork, scheduled-job runs had their own stale-inflight allowance here (#115469);
+        the scheduler registry went with the excision, leaving only chat wedging.)
         """
-        return self._wedged_chat_agent_count() + self._wedged_cron_job_count()
-
-    def _restart_wait_cron_counts(self) -> dict:
-        """``cron.scheduler.get_restart_wait_cron_counts``, counted per profile-scoped run.
-
-        Fail-soft toward waiting: if the split can't be read, every active cron run stays
-        awaitable and nothing is excluded.
-        """
-        # Cron was excised: there are no cron runs, so nothing is awaitable/wedged.
-        return {"awaitable": 0, "wedged": 0, "restart_safe": 0}
-
-    def _wedged_cron_job_count(self) -> int:
-        """Cron runs past ``cron.scheduler.get_wedged_job_ids``'s allowance; 0 if cron can't import."""
-        return self._restart_wait_cron_counts()["wedged"]
-
-    def _restart_safe_cron_count(self) -> int:
-        """Cron runs whose worker owns a restart-safe systemd scope; 0 if cron can't import.
-
-        Such a worker runs outside the gateway cgroup, so neither the tool-process sweep nor
-        ``mark_running_jobs_interrupted`` reaches it, and its final send rides the durable delivery
-        queue for whichever gateway is live next. The restart after-turn wait must therefore not
-        hold the gateway in ``draining`` for it: waiting buys the run nothing and refuses new turns
-        for up to the whole cap (observed live: a 100-minute job held the gateway ~30 minutes).
-        Degraded (no user bus) workers are NOT in this set — they share the cgroup and die with a
-        systemd stop, so they keep holding the wait.
-        """
-        return self._restart_wait_cron_counts()["restart_safe"]
+        return self._wedged_chat_agent_count()
 
     def _wedged_chat_agent_count(self) -> int:
         """Running chat agents with no activity for ``agent.gateway_timeout`` (0 when disabled);
@@ -1479,31 +1424,24 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
     def _awaitable_work_count(self) -> int:
         """Active work minus the units the restart wait must not hold for.
 
-        Two disjoint exclusions: wedged turns (idle past ``agent.gateway_timeout`` / past the cron
-        in-flight allowance — restart is their remedy, #115469) and cron runs executing in a
-        restart-safe external worker (``_restart_safe_cron_count``), which outlives this process
-        either way. Cron runs are counted per profile-scoped run by the scheduler, not by
-        subtracting from the bare-ID active count: two profiles can run the same job ID, and one
-        excluded run must not hide the other.
+        Wedged turns (idle past ``agent.gateway_timeout``) sit outside the count — restart is
+        their remedy (#115469). (Before the fork excised its scheduler, runs handed to a
+        restart-safe external worker were excluded here too; that registry is gone.)
         """
-        non_cron = (
+        live_units = (
             self._running_agent_count()
             + managed_turn_count(self)
             + self._active_api_run_count()
             + self._active_deferred_agent_worker_count()
         )
-        return (
-            max(0, non_cron - self._wedged_chat_agent_count())
-            + self._restart_wait_cron_counts()["awaitable"]
-        )
+        return max(0, live_units - self._wedged_chat_agent_count())
 
     def _describe_active_work(self) -> list:
         """One dict per in-flight work unit the restart wait is holding for, so an observer
         (``hermes update``, ``hermes gateway status``) can name it instead of printing a bare count.
 
-        ``kind`` ∈ ``chat`` (session turn), ``cron`` (job id + external worker pid when the run was handed to a
-        restart-safe scope), ``managed`` (session + worker pid when a worker holds it), ``api`` / ``deferred``
-        (count only). Best-effort: a source that can't be read is omitted, never raises."""
+        ``kind`` ∈ ``chat`` (session turn), ``managed`` (session + worker pid when a worker holds it), ``api`` /
+        ``deferred`` (count only). Best-effort: a source that can't be read is omitted, never raises."""
         from gateway.run import _AGENT_PENDING_SENTINEL
         now = time.time()
         units: list = []
@@ -1523,7 +1461,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                         unit["current_tool"] = summary.get("current_tool")
                         unit["idle_s"] = summary.get("seconds_since_activity")
             units.append(unit)
-        # Cron work units excised with the cron package.
         units.extend(uncounted_runtime_work_units(self, os.getpid()))
         for kind, count in (("api", self._active_api_run_count()), ("deferred", self._active_deferred_agent_worker_count())):
             units.extend({"kind": kind, "pid": os.getpid()} for _ in range(count))
@@ -1541,10 +1478,9 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         if self._awaitable_work_count() <= 0:
             logger.warning(
                 "Restart requested with %d active work unit(s), none awaitable "
-                "(%d wedged past the inactivity timeout, %d in restart-safe external cron "
-                "workers that outlive this process); skipping the after-turn wait and "
+                "(%d wedged past the inactivity timeout); skipping the after-turn wait and "
                 "proceeding to stop()/drain", active,
-                self._wedged_agent_count(), self._restart_safe_cron_count(),
+                self._wedged_agent_count(),
             )
             return False
         timeout = float(getattr(self, "_restart_after_turn_timeout", 0.0) or 0.0)
@@ -1575,10 +1511,10 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             if (now - last_status_at) >= 30.0:
                 logger.info(
                     "Restart deferred: waiting on %d active work unit(s) "
-                    "(%d wedged and excluded, %d restart-safe and excluded; "
+                    "(%d wedged and excluded; "
                     "%.0fs remaining before force drain): %s",
                     self._awaitable_work_count(), self._wedged_agent_count(),
-                    self._restart_safe_cron_count(), deadline - now,
+                    deadline - now,
                     self._describe_active_work(),
                 )
                 self._scale_to_zero_status("draining", "restart wait: status mark failed")
@@ -1587,9 +1523,8 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         if self._active_work_count() > 0:
             logger.warning(
                 "Restart deferred wait: %d excluded work unit(s) remain "
-                "(%d wedged, %d restart-safe external cron); proceeding to stop()/drain",
+                "(%d wedged); proceeding to stop()/drain",
                 self._active_work_count(), self._wedged_agent_count(),
-                self._restart_safe_cron_count(),
             )
             return False
         logger.info("Restart deferred wait complete — active work drained; proceeding to stop()")
@@ -1664,7 +1599,10 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
 
     @staticmethod
     def _stop_kill_tool_subprocesses(phase: str) -> list:
-        """Kill tool subprocesses + terminal envs + browsers; returns cron job IDs marked interrupted.
+        """Kill tool subprocesses + terminal envs + browsers; returns job IDs marked interrupted.
+
+        (Always empty since the pre-fork scheduler registry went away with the excision — kept
+        for interface stability.)
 
         Called twice: after a drain timeout (reclaim children before systemd SIGKILLs) and as a final
         catch-all. Best-effort; one failing subsystem cannot block the rest.
@@ -1686,9 +1624,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 "Shutdown (%s): killed %d tool subprocess(es)",
                 lambda: process_registry.kill_all(source="gateway_shutdown"))
 
-        def _mark_cron_interrupted() -> list:
-            # Cron was excised from this branch: no registry exists to mark interrupted.
-            return []
         def _interrupt_delegations() -> None:
             from tools.async_delegation import interrupt_all as _interrupt_async
             _count_step(
@@ -1697,7 +1632,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             )
 
         _step("process_registry.kill_all", _kill_processes)
-        _marked_cron_jobs = _step("mark_running_jobs_interrupted", _mark_cron_interrupted) or []
         _step("async interrupt_all", _interrupt_delegations)
         def _cleanup_environments() -> None:
             from tools.terminal_tool_lifecycle import cleanup_all_environments
@@ -1709,11 +1643,11 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
 
         _step("cleanup_all_environments", _cleanup_environments)
         _step("cleanup_all_browsers", _cleanup_browsers)
-        return _marked_cron_jobs
+        return []
 
     @staticmethod
     async def _stop_kill_tool_subprocesses_off_loop(phase: str) -> list:
-        """Run _stop_kill_tool_subprocesses in a worker thread; returns cron job IDs marked interrupted.
+        """Run _stop_kill_tool_subprocesses in a worker thread; returns job IDs marked interrupted.
 
         ``kill_all`` fans out into per-target ``kill_process`` calls that do blocking work
         (registry checkpoint disk I/O, ``subprocess.run`` for systemd scopes, sandbox exec),
@@ -1721,7 +1655,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         Offloaded with ``asyncio.to_thread`` — the loop's default executor, deliberately NOT
         the gateway-owned ``self._executor``, which ``_stop_quiesce_and_close_session_dbs``
         drains right after this phase. Phase order is preserved: callers await this before
-        cron notices / adapter teardown. If the surrounding stop task is cancelled while the
+        teardown notices / adapter teardown. If the surrounding stop task is cancelled while the
         worker runs, the thread is left to finish on its own; the thread-based shutdown
         watchdog remains the hard backstop.
         """
@@ -1761,41 +1695,41 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         logger.info("Shutdown phase: notify_active_sessions done at +%.2fs", ctx.elapsed())
 
     async def _stop_drain_active_work(self, timeout: float, ctx: GatewayShutdownMixin._StopContext) -> None:
-        """Pre-mark resume_pending, drain agents/cron/API work into ``ctx``."""
+        """Pre-mark resume_pending, drain agents/API/deferred work into ``ctx``."""
         from gateway.run import GatewayRunner
         # Pre-mark resume_pending BEFORE the drain so a mid-drain SIGKILL still leaves a durable marker.
         _pre_drain_keys = await GatewayRunner._mark_running_sessions_resume_pending(
             self, "pre-drain mark_resume_pending"
         )
-        _cron_at_start = self._active_cron_job_count()
         _api_at_start = self._active_api_run_count()
         _deferred_at_start = ctx.deferred_count()
-        # Cron floor clamped to the watchdog leash; getattr-guard for bare shutdown-path doubles.
-        _cron_drain_cfg = getattr(self, "_cron_drain_timeout", DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)
+        # Background floor clamped to the watchdog leash; getattr-guard for bare shutdown-path doubles.
+        # (The pre-fork key spelling survives until the loader-side rename.)
+        _bg_drain_cfg = getattr(self, "_cron_drain_timeout", DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT)
         # Under launchd the real leash is launchd's own exit timeout, not our watchdog
-        # (drain + grace): a signal-driven stop that lets cron work push past it is SIGKILLed
+        # (drain + grace): a signal-driven stop that lets background work push past it is SIGKILLed
         # before cleanup runs.
         # ``timeout`` is already the effective (launchd-capped) drain, so this is the same
         # leash the thread watchdog is armed with — dump margin included.
-        _cron_leash = effective_stop_watchdog_delay(self, resolve_shutdown_watchdog_delay(timeout))
-        _cron_timeout = resolve_cron_drain_budget(
-            timeout, _cron_drain_cfg, watchdog_delay=_cron_leash, elapsed=ctx.elapsed(),
+        _bg_leash = effective_stop_watchdog_delay(self, resolve_shutdown_watchdog_delay(timeout))
+        _bg_timeout = resolve_background_drain_budget(
+            timeout, _bg_drain_cfg, watchdog_delay=_bg_leash, elapsed=ctx.elapsed(),
         )
-        if (_cron_at_start or _api_at_start) and _cron_timeout > timeout:
+        if _api_at_start and _bg_timeout > timeout:
             logger.info(
-                "Shutdown drain: %d in-flight cron job(s), %d api_server run(s) — waiting up to "
-                "%.0fs for them (cron_drain_timeout=%.0fs, restart_drain_timeout=%.0fs)",
-                _cron_at_start, _api_at_start, _cron_timeout, _cron_drain_cfg, timeout,
+                "Shutdown drain: %d api_server run(s) — waiting up to "
+                "%.0fs for them (background drain floor=%.0fs, restart_drain_timeout=%.0fs)",
+                _api_at_start, _bg_timeout, _bg_drain_cfg, timeout,
             )
         _drain_started_at = time.monotonic()
-        ctx.active_agents, ctx.timed_out = await self._drain_active_agents(timeout, _cron_timeout)
+        ctx.active_agents, ctx.timed_out = await self._drain_active_agents(timeout, _bg_timeout)
         ctx.drain_elapsed = time.monotonic() - _drain_started_at
         logger.info(
             "Shutdown phase: drain done at +%.2fs (drain took %.2fs, timed_out=%s, active_at_start=%d, "
-            "active_now=%d, cron_at_start=%d, cron_now=%d, api_at_start=%d, api_now=%d, "
+            "active_now=%d, api_at_start=%d, api_now=%d, "
             "deferred_at_start=%d, deferred_now=%d)", ctx.elapsed(), ctx.drain_elapsed,
-            ctx.timed_out, len(ctx.active_agents), self._running_agent_count(), _cron_at_start,
-            self._active_cron_job_count(), _api_at_start, self._active_api_run_count(),
+            ctx.timed_out, len(ctx.active_agents), self._running_agent_count(),
+            _api_at_start, self._active_api_run_count(),
             _deferred_at_start, ctx.deferred_count(),
         )
         if ctx.timed_out:
@@ -1810,13 +1744,14 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                     logger.debug("clear_resume_pending after drain failed for %s: %s", _sk, _e)
 
     async def _stop_interrupt_remaining_work(self, ctx: GatewayShutdownMixin._StopContext) -> None:
-        """Drain timed out: mark resume_pending, interrupt, settle, kill tool subprocesses, notify cron."""
+        """Drain timed out: mark resume_pending, interrupt, settle, kill tool subprocesses, notify."""
         from gateway.run import GatewayRunner
         logger.warning(
             "Gateway drain timed out after %.1fs with %d active agent(s), "
-            "%d in-flight cron job(s), %d api_server run(s), and %d deferred agent worker(s); "
-            "interrupting remaining work.", ctx.drain_elapsed, self._running_agent_count(),
-            self._active_cron_job_count(), self._active_api_run_count(), ctx.deferred_count(),
+            "%d api_server run(s), and %d deferred agent worker(s); "
+            "interrupting remaining work.",
+            ctx.drain_elapsed, self._running_agent_count(),
+            self._active_api_run_count(), ctx.deferred_count(),
         )
         # Mark resume_pending BEFORE interrupting so the next message auto-resumes (stuck sessions
         # still escalate via .restart_failure_counts). CURRENT _running_agents, not the drain snapshot.
@@ -1844,7 +1779,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         # Off-loop: the sweep does blocking kills that must not monopolize the event loop (#116327).
         await GatewayRunner._stop_kill_tool_subprocesses_off_loop("post-interrupt")
         logger.info("Shutdown phase: post-interrupt tool kill done at +%.2fs", ctx.elapsed())
-        # Cron interrupt notices were excised together with the cron package (#82232 machinery).
 
     async def _stop_finalize_agents_and_adapters(self, ctx: GatewayShutdownMixin._StopContext) -> None:
         """Detached restart launch, agent finalization, idle-cache cleanup, adapter teardown."""
@@ -1924,7 +1858,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         def _reap_aux_clients() -> None:
             # Reap the process-global auxiliary-client cache once at the very end of teardown. Per-turn
             # cleanup runs in _cleanup_agent_resources for each active agent, but clients bound to
-            # worker-thread loops that died with their ThreadPoolExecutor (notably cron ticks) only get
+            # worker-thread loops that died with their ThreadPoolExecutor only get
             # swept here. Without this, long-running gateways accumulate async httpx transports until they
             # hit EMFILE on macOS's default RLIMIT_NOFILE=256. See #14210.
             from agent.auxiliary_client import shutdown_cached_clients
@@ -1964,23 +1898,22 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             )
             return
         logger.info("Shutdown phase: executor quiesced at +%.2fs", ctx.elapsed())
-        # Cron jobs (scheduler pool), API-server runs (their own unbounded executor, never joined at disconnect)
+        # API-server runs (their own unbounded executor, never joined at disconnect)
         # and deferred hygiene workers (the loop's default executor) never touch self._executor, so the join above
         # cannot see them. A writer that outlived the drain is mid-write for the same #101093 reasons; the drain
         # spent its budget, so no second wait — leave the handles open (#102198). The API count is the snapshot
         # taken before the adapters were released; a run whose handler task was cancelled at disconnect
         # has already left it, so that term under-counts — the live worker-scoped count below covers
         # the cancelled-handler case (#116535).
-        _cron_live = self._active_cron_job_count()
         _api_live = ctx.api_live
         _api_worker_live = self._active_api_worker_count()
         _deferred_live = ctx.deferred_count() + managed_turn_count(self)  # + authority turns/mutations
-        if _cron_live or _api_live or _api_worker_live or _deferred_live:
+        if _api_live or _api_worker_live or _deferred_live:
             logger.warning(
-                "Shutdown phase: %d cron job(s) / %d API-server run(s) / %d API-server worker(s) / "
+                "Shutdown phase: %d API-server run(s) / %d API-server worker(s) / "
                 "%d deferred/authority worker(s) still running after the executor quiesce — skipping the SessionDB "
                 "close/checkpoint, leaving state.db open for the live writer (#102198, #116535)",
-                _cron_live, _api_live, _api_worker_live, _deferred_live,
+                _api_live, _api_worker_live, _deferred_live,
             )
             return
         _step = GatewayShutdownMixin._quiet_step
@@ -2000,7 +1933,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         _step("Runner SessionDB handle sweep error", lambda: GatewayRunner.close_all_session_db_handles(self))
 
         def _close_shared() -> None:
-            # Shared SessionDB instances still held by the process-wide registry (tools, cron, mirror).
+            # Shared SessionDB instances still held by the process-wide registry.
             # This is the safety net that guarantees no WAL write lock survives past gateway shutdown
             # (#90837).
             from hermes_state_registry import close_all
@@ -2076,7 +2009,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             "draining": bool(self._draining),
             "running": bool(self._running),
             "active_agents": self._running_agent_count(),
-            "active_cron_jobs": self._active_cron_job_count(),
             "active_api_runs": self._active_api_run_count(),
             "active_deferred_agent_workers": ctx.deferred_count(),
             "restart_drain_timeout": self._restart_drain_timeout,

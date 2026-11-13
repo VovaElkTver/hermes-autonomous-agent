@@ -1,5 +1,5 @@
 """Telegram outbound send policy shared by the gateway adapter and the standalone sender
-(``hermes send``, the ``send_message`` tool, standalone cron delivery): the push-notification
+(``hermes send``, the ``send_message`` tool, standalone scheduled delivery): the push-notification
 mode and the visually-empty guard, so both lanes make the same decision for the same text."""
 
 from __future__ import annotations

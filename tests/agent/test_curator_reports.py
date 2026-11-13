@@ -109,17 +109,16 @@ def test_same_second_reruns_get_unique_dirs(curator_env):
 # ---------------------------------------------------------------------------
 #
 # When the curator consolidates skill X into umbrella Y during a run, any
-# cron job that listed X in its ``skills`` field would fail to load X at
+# scheduled job that listed X in its ``skills`` field would fail to load X at
 # run time — the scheduler logs a warning and skips it, so the scheduled
 # job runs without the instructions it was scheduled to follow. These
-# tests verify that _write_run_report calls into cron.jobs to repair
-# those references and records what it did in both run.json and
-# cron_rewrites.json.
+# tests verify that _write_run_report records what it did in both
+# run.json and scheduled_rewrites.json.
 
 
 def test_cron_rewrite_fields_zeroed_after_excision(curator_env):
-    """Cron was excised: run.json still carries rewrite fields, but they report
-    an empty, successful sweep and no cron_rewrites.json sidecar is written."""
+    """Scheduled-job rewriting was excised: run.json still carries rewrite fields, but they report
+    an empty, successful sweep and no scheduled_rewrites.json sidecar is written."""
     curator = curator_env["curator"]
 
     before = [{"name": "foo", "state": "active", "pinned": False}]
@@ -150,7 +149,7 @@ def test_cron_rewrite_fields_zeroed_after_excision(curator_env):
     )
 
     payload = json.loads((run_dir / "run.json").read_text())
-    assert payload["cron_rewrites"] == {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
-    assert payload["counts"]["cron_jobs_rewritten"] == 0
-    assert not (run_dir / "cron_rewrites.json").exists()
+    assert payload["scheduled_rewrites"] == {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
+    assert payload["counts"]["scheduled_jobs_rewritten"] == 0
+    assert not (run_dir / "scheduled_rewrites.json").exists()
 

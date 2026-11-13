@@ -596,7 +596,7 @@ def run_backup(args) -> bool:
 
     True when every selected file landed in the archive (or there was nothing to back up); False
     when the zip was written but is incomplete — it is kept so the rest can still be restored, and
-    the caller turns False into exit status 1 so a cron/systemd timer never publishes a "successful"
+    the caller turns False into exit status 1 so a periodic systemd timer never publishes a "successful"
     archive that is missing state.db. Hard failures keep raising ``SystemExit``.
     """
     require_file_tooling("`hermes backup`")
@@ -1072,7 +1072,7 @@ def _import_members_exclusive(
 def _revive_gateway_after_import(hermes_root: Path) -> None:
     """Start an installed gateway service after a restore, best-effort and prompt-free.
 
-    Bot tokens and cron jobs are inert without a gateway (a platform-less gateway is supported, so
+    Bot tokens and scheduled jobs are inert without a gateway (a platform-less gateway is supported, so
     this is safe for any backup); failures print a manual fallback, never fail the import. Only
     revived when the restore landed in the default home or no other install exists: a sandbox or
     profile restore must not install a second gateway on the default service name.
@@ -1094,7 +1094,7 @@ def _revive_gateway_after_import(hermes_root: Path) -> None:
         # Import boundary: the restore already succeeded; any service failure prints the
         # manual fallback instead of failing the import.
         logger.debug("gateway revive after import failed", exc_info=True)
-        print("\nStart the gateway to activate cron jobs and messaging:\n  hermes gateway run")
+        print("\nStart the gateway to activate scheduled jobs and messaging:\n  hermes gateway run")
 
 
 # --- Quick state snapshots (used by /snapshot slash command and hermes backup --quick) ---
@@ -1136,8 +1136,8 @@ def _newest_first(root: Path, keep_entry) -> list[Path]:
     return sorted(filter(keep_entry, root.iterdir()), key=lambda p: p.name, reverse=True)
 
 
-# Kept in sync with ``_QUICK_STATE_FILES`` and ``cron/jobs.py``'s ``JOBS_FILE``.
-_CRON_JOBS_REL = "cron/jobs.json"
+# Kept in sync with ``_QUICK_STATE_FILES``.
+_LEGACY_JOBS_REL = "cron/jobs.json"
 
 
 def _prune_oldest(newest_first: list[Path], keep: int, remove, what: str) -> int:
@@ -1264,7 +1264,7 @@ def _create_quick_snapshot_locked(
             are skipped (with a printed warning) instead of copied. Used by
             the pre-update safety snapshot so a multi-GB ``state.db`` can
             never stall ``hermes update`` or silently eat disk — the small
-            pairing/cron/config files the snapshot exists to protect are
+            pairing/scheduler/config files the snapshot exists to protect are
             always captured. ``None`` (default) copies everything, which
             preserves manual ``/snapshot`` and ``hermes backup --quick``
             behavior.
@@ -1680,12 +1680,12 @@ def restore_cron_jobs_if_emptied(
     snapshot_id: str,
     hermes_home: Optional[Path] = None,
 ) -> Optional[dict[str, Any]]:
-    """Safety net for silent cron-job loss across ``hermes update``.
+    """Safety net for silent scheduled-job loss across ``hermes update``.
 
     Config-version migrations have been observed to leave ``cron/jobs.json``
     valid-but-empty after an update, silently dropping every scheduled job
     (issue #34600). The desktop scheduler can also overwrite the file with its
-    own small set of internally-tracked crons, causing partial loss (issue
+    own small set of internally-tracked scheduled jobs, causing partial loss (issue
     #52144).
 
     This compares the *current* job count against the pre-update snapshot. If
@@ -1712,7 +1712,7 @@ def restore_cron_jobs_if_emptied(
         return None
 
     home = hermes_home or get_hermes_home()
-    live_path = home / _CRON_JOBS_REL
+    live_path = home / _LEGACY_JOBS_REL
 
     live_count = _count_cron_jobs(live_path)
     # ``None`` (missing or unparseable) is intentionally left alone — that's a
@@ -1720,7 +1720,7 @@ def restore_cron_jobs_if_emptied(
     if live_count is None:
         return None
 
-    snap_path = _quick_snapshot_root(home) / snapshot_id / _CRON_JOBS_REL
+    snap_path = _quick_snapshot_root(home) / snapshot_id / _LEGACY_JOBS_REL
     snap_count = _count_cron_jobs(snap_path)
     if not snap_count:  # None or 0 — nothing worth restoring
         return None
@@ -1728,7 +1728,7 @@ def restore_cron_jobs_if_emptied(
     # Restore when live has FEWER jobs than the pre-update snapshot.
     # Catches both total loss (0 vs N) and partial loss (1 vs 19) — the
     # desktop scheduler can overwrite jobs.json with its own small set of
-    # internally-tracked crons after an update/restart.
+    # internally-tracked scheduled jobs after an update/restart.
     if live_count >= snap_count:
         return None
 
@@ -1737,12 +1737,12 @@ def restore_cron_jobs_if_emptied(
         shutil.copy2(snap_path, live_path)
     except (OSError, PermissionError) as exc:
         logger.error(
-            "Cron jobs were emptied during update but auto-restore failed: %s", exc
+            "Scheduled jobs were emptied during update but auto-restore failed: %s", exc
         )
         return None
 
     logger.warning(
-        "Restored %d cron job(s) from pre-update snapshot %s "
+        "Restored %d scheduled job(s) from pre-update snapshot %s "
         "(live file had %d job(s), snapshot had %d — jobs were lost during migration)",
         snap_count,
         snapshot_id,
@@ -1819,7 +1819,7 @@ def create_pre_update_snapshots_all_profiles(
 
 # Config paths that the update flow must never change (#64160): the model
 # routing keys and the Mixture-of-Agents section are consumed machine-wide
-# (gateway, cron, desktop), so an update/repair cycle that rewrites them
+# (gateway, scheduler, desktop), so an update/repair cycle that rewrites them
 # silently redirects paid inference. Each entry is a dotted path into the raw
 # config.yaml document; a single-element tuple protects the whole section.
 _PROTECTED_CONFIG_PATHS: tuple[tuple[str, ...], ...] = (
@@ -1855,7 +1855,7 @@ def restore_config_model_settings_if_rewritten(
     ``model.provider``/``model.default`` and drop the ``moa:`` section
     entirely (issue #64160; the macOS repair/relaunch variant rewrote a
     pinned ``model.default`` to a transient composer pick). These keys are
-    consumed by the gateway and unattended cron jobs too, so a rewrite
+    consumed by the gateway and unattended scheduled jobs too, so a rewrite
     silently changes paid inference behavior machine-wide.
 
     Mirrors :func:`restore_cron_jobs_if_emptied`: compare the *current*
@@ -1890,7 +1890,7 @@ def restore_config_model_settings_if_rewritten(
     live = _read_raw_yaml_dict(live_path)
     if live is None:
         # Missing or unparseable live config is a different failure mode the
-        # user should see rather than have papered over (matches the cron net).
+        # user should see rather than have papered over (matches the scheduled-job net).
         return None
 
     restored_keys: list[str] = []
@@ -1969,7 +1969,7 @@ def restore_cron_jobs_all_profiles(
     profile_snapshots: dict[str, str],
     invoking_home: Optional[Path] = None,
 ) -> list[dict[str, Any]]:
-    """Run the cron-jobs safety net for every sibling profile (#66140).
+    """Run the scheduled-job safety net for every sibling profile (#66140).
 
     ``profile_snapshots`` is the map returned by
     :func:`create_pre_update_snapshots_all_profiles`. Each profile's live
@@ -1990,7 +1990,7 @@ def restore_cron_jobs_all_profiles(
         try:
             result = restore_cron_jobs_if_emptied(snap_id, hermes_home=profile_home)
         except Exception as exc:
-            logger.debug("Cron restore check for profile %s failed: %s", name, exc)
+            logger.debug("Scheduled-job restore check for profile %s failed: %s", name, exc)
             continue
         if result:
             result["profile"] = name

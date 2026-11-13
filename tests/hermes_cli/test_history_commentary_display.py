@@ -136,7 +136,7 @@ def test_rest_pages_bind_the_history_owner_for_messages_and_around(
     row = _row()
     homes = {name: tmp_path / name for name in ("visible", "hidden")}
     monkeypatch.setattr(
-        sessions, "_cron_profile_home", lambda profile: (profile, homes[profile])
+        sessions, "_SCHEDULED_PROFILE_HOME", lambda profile: (profile, homes[profile])
     )
     monkeypatch.setattr(
         config_mod,
@@ -200,7 +200,7 @@ def test_unscoped_rest_history_uses_custom_home_of_its_database(monkeypatch, tmp
 
     custom, default = tmp_path / "custom", tmp_path / "default"
     monkeypatch.setattr(
-        sessions, "_cron_profile_home", lambda profile: ("default", default)
+        sessions, "_SCHEDULED_PROFILE_HOME", lambda profile: ("default", default)
     )
     monkeypatch.setattr(
         config_mod,

@@ -129,7 +129,7 @@ def _get_service_pids(all_profiles: bool = False) -> set:
     ``all_profiles`` widens the launchd branch to every installed ``ai.hermes.gateway*`` LaunchAgent — the
     update path needs the whole fleet excluded from its sweep (#41403, #73626): sibling-profile launchd
     gateways found by the (BSD-fixed) ps scan must not be misclassified as manual processes and killed.
-    Default-scope callers (``gateway status``, cron checks) keep seeing only the current profile's service;
+    Default-scope callers (``gateway status``, scheduled-run checks) keep seeing only the current profile's service;
     the orphan reaper passes all_profiles=True for the same friendly-fire reason. The systemd branch mirrors
     this: default scope filters to the current profile's exact unit name; ``all_profiles=True`` widens to
     the ``hermes-gateway*`` fleet glob.
@@ -331,7 +331,7 @@ def _wait_for_pid_exit(pid: int, timeout: float, *, on_progress=None) -> bool:
 # repeated up to ``tick_strikes`` times when a wedge is suspected — worst case ~3.4s, still far inside the
 # 10s query tier of the subprocess timeout doc) and classifies the gateway BEFORE any drain wait begins: -
 # ``alive``   — the loop answered the tick socket, or the file is fresh and the loop is not contradicted by
-# the socket. Callers must take the normal graceful-drain path, which honours the in-flight cron drain floor
+# the socket. Callers must take the normal graceful-drain path, which honours the in-flight scheduled-work drain floor
 # (#86684). - ``wedged``  — the heartbeat belongs to this PID, is stale well past several missed beats, AND
 # the tick socket is armed but stays silent across a sustained window of consecutive misses (default 3):
 # both witnesses agree, sustained, that the loop is provably dead. One silent probe is never destructive
@@ -340,7 +340,7 @@ def _wait_for_pid_exit(pid: int, timeout: float, *, on_progress=None) -> bool:
 # escalate immediately via ``_escalate_wedged_gateway``. - ``unknown`` — no heartbeat / unreadable / PID
 # mismatch / witness conflict (fresh file with a silent loop, armed socket unreachable). Treated like
 # ``alive``: never escalate on ambiguity. The distinction matters: only a *provably dead* loop may bypass
-# the cron drain floor. A merely busy gateway still answers the probe (socket ping) and keeps its full drain
+# the scheduled-work drain floor. A merely busy gateway still answers the probe (socket ping) and keeps its full drain
 # budget — even when the filesystem is stalling the heartbeat write (the incident that motivated #90502).
 # Legacy gateways (no ``loop_tick_socket`` flag in the payload) wrote the file on-loop, so their staleness
 # remains proof and the old single-witness contract is unchanged.
@@ -507,7 +507,7 @@ def probe_gateway_loop_liveness(
 def _escalate_wedged_gateway(pid: int, *, term_grace: float = 5.0, kill_wait: float = 5.0) -> bool:
     """Bounded stop (SIGTERM, ``term_grace``, SIGKILL, ``kill_wait``) for a provably dead loop; True once gone.
     Callers MUST have classified ``GATEWAY_LOOP_WEDGED`` first: escalating a merely busy gateway
-    bypasses the cron drain floor and SIGKILLs live work.
+    bypasses the scheduled-work drain floor and SIGKILLs live work.
 
     See #86684.
     """
@@ -2230,7 +2230,7 @@ def _native_service_homes() -> set[Path]:
 def _bare_unit_pinned_home() -> Path | None:
     """Resolved ``HERMES_HOME`` pinned by an installed ``hermes-gateway.service``, or None. The unit is the
     one naming basis that holds still across the sudo mid-command switch (see ``_profile_suffix``) and it
-    covers every elevated identity — ``sudo -i`` and cron included, where SUDO_USER is absent.
+    covers every elevated identity — ``sudo -i`` and scheduled runs included, where SUDO_USER is absent.
 
     Root reads the system unit; an unprivileged process reads only its own user unit, never the system
     one — a bare system unit pinning ``profiles/<name>`` would otherwise alias that profile onto the
@@ -3020,7 +3020,7 @@ def _ld_library_path_line(system: bool, target_home_dir: str | None = None) -> s
     ~/.hermes/.env is too late for CUDA libs — #14613); system units remap caller-home components.
 
     The installed unit is the fallback source: the unit is regenerated and compared on every
-    start/restart/status, and a shell without the export (ssh, cron, ``sudo`` strips ``LD_*``)
+    start/restart/status, and a shell without the export (ssh, timer-driven launches, ``sudo`` strips ``LD_*``)
     must not be able to "repair" the line away."""
     raw = os.environ.get("LD_LIBRARY_PATH", "") or _installed_unit_ld_library_path(system)
     components = [p for p in raw.split(":") if p]
@@ -3198,8 +3198,8 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
         # System units add managed Node once the TARGET user's home is known (not the sudo caller's).
         _append_node_dir_for_service(path_entries)
 
-    # TimeoutStopSec must cover the full stop budget (cron drain + cleanup) or systemd SIGKILLs mid-drain.
-    restart_timeout = resolve_systemd_timeout_stop_sec(_get_restart_drain_timeout(), _get_cron_drain_timeout())
+    # TimeoutStopSec must cover the full stop budget (scheduled-work drain + cleanup) or systemd SIGKILLs mid-drain.
+    restart_timeout = resolve_systemd_timeout_stop_sec(_get_restart_drain_timeout(), _get_periodic_drain_timeout())
 
     if system:
         username, group_name, home_dir, uid = _system_service_identity(run_as_user)
@@ -3222,7 +3222,7 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
         path_entries = [e for e in _target_node_entries if e not in path_entries] + path_entries
         user_home = Path(home_dir)
         identity_lines = f"User={username}\nGroup={group_name}\n"
-        # Restart-safe cron/Kanban workers cross `systemd-run --user`, which needs this user's manager;
+        # Restart-safe scheduled/Kanban workers cross `systemd-run --user`, which needs this user's manager;
         # without the ordering the gateway and user@<uid>.service race at boot and the one-shot bus
         # adoption in run_gateway() can miss (#104893).
         ordering_lines = f"After=user@{uid}.service\nWants=user@{uid}.service\n"
@@ -3391,7 +3391,7 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
 def _print_linger_enable_warning(username: str, detail: str | None = None, *, system: bool = False) -> None:
     print()
     if system:
-        print(f"⚠ Linger not enabled for {username} — cron and Kanban workers cannot start (no user D-Bus).")
+        print(f"⚠ Linger not enabled for {username} — scheduled and Kanban workers cannot start (no user D-Bus).")
     else:
         print("⚠ Linger not enabled — gateway may stop when you close this terminal.")
     if detail:
@@ -3411,7 +3411,7 @@ def _ensure_linger_enabled(username: str | None = None, *, system: bool = False)
 
     A user unit needs linger so the gateway survives logout. A system unit (``system=True``) needs
     it for its ``User=`` so ``user@<uid>.service`` provides the D-Bus that ``systemd-run --user
-    --scope`` — every restart-safe cron/Kanban worker — connects to (#104893). Returns True only
+    --scope`` — every restart-safe scheduled/Kanban worker — connects to (#104893). Returns True only
     when linger was enabled by this call.
     """
     if is_termux() or not is_linux():
@@ -3438,7 +3438,7 @@ def _ensure_linger_enabled(username: str | None = None, *, system: bool = False)
         return False
 
     if system:
-        print(f"Enabling linger for {username} so cron and Kanban workers can reach systemd-run --user...")
+        print(f"Enabling linger for {username} so scheduled and Kanban workers can reach systemd-run --user...")
     else:
         print("Enabling linger so the gateway survives SSH logout...")
     try:
@@ -3467,7 +3467,7 @@ def _ensure_system_service_linger(username: str) -> None:
     import pwd
     uid = pwd.getpwnam(username).pw_uid  # windows-footgun: ok — POSIX systemd helper, never invoked on Windows
     if _wait_for_target_user_bus(uid):
-        print(f"✓ /run/user/{uid}/bus is up — cron and Kanban workers can use systemd-run --user")
+        print(f"✓ /run/user/{uid}/bus is up — scheduled and Kanban workers can use systemd-run --user")
     else:
         print(f"⚠ /run/user/{uid}/bus did not appear within 5s.")
         print(f"  Start the user manager: sudo systemctl start user@{uid}.service")
@@ -3522,8 +3522,8 @@ def _agent_timeout_setting(env_var: str, key: str, parse) -> float:
     return parse(None)
 
 
-def _get_cron_drain_timeout() -> float:
-    """Return the configured cron and api_server (/v1) drain floor in seconds.
+def _get_periodic_drain_timeout() -> float:
+    """Return the configured scheduled-work and api_server (/v1) drain floor in seconds.
 
     See #82161.
     """
@@ -3537,7 +3537,7 @@ def _get_restart_exit_wait_budget() -> float:
         _agent_timeout_setting(
             "HERMES_RESTART_AFTER_TURN_TIMEOUT", "restart_after_turn_timeout", parse_restart_after_turn_timeout
         ),
-        _get_cron_drain_timeout(),
+        _get_periodic_drain_timeout(),
     )
 
 
@@ -3739,13 +3739,13 @@ def systemd_restart(system: bool = False):
         print(
             # Health probe says the event loop is provably dead (#81642): SIGUSR1 can never drain it, so the
             # graceful wait below would burn the full budget. A busy-but-alive gateway (fresh heartbeat)
-            # never takes this path — its in-flight work, including the #86684 cron drain floor, keeps the
+            # never takes this path — its in-flight work, including the #86684 scheduled-drain floor, keeps the
             # full graceful budget.
             # Health probe says the event loop is provably dead (#81642): the gateway cannot process a
             # graceful shutdown, so waiting the full drain budget only stalls the restart (and `hermes
             # update` behind it) for 180s. Bounded escalation instead: SIGTERM grace → SIGKILL → proceed,
             # ~10s worst case. Never taken for a busy-but-alive gateway — a fresh heartbeat keeps the drain
-            # path (and the #86684 cron drain floor) fully intact.
+            # path (and the #86684 scheduled-drain floor) fully intact.
             f"⚠ Gateway PID {pid} event loop is unresponsive — "
             "skipping graceful drain and forcing a bounded stop..."
         )
@@ -4591,7 +4591,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
     print("┌─────────────────────────────────────────────────────────┐")
     print("│           ☤ Hermes Gateway Starting...                 │")
     print("├─────────────────────────────────────────────────────────┤")
-    print("│  Messaging platforms + cron scheduler                    │")
+    print("│  Messaging platforms + scheduled jobs                    │")
     print("│  Press Ctrl+C to stop                                   │")
     print("└─────────────────────────────────────────────────────────┘")
     print()
@@ -4613,7 +4613,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False, fo
 
     def _hard_exit_after_gateway_teardown(code: int) -> None:
         # Mirror gateway.run.main()'s wedge-proof exit: bypass Python finalization so non-daemon
-        # threads (in-flight cron jobs) can't delay a /restart by minutes.
+        # threads (in-flight scheduled jobs) can't delay a /restart by minutes.
         from gateway.run import _exit_after_graceful_shutdown
         _exit_after_graceful_shutdown(code)
 
@@ -4680,7 +4680,7 @@ from hermes_cli.gateway_setup_wizard import (
 # Operator wording for the out-of-loop watchdog exit reasons stamped by gateway/shutdown_watchdog.py.
 _WATCHDOG_EXIT_REASONS = {
     "loop_liveness_watchdog": (
-        "event loop stopped dispatching (housekeeping, cron and the kanban dispatcher froze); "
+        "event loop stopped dispatching (housekeeping, scheduled runs and the kanban dispatcher froze); "
         f"the liveness watchdog exited with code {GATEWAY_SERVICE_RESTART_EXIT_CODE} for the supervisor to restart it"
     ),
     "shutdown_watchdog": "shutdown drain wedged; the shutdown watchdog forced the exit (see logs/gateway-shutdown-watchdog.log)",
@@ -4717,7 +4717,7 @@ def _runtime_health_lines() -> list[str]:
             )
             return lines
         # PID alive but housekeeping stopped re-stamping the file: the reporter's "not a crash" case
-        # (#113372) — the process looks 'running' while housekeeping/cron/kanban dispatch are frozen.
+        # (#113372) — the process looks 'running' while housekeeping/scheduled-runs/kanban dispatch are frozen.
         age = runtime_status_heartbeat_age_s(state)
         if gateway_state != "draining" and age is not None:
             lines.append(
@@ -4729,7 +4729,7 @@ def _runtime_health_lines() -> list[str]:
         lines.append(f"⚠ Last startup issue: {exit_reason}")
     elif gateway_state == "degraded" and exit_reason:
         # An out-of-loop watchdog hard-exited the process (#113372): the loop stopped dispatching, so
-        # housekeeping/cron/kanban froze together. Without this arm the file would read 'running'.
+        # housekeeping/scheduled-runs/kanban froze together. Without this arm the file would read 'running'.
         lines.append(f"⚠ Gateway exited degraded: {_WATCHDOG_EXIT_REASONS.get(exit_reason, exit_reason)}")
     elif gateway_state == "draining":
         action = "restart" if state.get("restart_requested") else "shutdown"

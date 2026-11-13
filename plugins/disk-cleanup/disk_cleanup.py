@@ -144,8 +144,8 @@ def _is_protected_dir(p: Path) -> bool:
     return False
 
 @functools.lru_cache(maxsize=8)  # keyed by home: a multiplexed process serves several profiles
-def _protected_cron_paths(home: Path) -> frozenset:
-    """Defense-in-depth for quick(): EXACT cron control-plane paths (``cron/``, ``output/`` root,
+def _protected_schedule_paths(home: Path) -> frozenset:
+    """Defense-in-depth for quick(): EXACT legacy scheduler control-plane paths (``cron/``, ``output/`` root,
     ``jobs.json``, ``.tick.lock``) never deleted regardless of stored category (stale tracked.json).
     Never widen to everything under ``cron/output/``: run artifacts there are disposable; only
     wholesale deletion of ``output/`` is fatal."""
@@ -155,8 +155,8 @@ def _protected_cron_paths(home: Path) -> frozenset:
 
 # Paths under $HERMES_HOME that must NEVER be deleted by quick(), regardless of what the stored category
 # says. This is a defense-in-depth guard against stale tracked.json entries from before #34840.
-def _is_protected_cron_path(p: Path) -> bool:
-    return str(p.resolve()) in _protected_cron_paths(get_hermes_home())
+def _is_protected_schedule_path(p: Path) -> bool:
+    return str(p.resolve()) in _protected_schedule_paths(get_hermes_home())
 
 
 def fmt_size(n: float) -> str:
@@ -281,8 +281,8 @@ def quick() -> dict[str, Any]:
             _log(f"SKIP stale {cat} entry: {p} (re-classified as {re_cat!r}{_STALE_SKIP_NOTE[cat]})")
             continue
         # Hard safety net even if re-validation above somehow let it through.
-        if _is_protected_cron_path(p):
-            _log(f"SKIP protected cron path: {p}")
+        if _is_protected_schedule_path(p):
+            _log(f"SKIP protected scheduler path: {p}")
             continue
         if _is_protected_dir(p):
             _log(f"SKIPPED: {p} (protected top-level dir)")

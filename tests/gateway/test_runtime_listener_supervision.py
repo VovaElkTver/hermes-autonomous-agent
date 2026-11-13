@@ -83,7 +83,7 @@ async def test_listener_failure_stops_bootstrap_background_threads(monkeypatch):
             thread = threading.Thread(target=stopped.wait, daemon=True)
             thread.start()
             threads.append(thread)
-        return stopped, None, *threads
+        return stopped, threads[-1]
 
     publish = run_runtime.publish_gateway_runtime_ready
 
@@ -91,7 +91,7 @@ async def test_listener_failure_stops_bootstrap_background_threads(monkeypatch):
         publish(runner)
         runner.session_api.server.should_exit = True
 
-    monkeypatch.setattr(run_bootstrap, '_start_gateway_start_cron_and_housekeeping', start_owned_threads)
+    monkeypatch.setattr(run_bootstrap, '_start_gateway_periodic_threads', start_owned_threads)
     monkeypatch.setattr(run_runtime, 'publish_gateway_runtime_ready', fail_after_ready)
     try:
         with pytest.raises(RuntimeError, match='session API stopped unexpectedly'):

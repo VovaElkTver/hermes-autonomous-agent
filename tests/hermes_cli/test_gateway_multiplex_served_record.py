@@ -186,34 +186,17 @@ def test_service_verbs_do_not_start_a_second_gateway(served_root, monkeypatch, v
     assert calls, f"--force must let `gateway {verb}` reach the service manager"
 
 
-def test_satellite_gateway_identity_does_not_imply_cron_health(served_root, monkeypatch):
+def test_satellite_gateway_identity_does_not_imply_background_job_health(served_root, monkeypatch):
     import hermes_cli.gateway as gw
     import hermes_cli.status as st
-    import hermes_cli.cron as cr
     monkeypatch.setattr(gw, "find_gateway_pids", lambda *a, **k: [])
     monkeypatch.setattr(gw, "get_gateway_runtime_snapshot",
                         lambda system=False: gw.GatewayRuntimeSnapshot(manager="systemd (user)"))
-    monkeypatch.setattr(cr, "_active_cron_provider_name", lambda: "builtin")
-    monkeypatch.setattr(cr, "_print_active_jobs_summary", lambda jobs: None)
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         st._render_gateway(None)
     assert "running" in buf.getvalue() and "multiplexer" in buf.getvalue()
-
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        cr.cron_status()
-    # Multiplex-only: the ONE host gateway is named as the ticker, with the profiles it serves —
-    # the FULL line, so this cannot pass on the sibling "(multiplexing this profile)" rung.
-    assert f"Scheduler host: the host gateway (PID {os.getpid()}) serving profiles default, coder" \
-        in buf.getvalue()
-    # The remediation this rung prints must run for a served NAMED profile (`hermes gateway
-    # restart` exits 78 there).
-    assert "restart: hermes --profile default gateway restart" in buf.getvalue()
-    # A live scheduler host alone does not prove this satellite's ticker is healthy.
-    assert "has not reported a heartbeat" in buf.getvalue()
-    assert "will fire automatically" not in buf.getvalue()
 
 
 def test_dashboard_liveness_ladder_reports_served_profile_running(served_root):

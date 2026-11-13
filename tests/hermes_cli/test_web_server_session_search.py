@@ -159,7 +159,7 @@ def test_desktop_session_search_merges_id_matches_before_content_matches(monkeyp
 
 def test_desktop_session_search_stamps_the_requested_profile(monkeypatch):
     monkeypatch.setattr(
-        _rt_sessions, "_cron_profile_home", lambda profile: (profile, None)
+        _rt_sessions, "_SCHEDULED_PROFILE_HOME", lambda profile: (profile, None)
     )
     monkeypatch.setattr(
         _rt_sessions,
@@ -199,7 +199,7 @@ def test_desktop_session_search_attaches_profile_to_rich_results(monkeypatch):
 
     # Browsing never initializes a store: serve the fake as the profile's existing store,
     # as the requested-profile test above does.
-    monkeypatch.setattr(_rt_sessions, "_cron_profile_home", lambda profile: (profile, None))
+    monkeypatch.setattr(_rt_sessions, "_SCHEDULED_PROFILE_HOME", lambda profile: (profile, None))
     monkeypatch.setattr(
         _rt_sessions,
         "_open_session_db_for_profile",

@@ -72,7 +72,7 @@ sessions_router = APIRouter()
 router = APIRouter()
 
 # Late-bound web_server helpers (resolved at call time; cycle-safe, monkeypatch-transparent).
-_cron_profile_home = late("_cron_profile_home", "hermes_cli.web_server_cron")
+_scheduled_profile_home = late("_cron_profile_home", "hermes_cli.web_server_cron")
 _resolve_profile_dir = late("_resolve_profile_dir", "hermes_cli.web_server_profiles")
 _spawn_hermes_action = late("_spawn_hermes_action", "hermes_cli.web_server_gateway")
 
@@ -469,11 +469,11 @@ def get_profiles_sessions(
     if order not in ("created", "recent"):
         raise HTTPException(status_code=400, detail="order must be one of: created, recent")
 
-    targets = ([_cron_profile_home(profile)] if profile and profile != "all"
+    targets = ([_scheduled_profile_home(profile)] if profile and profile != "all"
                else _profile_targets("GET /api/profiles/sessions"))
 
-    # Source scoping (see /api/sessions): recents pass exclude_sources=cron, the cron-jobs
-    # section source=cron — two independent lists so cron sessions can't starve recents.
+    # Source scoping (see /api/sessions): recents pass exclude_sources=cron, the scheduled-jobs
+    # section source=cron — two independent lists so scheduled sessions can't starve recents.
     filters = dict(
         source=source or None, sources=_csv_list(sources) or None,
         exclude_sources=_csv_list(exclude_sources) or None, min_message_count=max(0, min_messages),
@@ -525,14 +525,14 @@ def get_profiles_sessions(
 def get_profiles_sessions_sidebar(
     recents_profile: str = "all", recents_limit: int = 20, recents_exclude: str | None = None,
     cron_limit: int = 50, messaging_limit: int = 100, messaging_exclude: str | None = None):
-    """Batched sidebar session slices (recents / cron / messaging) — one profile-DB open per
+    """Batched sidebar session slices (recents / scheduled runs / messaging) — one profile-DB open per
     refresh instead of three ``/api/profiles/sessions`` calls. Same row projection and 300s
     active heuristic as the per-slice endpoint; all slices use ``min_messages=1`` /
     ``archived=exclude`` / recency order.
 
     ``recents_profile`` scopes the WHOLE payload, not just recents — the sidebar has one
     scope, so a concrete profile must never show another profile's Telegram threads or
-    cronjobs; ``all`` asks for everything.
+    scheduled jobs; ``all`` asks for everything.
 
     See #42651, #65710, #70629.
     """
@@ -541,7 +541,7 @@ def get_profiles_sessions_sidebar(
     recents_scope = (recents_profile or "all").strip() or "all"
     recents_exclude_list = [s for s in (recents_exclude or "").split(",") if s.strip()]
     messaging_exclude_list = [s for s in (messaging_exclude or "").split(",") if s.strip()]
-    # (source, exclude) per slice; ``source=cron`` is the implicit cron taxonomy.
+    # (source, exclude) per slice; ``source=cron`` is the implicit scheduled-source taxonomy.
     slice_scope = {"recents": (None, recents_exclude_list), "cron": ("cron", None),
                    "messaging": (None, messaging_exclude_list)}
     cap = {"recents": min(max(recents_limit, 1), 500), "cron": min(max(cron_limit, 1), 500),
@@ -554,7 +554,7 @@ def get_profiles_sessions_sidebar(
 
     def _slice(db, key, recents_subagents=(False, None)):
         source, exclude = slice_scope[key]
-        # Only recents takes subagent runs (sessions.show_subagents); cron/messaging keep shape.
+        # Only recents takes subagent runs (sessions.show_subagents); scheduled/messaging keep shape.
         include_subagents, exclude = recents_subagents if key == "recents" else (False, exclude)
         # include_pinned: a pinned conversation must reach the sidebar even when it has aged
         # past the window, or its Pinned row renders empty.

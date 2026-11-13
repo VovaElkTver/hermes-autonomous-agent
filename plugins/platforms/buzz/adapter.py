@@ -1837,7 +1837,7 @@ def _env_enablement() -> Optional[dict]:
     """``env_enablement_fn``: seed ``PlatformConfig.extra`` from the owning profile's env so env-only setups
     show in gateway status; None if unconfigured. Reads go through the profile scope: a served secondary sees
     only its own ``.env`` (#98738 — the process env is the DEFAULT profile's and must not fabricate Buzz here).
-    Cron delivery target defaults to the first watched channel."""
+    Scheduled-delivery target defaults to the first watched channel."""
     relay = str(_get_scoped_secret("BUZZ_RELAY_URL", "") or "").strip()
     if not relay or not _resolve_private_key():
         return None
@@ -1853,7 +1853,7 @@ async def _standalone_send(
     pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
     media_files: Optional[list[Any]] = None, force_document: bool = False,
 ) -> dict[str, Any]:
-    """One-shot send without a live adapter (out-of-process ``deliver=buzz`` cron)."""
+    """One-shot send without a live adapter (out-of-process ``deliver=buzz`` send)."""
     extra = getattr(pconfig, "extra", {}) or {}
     relay = _configured_relay(extra)
     private_key = _resolve_private_key(extra)
@@ -1925,7 +1925,7 @@ def interactive_setup() -> None:
     channels = ask("Channel UUIDs to watch (comma-separated, empty = all joined channels)", "BUZZ_CHANNELS")
     if channels:
         save_env_value("BUZZ_CHANNELS", channels.replace(" ", ""))
-    home = ask("Home channel UUID for cron/notification delivery (optional)", "BUZZ_HOME_CHANNEL")
+    home = ask("Home channel UUID for scheduled/notification delivery (optional)", "BUZZ_HOME_CHANNEL")
     if home:
         save_env_value("BUZZ_HOME_CHANNEL", home.strip())
     print()

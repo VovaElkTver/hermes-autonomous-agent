@@ -749,13 +749,13 @@ class _IncomingHandler(dingtalk_stream.ChatbotHandler if DINGTALK_STREAM_AVAILAB
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False):
     """Out-of-process delivery (standalone_sender_fn) via the static robot webhook (DINGTALK_WEBHOOK_URL / extra
-    ``webhook_url``) — per-session webhooks aren't available to cron jobs."""
+    ``webhook_url``) — per-session webhooks aren't available to scheduled jobs."""
     try:
         import httpx
     except ImportError:
         return send_error("httpx not installed")
     # Scoped: the webhook URL carries the robot's access_token and IS the delivery target — a raw
-    # environ read would post a secondary profile's cron output to the default profile's robot.
+    # environ read would post a secondary profile's scheduled output to the default profile's robot.
     webhook_url = (getattr(pconfig, "extra", {}) or {}).get("webhook_url") or _get_scoped_secret("DINGTALK_WEBHOOK_URL", "")
     if not webhook_url:
         return send_error("DingTalk not configured. Set DINGTALK_WEBHOOK_URL env var or webhook_url in dingtalk platform extra config.")

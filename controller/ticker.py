@@ -1,7 +1,7 @@
 """controller.ticker — the resident in-thread tick loop of the autonomy loop.
 
 MCU-style scheduler living INSIDE the hermes-gateway process: daemon threads
-started by the controller plugin (NOT systemd, NOT cron, NOT a separate
+started by the controller plugin (NOT systemd, NOT a background scheduler, NOT a separate
 process — vovak 24.10 06:21: "это внутренний thread самого гермес"). The pump
 drain runs via ``loop.run_cycle`` directly in the scheduler thread, which also
 keeps the worker pgid registry (adopt open runs from state.db, reap on death);
@@ -13,11 +13,11 @@ text anywhere in this path.
 Interval table (monotonic clock, re-anchored after any late tick):
   pump      5 min — drain every workdir that has ready/running tasks
   watchdog  30 min — pump staleness + machine-park repair (the rules of the
-                     deleted human-gate-watchdog cron, now deterministic code)
+                     deleted human-gate-watchdog ticker, now deterministic code)
 
 Single-flight: the gateway process is the singleton; the pump tick still takes
 the shared ``controller.pump_lock`` so a manual ``controller.pump_cli`` run or
-the residual cron backup tick (24h parallel soak) cannot pile a second drain
+the residual legacy-tick backup run (24h parallel soak) cannot pile a second drain
 on top of the in-thread one — a contended lock skips, never blocks.
 Process ownership of the ticker itself is a plain flock
 (``~/.hermes/run/controller-ticker.lock``): the kernel drops it when the
@@ -37,7 +37,7 @@ mid-drain included), and an atexit hook makes a normal gateway exit join it
 the same way. A hard kill cannot be joined — the restart-safe worker adoption
 above is the fallback, by design.
 
-Soak contract (task-ticker01): runs in parallel with the cron tick
+Soak contract (task-ticker01): runs in parallel with the legacy periodic tick
 b17bcdf067af for 24h; the heartbeats in ``ctl_ticker_heartbeat`` are the soak
 evidence (kind='pump'/'watchdog'/'ticker-start'/'ticker-stop').
 """
@@ -60,7 +60,7 @@ logger = logging.getLogger("controller.ticker")
 INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0}
 TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
 
-PUMP_STALE_S = 25 * 60   # the watchdog cron's own freshness rule
+PUMP_STALE_S = 25 * 60   # the watchdog ticker's own freshness rule
 MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
 HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
 HB_RETRIES = 3               # then the row is skipped, the tick stays alive
@@ -79,7 +79,7 @@ def _ownership_path() -> os.PathLike[str]:
 
 
 def _gates_file_path() -> os.PathLike[str]:
-    """The gate snapshot file the residual cron tick and gate tooling read
+    """The gate snapshot file the residual periodic tick and gate tooling read
     (external contract kept fresh by the in-thread ticker during the soak)."""
     from hermes_constants import get_hermes_home
     return get_hermes_home() / "run" / "pump-gates.json"
@@ -188,7 +188,7 @@ def _claim_owner(conn, boot_token: str, stale_after_s: float) -> str | None:
 
 def read_gates_file(path: str | None = None) -> dict | None:
     """Reader for the pump-gates.json external contract: a broken/absent
-    snapshot DEGRADES (logged, returns None) — the residual cron tick must not
+    snapshot DEGRADES (logged, returns None) — the residual periodic tick must not
     die on a snapshot the ticker failed to finish writing."""
     path = path or str(_gates_file_path())
     try:
@@ -498,7 +498,7 @@ class Ticker:
             " WHERE state IN ('ready','running')").fetchall()]
 
     def _worker_cfg(self) -> tuple:
-        """Fresh config read per drain (the cron tick did the same); a failed
+        """Fresh config read per drain (the periodic tick did the same); a failed
         load degrades to default routing, never a crash."""
         try:
             from hermes_cli.config import load_config_readonly
@@ -532,7 +532,7 @@ class Ticker:
 
     def _write_gates_file(self, snap: dict) -> None:
         """Keep ~/.hermes/run/pump-gates.json fresh — the external contract the
-        residual cron tick and gate tooling read during the parallel soak.
+        residual periodic tick and gate tooling read during the parallel soak.
         Written to a tmp file and os.replace-d: a kill mid-write must never
         hand the reader half a JSON document (audit 28.10)."""
         if not self.gates_path:
@@ -575,7 +575,7 @@ class Ticker:
             if scope not in cur:
                 del self._epochs[scope]
 
-    # -- watchdog (the deleted cron's rules, deterministic) ----------------------
+    # -- watchdog (the deleted ticker's rules, deterministic) ----------------------
 
     def run_watchdog(self, conn) -> None:
         # 0) retention (audit 28.10: an insert-only heartbeat table is a leak):

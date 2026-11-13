@@ -40,15 +40,6 @@ async def test_cancel_background_tasks_cancels_inflight_message_processing():
 
 
 
-def test_cron_provider_stop_cannot_override_gateway_exit_code():
-    provider = MagicMock()
-    provider.stop.side_effect = SystemExit(GATEWAY_SERVICE_RESTART_EXIT_CODE)
-
-    gateway_run._stop_cron_provider(provider)
-
-    provider.stop.assert_called_once_with()
-
-
 @pytest.mark.asyncio
 async def test_gateway_stop_interrupts_running_agents_and_cancels_adapter_tasks():
     runner, adapter = make_restart_runner()

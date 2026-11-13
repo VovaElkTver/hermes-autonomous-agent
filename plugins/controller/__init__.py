@@ -128,7 +128,7 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, task_id: s
 def pump(scope: str, *, worker_fn=None, review_fn=None, max_steps: int = 20) -> list[dict]:
     """Drive the autonomous cycle for one scope (queue + loop). The engine is pure and
     tested; worker_fn is host-provided (headless executor or delegate dispatch) and
-    review_fn defaults to the supervisor checkpoint. Safe to call from cron or a
+    review_fn defaults to the supervisor checkpoint. Safe to call from a periodic tick or a
     completion watcher: permission is re-checked at dispatch, so a paused queue no-ops."""
     from controller import loop as _loop
     if worker_fn is None:
@@ -221,7 +221,7 @@ def register(ctx):
         except Exception as exc:
             logger.warning("controller recovery failed: %s", exc)
         # The autonomy loop itself now runs IN THIS PROCESS: one daemon thread,
-        # fixed cadence, no cron for the mechanics. Ownership (flock) makes it a
+        # fixed cadence, no background scheduler for the mechanics. Ownership (flock) makes it a
         # gateway singleton even though CLI/worker processes also load this plugin.
         try:
             from agent import safe_mode as _safe_mode

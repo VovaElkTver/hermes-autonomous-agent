@@ -1243,7 +1243,7 @@ class GoogleChatAdapter(BasePlatformAdapter):
                            chat_id: Optional[str] = None) -> Optional[str]:
         """Thread to reply under, or None: ``metadata['thread_id']`` → ``thread_name`` /
         ``thread_ts`` aliases → ``reply_to`` when already a ``spaces/X/threads/Y`` name →
-        ``_last_inbound_thread[chat_id]`` (else DM replies land top-level). Cron deliveries
+        ``_last_inbound_thread[chat_id]`` (else DM replies land top-level). Scheduled deliveries
         (``job_id`` in metadata) skip the last fallback so output is not buried in a stale thread."""
         if metadata:
             for key in ("thread_id", "thread_name", "thread_ts"):
@@ -1688,7 +1688,7 @@ def interactive_setup() -> None:
         save_env_value("GOOGLE_CHAT_ALLOW_ALL_USERS", "true")
         print_warning("⚠️  Open access — anyone who can DM the bot can command it.")
     home = prompt(
-        "Home space for cron/notification delivery (e.g. spaces/AAAA, or empty)",
+        "Home space for scheduled/notification delivery (e.g. spaces/AAAA, or empty)",
         default=get_env_value("GOOGLE_CHAT_HOME_CHANNEL") or "",
     )
     if home:
@@ -1724,7 +1724,7 @@ async def _standalone_send(
     media_files: Optional[list[str]] = None, force_document: bool = False,
 ) -> dict[str, Any]:
     """POST one Chat message via REST without the SDK (``send_message_tool`` when the
-    gateway runner is not in-process, e.g. ``hermes cron``). Needs SA credentials and a
+    gateway runner is not in-process, e.g. a detached one-shot send). Needs SA credentials and a
     validated space name; ``media_files`` / ``force_document`` are signature parity only."""
     if not chat_id:
         return _standalone_error("chat_id (space resource) is required")
@@ -1750,7 +1750,7 @@ async def _standalone_send(
         return _standalone_error(_STANDALONE_SA_ERRORS[err.kind].format(exc=err.detail, path=sa_value))
     except Exception as e:
         return _standalone_error(f"credential load failed: {e}")
-    # Bound the synchronous token refresh so a hung STS endpoint can't stall cron.
+    # Bound the synchronous token refresh so a hung STS endpoint can't stall scheduled sends.
     try:
         await asyncio.wait_for(asyncio.to_thread(creds.refresh, _GoogleAuthRequest()), timeout=10.0)
     except TimeoutError:

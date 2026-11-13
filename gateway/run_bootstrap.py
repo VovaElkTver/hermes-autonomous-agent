@@ -389,27 +389,25 @@ async def _start_gateway_start_control_socket(runner):
     return _control_server
 
 
-def _start_gateway_start_cron_and_housekeeping(runner):
-    """Start the gateway housekeeping thread; returns ``(cron_stop, cron_provider,
-    cron_thread, housekeeping_thread)``. Cron is excised on this branch: the middle
-    two are always ``None``/``None`` kept for call-site stability."""
+def _start_gateway_periodic_threads(runner):
+    """Start the gateway background threads; returns ``(periodic_stop, housekeeping_thread)``.
+
+    ``periodic_stop`` gates housekeeping and the event-driven tasks/queue processor loop;
+    setting it once begins an orderly stop of both.
+    """
     from gateway.run import (_start_gateway_housekeeping, asyncio, get_hermes_home, logger, threading)
     # Hoisted to function scope: the hermes_events SAFE gate below reads _safe_mode
-    # on the cron-excised path too (a branch-local import left it unbound ->
-    # UnboundLocalError crash-loop 09.11).
+    # on this path too (a branch-local import left it unbound -> UnboundLocalError
+    # crash-loop 09.11).
     from agent import safe_mode as _safe_mode
-    # Cron was excised from this branch (no ``cron`` package): no scheduler provider,
-    # ticker or store. Housekeeping receives cron_provider=None/cron_thread=None so the
-    # excised cron chores stand down; shutdown stays None-safe.
-    cron_stop = threading.Event()
-    cron_provider = None
-    cron_thread: Any = None
+    # No standalone scheduler exists on this branch (excised pre-fork): periodicity lives in
+    # systemd timers plus the in-gateway controller ticker, and event-driven flow in the
+    # tasks/queue processor below. Shutdown stays None-safe for everything else.
+    periodic_stop = threading.Event()
     from gateway.runtime_ownership import process_ownership
-    logger.info("Fork autonomous_mode: cron excised — scheduler not started")
 
-    # hermes_events: the kernel's own event processor (fleet fork, 26.10 contract — the
-    # replacement for cron-thinking, not another cron). Same SAFE gate, fail-open:
-    # an experimental subsystem must never gate the message loop.
+    # hermes_events: the kernel's own event processor (fleet fork, 26.10 contract). Same SAFE
+    # gate, fail-open: an experimental subsystem must never gate the message loop.
     if _safe_mode.is_safe():
         logger.warning("SAFE MODE: hermes_events processor not started")
     else:
@@ -428,9 +426,9 @@ def _start_gateway_start_cron_and_housekeeping(runner):
             _events_processor.start()
 
             def _events_loop() -> None:
-                while not cron_stop.is_set():
-                    cron_stop.wait(30)
-                    if cron_stop.is_set():
+                while not periodic_stop.is_set():
+                    periodic_stop.wait(30)
+                    if periodic_stop.is_set():
                         break
                     try:
                         _events_processor.tick()
@@ -444,21 +442,19 @@ def _start_gateway_start_cron_and_housekeeping(runner):
         except Exception:
             logger.exception("hermes_events failed to start; continuing without it")
 
-    # (External cron-provider api-server warning excised with the cron package.)
-
-    # Gateway-only housekeeping runs independently of the cron provider; shares cron_stop for shutdown.
+    # Gateway-only housekeeping shares ``periodic_stop`` so one set() stops both loops.
     housekeeping_thread = threading.Thread(
-        target=_start_gateway_housekeeping, args=(cron_stop,),
+        target=_start_gateway_housekeeping, args=(periodic_stop,),
         kwargs={"adapters": runner.adapters, "loop": asyncio.get_running_loop(),
-                "cron_provider": cron_provider, "runner": runner, "cron_thread": cron_thread},
+                "runner": runner},
         daemon=True, name="gateway-housekeeping")
     process_ownership.start_writer(housekeeping_thread)
-    return cron_stop, cron_provider, cron_thread, housekeeping_thread
+    return periodic_stop, housekeeping_thread
 
 
 async def _start_gateway_shutdown_tail(
-    runner, _control_server, cron_stop: threading.Event, cron_provider,
-    cron_thread: Any, housekeeping_thread: threading.Thread,
+    runner, _control_server, periodic_stop: threading.Event,
+    housekeeping_thread: threading.Thread,
     _planned_stop_watcher_stop: threading.Event, _planned_stop_watcher_thread: threading.Thread,
     _signal_initiated_shutdown: list) -> bool:
     """Post-``wait_for_shutdown`` teardown; returns the process exit verdict (True = exit 0)."""
@@ -477,9 +473,10 @@ async def _start_gateway_shutdown_tail(
 
     _best_effort(_stop_keepalive)
 
-    # Cron was excised, so there is no scheduler/provider/thread to drain here (the historical
-    # cooperative-await rationale lives in git history, #58818/#12175).
-    cron_stop.set()
+    # No standalone scheduler remains to drain here (the historical cooperative-await
+    # rationale lives in git history, #58818/#12175); the stop event folds in
+    # housekeeping + the event-processor loop.
+    periodic_stop.set()
     await _await_thread_exit(housekeeping_thread, timeout=_HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT)
 
     # Stop the planned-stop watcher (daemon=True so this is belt-and-suspenders).
@@ -494,7 +491,7 @@ async def _start_gateway_shutdown_tail(
         logger.warning("MCP shutdown failed; connections may be left open", exc_info=True)
 
     # The failure verdict comes AFTER the cooperative teardown: returning early here leaked the
-    # cron ticker + housekeeping threads (and open MCP connections) for embedded callers (#12175).
+    # housekeeping thread (and open MCP connections) for embedded callers (#12175).
     return _resolve_gateway_exit_verdict(runner, _signal_initiated_shutdown[0])
 
 
@@ -647,11 +644,11 @@ def _start_gateway_install_signal_handlers(loop, shutdown_signal_handler, restar
 
 async def _start_gateway_run_runner(runner, _signal_initiated_shutdown: list) -> Optional[bool]:
     """MCP discovery, then ``runner.start()``. Returns the exit verdict when the process must end
-    before running mode (start failed, clean exit, aborted startup); None to continue into cron."""
+    before running mode (start failed, clean exit, aborted startup); None to continue into running mode."""
     from gateway.run import (_discover_gateway_mcp_tools, _resolve_gateway_exit_verdict,
                              _shutdown_gateway_health_export, _shutdown_mcp_servers_nonblocking)
     # SAFE MODE boot identity (fleet fork): one-shot flag consumed here; the whole node
-    # comes up owner-transport-only — cron ticker, controller pump, MCP and hermes_events
+    # comes up owner-transport-only — controller ticker pump, MCP and hermes_events
     # stay off, and the sterile boot isolates history/memory/skills by session key suffix.
     from agent import safe_mode as _safe_mode
     if _safe_mode.consume_boot_flag():
@@ -688,7 +685,8 @@ async def _start_gateway_run_runner(runner, _signal_initiated_shutdown: list) ->
             raise SystemExit(runner.exit_code)
         return True
     if not runner._running:
-        # Startup aborted by restart/shutdown before running mode; preserve that path without starting cron.
+        # Startup aborted by restart/shutdown before running mode; preserve that path without
+        # starting the periodic threads.
         try:
             await runner.wait_for_shutdown()
             try:
@@ -867,7 +865,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         from gateway.run_runtime import start_gateway_runtime_api
         await start_gateway_runtime_api(runner)
         from gateway.run_api import await_session_socket_preload, preload_session_socket
-        ws_preload = preload_session_socket() if idle_exit else None  # overlaps the adapter/cron start
+        ws_preload = preload_session_socket() if idle_exit else None  # overlaps the adapter start
 
         def _lifecycle_record_startup() -> Optional[dict]:
             # Report if the previous life died uncleanly (SIGKILL / OOM / VM death), then claim the
@@ -891,14 +889,14 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         if _unclean_exit is not None:
             _start_deferred_state_db_integrity_check(_unclean_exit)
 
-        cron_stop, cron_provider, cron_thread, housekeeping_thread = (
-            _start_gateway_start_cron_and_housekeeping(runner))
+        periodic_stop, housekeeping_thread = (
+            _start_gateway_periodic_threads(runner))
         # From here every exit (a READY publication that raises included) runs the shutdown tail,
-        # which stops the cron ticker and housekeeping before the adapters they deliver through close.
+        # which stops housekeeping (and its shared stop event) before the adapters it delivers through close.
         from gateway.run_runtime import publish_gateway_runtime_ready, wait_gateway_runtime
         try:
             await await_session_socket_preload(ws_preload)
-            # READY only once adapters, cron and housekeeping run; missing systemd state just disables watchdog.
+            # READY only once adapters and housekeeping run; missing systemd state just disables watchdog.
             publish_gateway_runtime_ready(runner)
             runner._start_systemd_watchdog()
             if idle_exit:
@@ -916,7 +914,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                 await runner.stop()
             finally:
                 verdict = await _start_gateway_shutdown_tail(
-                    runner, _control_server, cron_stop, cron_provider, cron_thread, housekeeping_thread,
+                    runner, _control_server, periodic_stop, housekeeping_thread,
                     _planned_stop_watcher_stop, _planned_stop_watcher_thread, _signal_initiated_shutdown)
         return verdict
 

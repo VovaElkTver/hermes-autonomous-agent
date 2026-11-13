@@ -933,7 +933,7 @@ async def _standalone_send(
     pconfig, chat_id: str, message: str, *,
     thread_id: Optional[str] = None, media_files: Optional[list[str]] = None, force_document: bool = False,
 ) -> dict[str, Any]:
-    """Out-of-process Push delivery for cron jobs detached from the gateway (no inbound event → no
+    """Out-of-process Push delivery for scheduled jobs detached from the gateway (no inbound event → no
     reply token). ``thread_id`` is ignored (no threads); ``media_files`` need the webhook server."""
     token = _credentials(pconfig)[0]
     if not token or not chat_id:

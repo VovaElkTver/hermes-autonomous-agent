@@ -270,7 +270,7 @@ def _guess_chat_type(message: dict[str, Any], account_id: str) -> tuple[str, str
 
 
 # HTTP helpers enforce timeouts via asyncio.wait_for(), not aiohttp ClientTimeout, which raises
-# "Timeout context manager should be used inside a task" under run_coroutine_threadsafe() from a cron tick.
+# "Timeout context manager should be used inside a task" under run_coroutine_threadsafe() from a periodic tick.
 async def _api_request(
     session: aiohttp.ClientSession, method: str, *, base_url: str, endpoint: str, headers: dict[str, str], timeout_ms: int, body: Optional[str] = None,
 ) -> dict[str, Any]:
@@ -765,7 +765,7 @@ class WeixinAdapter(OwnAccessPolicyMixin, BasePlatformAdapter):
         except Exception as exc:
             logger.debug("[%s] Token lock unavailable (non-fatal): %s", self.name, exc)
         self._poll_session = _new_session()
-        # total=None disables aiohttp's ClientTimeout so send() works via run_coroutine_threadsafe() from cron;
+        # total=None disables aiohttp's ClientTimeout so send() works via run_coroutine_threadsafe() from periodic ticks;
         # _api_post/_api_get enforce timeouts with asyncio.wait_for() instead.
         self._send_session = _new_session(timeout=aiohttp.ClientTimeout(total=None, connect=None, sock_connect=None, sock_read=None))
         self._token_store.restore(self._account_id)
@@ -977,7 +977,7 @@ class WeixinAdapter(OwnAccessPolicyMixin, BasePlatformAdapter):
     async def _send_text_chunk(self, *, chat_id: str, chunk: str, context_token: Optional[str], client_id: str) -> None:
         """Send one text chunk with retry/backoff under the adapter-wide text gate. A stale-session response (``-14``,
         or ``-2`` with ``prepare failed``/``unknown error``) is re-sent once *without* ``context_token`` — iLink accepts
-        tokenless sends as a degraded fallback, which keeps cron pushes working when no user message refreshed the
+        tokenless sends as a degraded fallback, which keeps scheduled pushes working when no user message refreshed the
         session. A ``-2`` that survives that fails fast via ``_session_not_ready_error``."""
         async with self._send_text_gate:
             last_error: Optional[Exception] = None
@@ -1227,7 +1227,7 @@ async def _deliver_direct(
 async def send_weixin_direct(
     *, extra: dict[str, Any], token: Optional[str], chat_id: str, message: str, media_files: Optional[list[tuple[str, bool]]] = None,
 ) -> dict[str, Any]:
-    """One-shot send for ``send_message``/cron: reuse the live adapter's session on this loop, else a throwaway adapter."""
+    """One-shot send for ``send_message``/scheduled sends: reuse the live adapter's session on this loop, else a throwaway adapter."""
     account_id = _extra_or_secret(extra, "account_id")
     base_url = _extra_or_secret(extra, "base_url", ILINK_BASE_URL).rstrip("/")
     cdn_base_url = _extra_or_secret(extra, "cdn_base_url", WEIXIN_CDN_BASE_URL).rstrip("/")
@@ -1280,7 +1280,7 @@ def _is_connected(config: Any) -> bool:
 
 async def _standalone_send(pconfig: Any, chat_id: str, message: str, *, thread_id: Optional[str] = None,
                            media_files: Optional[list] = None, force_document: bool = False) -> dict[str, Any]:
-    """Out-of-process ``send_message``/cron sender: native text + media via :func:`send_weixin_direct`.
+    """Out-of-process ``send_message``/scheduled sender: native text + media via :func:`send_weixin_direct`.
     ``thread_id``/``force_document`` are signature parity only (iLink has neither). Imports nothing from
     other plugins, so an unrelated optional SDK (e.g. lark-oapi) can never block Weixin delivery."""
     from gateway.platforms._shared import send_error
@@ -1424,7 +1424,7 @@ def register(ctx) -> None:
         config_connected_fn=_config_connected,
         setup_fn=interactive_setup,
         cron_deliver_env_var="WEIXIN_HOME_CHANNEL",
-        # Out-of-process send_message/cron; the adapter's own send() chunks (MAX_MESSAGE_LENGTH), so
+        # Out-of-process send_message/scheduled sends; the adapter's own send() chunks (MAX_MESSAGE_LENGTH), so
         # max_message_length stays 0: send_message hands the full text + all media to one native send.
         standalone_sender_fn=_standalone_send, max_message_length=0, emoji="💬", allow_update_command=True,
         platform_hint=_PLATFORM_HINT,

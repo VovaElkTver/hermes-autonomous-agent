@@ -1423,7 +1423,7 @@ _TOOL_MEDIA_RE = re.compile(
     re.IGNORECASE)
 
 
-# Shared with cron delivery and gateway background tasks; canonical names live in gateway.media_repair.
+# Shared with scheduled background delivery and gateway background tasks; canonical names live in gateway.media_repair.
 from gateway.media_repair import tool_name_by_call_id as _tool_name_by_call_id
 
 
@@ -1530,8 +1530,8 @@ def _collect_history_media_paths(agent_history: list[dict[str, Any]]) -> set:
     return paths
 
 def _home_target_env_var(platform_name: str) -> str:
-    """Home-target env var: ``<PLATFORM>_HOME_CHANNEL`` (the cron-delivery override
-    spelling from ``cron.scheduler_delivery`` was excised with the cron package)."""
+    """Home-target env var: ``<PLATFORM>_HOME_CHANNEL`` (the scheduled-delivery override
+    spelling from the pre-fork ``scheduler_delivery`` module was excised with that package)."""
     return f"{platform_name.upper()}_HOME_CHANNEL"
 
 
@@ -1664,39 +1664,12 @@ def _cron_tick_profile_homes(config: object) -> list[tuple[str, Path]]:
         return homes
 
 
-def _cron_profile_gate(name: str, home: Path) -> bool:
-    """Tick ``home`` this cycle unless ANOTHER gateway process owns it.
-
-    Same stand-down the serve/Desktop ticker applies (``hermes_cli/web_server.py``): a host that
-    has not finished converging onto the one host gateway (``hermes gateway migrate --multiplex``)
-    may still run profile B's own gateway, and without this both it and this process race B's
-    ``cron/.tick.lock``. The lock stops a simultaneous double-run but not the race: when this
-    process wins, B's delivery leaves through ``SharedRouteAdapters``/fail-closed instead of B's
-    live adapters.
-
-    The liveness answer is compared against our OWN pid, never used bare: this process holds the
-    launch home's ``gateway.pid`` and publishes every served profile in ``served_profiles``, so a
-    bare ``_check_gateway_running`` reports "running" for every home we serve — standing us down
-    from all of them and stopping cron host-wide.
-    """
-    from gateway.status import get_running_pid, resolve_gateway_liveness
-
-    try:
-        liveness = resolve_gateway_liveness(
-            profile_dir=Path(home), use_cache=False,
-            pid_probe=lambda path: get_running_pid(path, cleanup_stale=False))
-    except Exception as exc:
-        logger.debug("Cron profile gate probe failed for %s (ticking it): %s", name, exc)
-        return True
-    return not (liveness.running and liveness.pid is not None and liveness.pid != os.getpid())
-
-
 def _enable_multiplex_log_routing(config: object) -> bool:
     """Route agent.log/errors.log/gateway.log records to their owning profile (inert single-profile).
     ``setup_logging(mode="gateway")`` binds file handlers to the launch home, so under multiplexing
     every secondary profile's records would land in the default profile's logs.
 
-    Swap the static handlers for the profile routers from #99440 — the same primitive the Desktop cron
+    Swap the static handlers for the profile routers from #99440 — the same primitive the Desktop
     ticker uses — once the served-profile set is known. Inert for single-profile gateways
     (``enable_profile_log_routing`` is a no-op below two homes).
     """
@@ -2087,7 +2060,7 @@ def _bridge_config_to_env(_cfg: dict) -> None:
     _security_cfg = _cfg.get("security", {})
     if isinstance(_security_cfg, dict) and _security_cfg.get("redact_secrets") is not None:
         os.environ["HERMES_REDACT_SECRETS"] = str(_security_cfg["redact_secrets"]).lower()
-    # Media policy uses the shared bridge so standalone entrypoints (`hermes cron run`) match.
+    # Media policy uses the shared bridge so standalone entrypoints match gateway behavior.
     _gateway_cfg = _cfg.get("gateway", {})
     if isinstance(_gateway_cfg, dict):
         from gateway.media_policy import apply_media_policy_env
@@ -2164,10 +2137,10 @@ from gateway.session import (
     AsyncSessionStore, SessionStore, SessionSource, SessionContext, build_session_key,
     profile_from_session_key_namespace)
 # Telegram topic routing (#22773, regression fixed #52060): a
-# ``telegram:<positive_chat_id>:<numeric_thread_id>`` cron target is ambiguous — a forum-style topic in a
+# ``telegram:<positive_chat_id>:<numeric_thread_id>`` scheduled-delivery target is ambiguous — a forum-style topic in a
 # private chat and a genuine Bot API channel Direct-Messages topic share the same shape and need OPPOSITE
 # routing. Disambiguate at delivery time via ``_is_channel_dm_topic`` (see its docstring for the full
-# rationale); ``thread_id`` goes in ``route_metadata`` so the anchorless cron send bypasses the
+# rationale); ``thread_id`` goes in ``route_metadata`` so the anchorless background send bypasses the
 # DeliveryRouter's private-chat reply-anchor requirement. Compute the routed metadata ONCE so both the text
 # send (via DeliveryRouter) and the media send agree.
 from gateway.delivery import DeliveryRouter
@@ -4420,12 +4393,10 @@ def _housekeeping_checkpoint_prune() -> None:
 
 
 def _start_gateway_housekeeping(
-    stop_event: threading.Event, adapters=None, loop=None, interval: int = 60, cron_provider=None, runner=None,
-    cron_thread=None,
+    stop_event: threading.Event, adapters=None, loop=None, interval: int = 60, runner=None,
 ):
-    """Background thread for gateway-only periodic chores. Cron was excised from this
-    branch, so ``cron_provider``/``cron_thread`` stay ``None`` and the excised cron
-    chores stand down; cadences are ticks of ``interval``, inner gates own the real cadence."""
+    """Background thread for gateway-only periodic chores. The standalone scheduler was excised
+    pre-fork — cadences are ticks of ``interval``, inner gates own the real cadence."""
     from gateway.run_profile_reconcile import _mcp_config_reconciler, profile_scoped_chore
     from gateway.run_housekeeping_disk import housekeeping_media_caches, maybe_post_auto_prune_prompt
     chores: list[tuple[int, str, Any]] = [
@@ -4440,11 +4411,6 @@ def _start_gateway_housekeeping(
         (60, "Paste sweep", _housekeeping_paste_sweep)]
     # Low disk + auto-prune undecided: ask on the home channel (two syscalls; snoozed per post).
     chores.append((1, "Auto-prune low-disk prompt", lambda: maybe_post_auto_prune_prompt(runner, loop)))
-    # Cron was excised: no misfire-catch-up chore, no ticker to supervise.
-    if cron_thread is not None:
-        # The ticker's own guards keep its loop alive; this is the outer layer for a thread that has
-        # already ended (#111010). Runs every tick so the outage is bounded by one housekeeping interval.
-        chores.append((1, "Cron ticker supervisor", cron_thread.restart_if_dead))
     chores += [
         # Per served profile: each profile has its own skills tree, curator state, Nous login
         # and state.db.
@@ -4471,7 +4437,7 @@ def _start_gateway_housekeeping(
         for every, label, fn in chores:
             if tick_count % every == 0:
                 _housekeeping_chore(label, fn)
-        # The excised cron delivery-queue watch (#117307) went with the cron package;
+        # The pre-fork scheduled delivery-queue watch (#117307) went with that package;
         # plain inter-tick sleep since nothing else can move a wake-up deadline.
         stop_event.wait(timeout=interval)
     logger.info("Gateway housekeeping stopped")
@@ -4484,7 +4450,7 @@ _HOUSEKEEPING_SHUTDOWN_DRAIN_TIMEOUT = 35.0
 async def _await_thread_exit(
     thread: Optional[threading.Thread], timeout: float, poll: float = 0.1) -> bool:
     """Wait for a daemon thread to exit WITHOUT blocking the event loop; True if it exited in time.
-    A synchronous ``join()`` freezes the loop — fatal for the cron ticker, whose in-flight delivery is a
+    A synchronous ``join()`` freezes the loop — fatal for the controller ticker, whose in-flight delivery is a
     coroutine on *this* loop: it could never run, so the join timed out and the message dropped.
 
     See #58818.
@@ -4934,8 +4900,8 @@ def _refresh_host_gateway_record(runner) -> None:
 # Bootstrap phases bound on the facade: ``_host_attach_or_none`` reads the replace step through this
 # module, and the lifecycle tests patch/drive these phases as ``gateway.run`` attributes.
 from gateway.run_bootstrap import (
-    _start_gateway_make_shutdown_signal_handler, _start_gateway_replace_existing_instance,
-    _start_gateway_shutdown_tail, _start_gateway_start_cron_and_housekeeping,
+    _start_gateway_make_shutdown_signal_handler, _start_gateway_periodic_threads,
+    _start_gateway_replace_existing_instance, _start_gateway_shutdown_tail,
 )
 
 
@@ -5064,7 +5030,7 @@ def main():
     # wedged non-daemon worker can't block Py_FinalizeEx's join. SystemExit caught so EVERY path exits.
     try:
         # start_gateway() performs the full graceful teardown (adapters disconnected, sessions saved +
-        # flushed, SQLite closed, cron/MCP stopped, PID file + runtime lock released) before it returns OR
+        # flushed, SQLite closed, housekeeping/MCP stopped, PID file + runtime lock released) before it returns OR
         # raises SystemExit with an explicit code. Force-exit afterwards so a wedged non-daemon worker
         # thread (e.g. a ThreadPoolExecutor tool/LLM call blocked with no timeout) cannot block interpreter
         # finalization (Py_FinalizeEx joins all non-daemon threads, incl. concurrent.futures' _python_exit)

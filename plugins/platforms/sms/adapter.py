@@ -6,7 +6,7 @@ Env vars — shared with the telephony skill: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TO
 TWILIO_PHONE_NUMBER (E.164 from-number). Gateway-specific: SMS_WEBHOOK_PORT (8080),
 SMS_WEBHOOK_HOST (127.0.0.1), SMS_WEBHOOK_URL (public URL for Twilio signature
 validation — required), SMS_INSECURE_NO_SIGNATURE (true disables validation — dev only),
-SMS_ALLOWED_USERS (comma-separated E.164), SMS_ALLOW_ALL_USERS, SMS_HOME_CHANNEL (cron).
+SMS_ALLOWED_USERS (comma-separated E.164), SMS_ALLOW_ALL_USERS, SMS_HOME_CHANNEL (scheduled deliveries).
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class SmsAdapter(BasePlatformAdapter):
     serves_profile_prefix: bool = True
 
     MAX_MESSAGE_LENGTH = MAX_SMS_LENGTH
-    # send() splits at MAX_MESSAGE_LENGTH, so cron delivery hands over the full payload.
+    # send() splits at MAX_MESSAGE_LENGTH, so scheduled delivery hands over the full payload.
     splits_long_messages = True
 
     def __init__(self, config: PlatformConfig):

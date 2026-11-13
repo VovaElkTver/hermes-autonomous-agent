@@ -249,12 +249,12 @@ class TestUninstallRefusesForeignUnit:
         assert "/somewhere/else" in capsys.readouterr().out
 
 
-class TestGetCronDrainTimeout:
+class TestGetPeriodicDrainTimeout:
     def test_missing_config_falls_back_to_default(self, monkeypatch):
         monkeypatch.delenv("HERMES_CRON_DRAIN_TIMEOUT", raising=False)
         monkeypatch.setattr(gateway_cli, "read_raw_config", dict)
         assert (
-            gateway_cli._get_cron_drain_timeout() == DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT
+            gateway_cli._get_periodic_drain_timeout() == DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT
         )
 
     def test_zero_in_config_is_opt_out(self, monkeypatch):
@@ -264,7 +264,7 @@ class TestGetCronDrainTimeout:
             "read_raw_config",
             lambda: {"agent": {"cron_drain_timeout": 0}},
         )
-        assert gateway_cli._get_cron_drain_timeout() == 0.0
+        assert gateway_cli._get_periodic_drain_timeout() == 0.0
 
     def test_env_overrides_config(self, monkeypatch):
         monkeypatch.setenv("HERMES_CRON_DRAIN_TIMEOUT", "45")
@@ -273,7 +273,7 @@ class TestGetCronDrainTimeout:
             "read_raw_config",
             lambda: {"agent": {"cron_drain_timeout": 90}},
         )
-        assert gateway_cli._get_cron_drain_timeout() == 45.0
+        assert gateway_cli._get_periodic_drain_timeout() == 45.0
 
 
 class TestGeneratedSystemdUnits:
@@ -284,8 +284,8 @@ class TestGeneratedSystemdUnits:
         )
         return f"TimeoutStopSec={timeout}"
 
-    def test_timeout_stop_sec_covers_default_cron_drain_floor(self, monkeypatch):
-        """#94759: default restart_drain_timeout=0 still leaves a 30s cron
+    def test_timeout_stop_sec_covers_default_background_drain_floor(self, monkeypatch):
+        """#94759: default restart_drain_timeout=0 still leaves a 30s background
         floor plus cleanup reserve. The old max(60, drain+30)=60 unit
         SIGKILLed that in-budget drain."""
         monkeypatch.delenv("HERMES_RESTART_DRAIN_TIMEOUT", raising=False)
@@ -293,7 +293,7 @@ class TestGeneratedSystemdUnits:
         monkeypatch.setattr(gateway_cli, "_get_restart_drain_timeout", lambda: 0.0)
         monkeypatch.setattr(
             gateway_cli,
-            "_get_cron_drain_timeout",
+            "_get_periodic_drain_timeout",
             lambda: DEFAULT_GATEWAY_CRON_DRAIN_TIMEOUT,
         )
 
@@ -306,11 +306,11 @@ class TestGeneratedSystemdUnits:
         assert self._expected_timeout_stop_sec() in unit
 
 
-    def test_timeout_stop_sec_keeps_the_floor_when_cron_drain_is_opted_out(
+    def test_timeout_stop_sec_keeps_the_floor_when_background_drain_is_opted_out(
         self, monkeypatch
     ):
         monkeypatch.setattr(gateway_cli, "_get_restart_drain_timeout", lambda: 0.0)
-        monkeypatch.setattr(gateway_cli, "_get_cron_drain_timeout", lambda: 0.0)
+        monkeypatch.setattr(gateway_cli, "_get_periodic_drain_timeout", lambda: 0.0)
 
         unit = gateway_cli.generate_systemd_unit(system=False)
         assert "TimeoutStopSec=60" in unit
@@ -1458,7 +1458,7 @@ class TestSystemUnitHermesHome:
 
     def test_installed_unit_keeps_ld_library_path_when_the_shell_lacks_it(self, monkeypatch, tmp_path):
         """The unit is regenerated and compared on every start/restart/status; a later shell without
-        the export (ssh, cron, sudo) must see the installed unit as current, not "repair" the line away."""
+        the export (ssh, sudo, batch jobs) must see the installed unit as current, not "repair" the line away."""
         unit_path = tmp_path / "hermes-gateway.service"
         monkeypatch.setattr(gateway_cli, "get_systemd_unit_path", lambda system=False: unit_path)
         monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/cuda/lib64:/opt/pct%dir/lib")
@@ -2780,13 +2780,13 @@ class TestRetryLaunchctlBootstrapUntilRegistered:
         assert list_calls["n"] >= 1
 
 
-class TestTimeoutStopSecCoversCronFloor:
+class TestTimeoutStopSecCoversBackgroundFloor:
     """#94759: TimeoutStopSec must cover the FULL stop budget.
 
-    resolve_cron_drain_budget() can hold the shutdown drain for
-    agent.cron_drain_timeout plus CRON_DRAIN_CLEANUP_RESERVE_S on top of
+    resolve_background_drain_budget() can hold the shutdown drain for
+    agent.cron_drain_timeout plus BACKGROUND_DRAIN_CLEANUP_RESERVE_S on top of
     (as a max of) the restart drain, so the unit leash is sized from
-    max(restart_drain, cron_floor) + 30 — not the restart drain alone."""
+    max(restart_drain, background_floor) + 30 — not the restart drain alone."""
 
     def _unit_with_config(self, tmp_path, monkeypatch, config_yaml, env=None):
         hermes = tmp_path / "home" / ".hermes"
@@ -2803,7 +2803,7 @@ class TestTimeoutStopSecCoversCronFloor:
             monkeypatch.setenv(key, value)
         return gateway_cli.generate_systemd_unit(system=False)
 
-    def test_cron_floor_dominates_when_larger(self, tmp_path, monkeypatch):
+    def test_background_floor_dominates_when_larger(self, tmp_path, monkeypatch):
         unit = self._unit_with_config(
             tmp_path,
             monkeypatch,
@@ -2819,9 +2819,9 @@ class TestTimeoutStopSecCoversCronFloor:
             monkeypatch,
             "agent:\n  restart_drain_timeout: 60\n",
         )
-        # An explicit restart drain above the default cron floor keeps the old
+        # An explicit restart drain above the default floor keeps the old
         # formula's result — no regression for restart-drain-dominated installs.
-        assert "TimeoutStopSec=90" in unit  # 60s drain + 30s cleanup: same as the pre-cron formula
+        assert "TimeoutStopSec=90" in unit  # 60s drain + 30s cleanup: unchanged long-standing formula
 
     def test_env_override_extends_the_leash(self, tmp_path, monkeypatch):
         unit = self._unit_with_config(

@@ -105,14 +105,15 @@ DEFAULT_CONFIG = {
         # TimeoutStopSec or risk SIGKILL mid-cleanup; for /restart prefer restart_after_turn_timeout
         # so turns finish BEFORE stop().
         "restart_drain_timeout": 0,
-        # Floor under the stop()/drain wait (seconds) for cron jobs and api_server runs. Interrupted
-        # chat turns resume on the next message, but an interrupted cron run is recorded as a
-        # permanent failure and an interrupted /v1 run fails its waiting caller, so neither may
-        # inherit restart_drain_timeout's 0 (#82161, #132989). Clamped to the shutdown-watchdog
+        # Floor under the stop()/drain wait (seconds) for api_server (/v1) runs — and, pre-fork,
+        # scheduled background jobs (that mechanism is excised; key name kept so existing
+        # configs keep resolving). Interrupted chat turns resume on the next message, but an
+        # interrupted /v1 run fails its waiting caller, so it may not inherit
+        # restart_drain_timeout's 0 (#82161, #132989). Clamped to the shutdown-watchdog
         # leash minus teardown headroom (~50s unless TimeoutStopSec is raised). 0 = opt out.
         "cron_drain_timeout": 30,
         # In-band restart (/restart, SIGUSR1): refuse new work, then wait up to this many seconds
-        # for in-flight agents/cron/api runs to finish before stop(). 0 = enter stop() at once. 30
+        # for in-flight agents/api runs to finish before stop(). 0 = enter stop() at once. 30
         # min is a safety valve for wedged agents, not a target; raise for long unattended turns.
         # Default 30 min is a safety valve for wedged agents, not a target latency — an interactive `hermes
         # gateway restart` must never block for hours on a turn that wedged (#79133).
@@ -472,7 +473,7 @@ DEFAULT_CONFIG = {
         "camofox": {},
     },
     # Stale git worktree lifecycle (`hermes -w`, `/worktree new`, subagent isolation, Desktop). The
-    # sweep runs at `hermes -w` startup and every 6h from the cron ticker over every repo Hermes made
+    # sweep runs at `hermes -w` startup and every 6h from the gateway's periodic ticker over every repo Hermes made
     # a worktree in. Trees idle past their tier (hermes-*/subagent-* 24h, named 72h) that are clean
     # and merged are removed; dirty or unpushed ones are archived to refs/hermes/archive/<tree>
     # first (`hermes worktree restore <name>`). Live trees and Kanban t_<hex> trees are never touched.
@@ -552,7 +553,7 @@ DEFAULT_CONFIG = {
     "tool_loop_guardrails": {
         "warnings_enabled": True,
         "hard_stop_enabled": False,
-        # Unattended gateway/cron platforms hard-stop by default (nobody can /stop a model that
+        # Unattended gateway platforms hard-stop by default (nobody can /stop a model that
         # ignores warnings); interactive cli/tui/desktop/acp stay warning-only.
         "non_interactive_hard_stop_enabled": True,
         "warn_after": {"exact_failure": 2, "same_tool_failure": 3, "idempotent_no_progress": 2},
@@ -690,7 +691,7 @@ DEFAULT_CONFIG = {
         "prepare_ahead": False,
     },
     # Anthropic prompt caching (Claude via OpenRouter or native API). cache_ttl: "5m" | "1h" | "auto"
-    # (auto = 1h for human-paced sessions — cli/tui/desktop/messaging — and 5m for subagent, cron,
+    # (auto = 1h for human-paced sessions — cli/tui/desktop/messaging — and 5m for subagent,
     # oneshot, webhook, kanban, api, tool, batch); other non-falsy values are ignored; falsy (false, null, "off",
     # "disabled", "no", "none") disables caching.
     "prompt_caching": {"cache_ttl": "5m"},
@@ -1449,7 +1450,7 @@ DEFAULT_CONFIG = {
         "project_discovery": True,
         # Trusted project roots; managed by `hermes skills trust` / `untrust`.
         "trusted_project_dirs": [],
-        # Skill names pinned as fully loaded in every new session (CLI, TUI, gateway, cron, API).
+        # Skill names pinned as fully loaded in every new session (CLI, TUI, gateway, API).
         # Resolved once when the agent's prompt is first built; missing/disabled names warn and
         # skip; HERMES_IGNORE_RULES suppresses the list like the other auto-injected context.
         "auto_load": [],
@@ -1481,7 +1482,7 @@ DEFAULT_CONFIG = {
 
     # Curator — background maintenance of AGENT-CREATED skills (never hub-installed): marks
     # long-unused skills stale, archives (never deletes) obsolete ones, optionally consolidates
-    # overlaps via a forked aux-model agent. Inactivity-triggered from session start, no cron
+    # overlaps via a forked aux-model agent. Inactivity-triggered from session start — no resident
     # daemon. `hermes curator status` shows the last run.
     "curator": {
         "enabled": True,
@@ -1644,10 +1645,10 @@ DEFAULT_CONFIG = {
     },
     # Approvals for dangerous commands.
     # mode: manual (always prompt) | smart (aux LLM auto-approves low-risk) | off (= --yolo)
-    # cron_mode / single_query_mode / unattended_mode: deny | approve — what to do when a
-    #   cron job, a -q session (HERMES_INTERACTIVE=1 but nobody to answer), or an unattended
-    #   platform (webhook, msgraph_webhook, api_server; no /approve channel) hits one.
-    #   deny blocks instantly so the agent finds another way instead of waiting out the
+    # Surface modes (scheduled background jobs / single-query / unattended): deny | approve —
+    #   what to do when such a surface — a -q session (HERMES_INTERACTIVE=1 but nobody to answer),
+    #   or an unattended platform (webhook, msgraph_webhook, api_server; no /approve channel) —
+    #   hits one. deny blocks instantly so the agent finds another way instead of waiting out the
     #   timeout and failing closed.
     # timeout: seconds before an unanswered prompt fails closed (CLI and gateway). 60s
     #   proved too tight for Telegram/Discord push notifications, hence 300.
@@ -1657,11 +1658,11 @@ DEFAULT_CONFIG = {
         # approval prompts — an unanswered prompt just waits the full timeout then fails closed, so the
         # agent is forced to work around the block (often via execute_code). This setting makes that intent
         # explicit: deny    — block the command and let the agent find another way (default, safe; mirrors
-        # cron_mode deny) approve — auto-approve all dangerous commands in single-query mode These surfaces
+        # the scheduled-job surface's deny default) approve — auto-approve all dangerous commands in single-query mode These surfaces
         # bind a session platform like chat gateways do, but have no send_exec_approval and no /approve
         # channel — a pending approval there just blocks for the full timeout with nobody to answer (#37284,
         # #87509): deny    — block the command instantly and let the agent find another way (default, safe;
-        # mirrors cron_mode deny) approve — auto-approve all dangerous commands on unattended platforms
+        # mirrors the scheduled-job surface's deny default) approve — auto-approve all dangerous commands on unattended platforms
         "mode": "smart",
         "timeout": 300,
         "discord_prompt_timeout": 300,  # Discord buttons stay clickable (min 30 s, cap MAX_SAFE_TIMEOUT_S)
@@ -1732,7 +1733,7 @@ DEFAULT_CONFIG = {
     # website/docs/user-guide/features/hooks.md.
     "hooks": {},
     # Auto-accept shell-hook registrations without a TTY prompt (also --accept-hooks or
-    # HERMES_ACCEPT_HOOKS=1). Gateway/cron/non-interactive runs need one of these to pick up
+    # HERMES_ACCEPT_HOOKS=1). Gateway/non-interactive runs need one of these to pick up
     # newly-added hooks.
     "hooks_auto_accept": False,
     # Custom personalities: {"name": "system prompt"} or {"name": {"description", "system_prompt",
@@ -1784,88 +1785,13 @@ DEFAULT_CONFIG = {
         "allow_lazy_installs": True,
     },
 
+    # Legacy pre-fork scheduler section kept for migration/routing compatibility:
+    # ``hermes_cli/left_core_migration`` still folds ``model_provider`` into provider-slot
+    # resolution on homes upgraded from pre-fork configs. The rest of this section's knobs
+    # went with the excised package.
     "cron": {
-        "catch_up_missed": True,  # False skips recurring misses beyond the local grace window.
-        # Let cron-spawned agents use the cronjob toolset (the "cron-librarian" pattern). Off by
-        # default: policy-denied in cron context to prevent unattended scheduling loops. Jobs
-        # created this way are user-owned in the same flat jobs table. Interactive toolsets
-        # (messaging/clarify) stay denied in cron regardless.
-        "allow_agent_scheduling": False,
-        # Pre-dispatch validation: before building any agent machinery, verify the provider API key
-        # resolves (unless a fallback chain exists), attached skills are ready, and delivery
-        # platforms are configured. Failure -> last_status=blocked_config, ONE alert, no LLM call.
-        # False = fail during the run instead.
-        "preflight": True,
-        # Default model for cron jobs (WHAT model runs). Fire-time resolution: per-job pin >
-        # cron.model > model.default (the main agent model). An unpinned job follows the main
-        # model on every run; cron.model decouples the whole fleet from chat. "" = fall through.
-        "model": "",
-        # Inference provider paired with cron.model (NOT the scheduler provider below). "" = resolve
-        # from global config.
+        # Legacy pre-fork key kept for migration.
         "model_provider": "",
-        # Cron SCHEDULER provider (WHEN a due job fires). "" = built-in in-process 60s ticker. Name
-        # an installed provider (plugins/cron_providers/<name>/ or $HERMES_HOME/plugins/ <name>/),
-        # e.g. "chronos" (NAS-mediated managed cron for scale-to-zero). An unknown or unavailable
-        # provider falls back to the built-in so cron never loses its trigger.
-        "provider": "",
-        # Chronos settings; consulted only when provider == "chronos". All non-secret — the agent
-        # holds NO scheduler credentials (provision reuses the Nous Portal token).
-        "chronos": {
-            # NAS/portal base URL that arms/cancels one-shots and mints the inbound fire JWT (used
-            # as the expected issuer).
-            "portal_url": "https://portal.nousresearch.com",
-            # This agent's publicly reachable base URL; NAS POSTs {callback_url}/api/cron/fire. ""
-            # -> Chronos unavailable, resolver falls back to the built-in ticker.
-            "callback_url": "",
-            "expected_audience": "",  # Expected JWT audience (e.g. "agent:{instance_id}").
-            # NAS JWKS URL for verifying the fire JWT signature. "" -> the fire endpoint refuses all
-            # tokens (never an unsigned decode).
-            "nas_jwks_url": "",
-        },
-        # Wrap delivered cron responses with a task-name header and "The agent cannot see this
-        # message" footer. False = clean output.
-        "wrap_response": True,
-        "delivery": {  # Delivery behaviour for cron output sent through a live gateway adapter.
-            # Mark cron deliveries FINAL so the platform pushes them (Telegram's "important" mode
-            # otherwise sends with disable_notification=True and briefs look undelivered). False =
-            # silent, no-push deliveries.
-            "notify": True,
-        },
-        # Make cron deliveries CONTINUABLE (user can reply to a brief with it in context). False
-        # keeps deliveries isolated to the job's session; per-job `attach_to_session` overrides.
-        # Thread-capable platforms (Telegram topics, Discord/Slack threads) get a seeded thread per
-        # job via create_handoff_thread; DM-only platforms mirror the brief into the target DM
-        # session. Appended at a turn boundary via mirror_to_session, cached system prompt
-        # untouched. User-written bare platforms address home conversations, unlike `all`
-        # broadcast expansions, which do not gain mirror eligibility.
-        "mirror_delivery": False,
-        # Max due jobs run in parallel per tick. None/0 = unbounded (thread count only); 1 = serial.
-        # Env override: HERMES_CRON_MAX_PARALLEL.
-        "max_parallel_jobs": None,
-        # save_job_output keeps the N most recent .md files per job; 0 or negative disables pruning
-        # (for externally managed cleanup).
-        "output_retention": 50,
-        # Timeout (seconds) for a no-agent cron script. Env: HERMES_CRON_SCRIPT_TIMEOUT. Keep in
-        # sync with cron.scheduler._DEFAULT_SCRIPT_TIMEOUT.
-        "script_timeout_seconds": 3600,
-        # Timeout (seconds) for SessionDB() init inside cron jobs: state.db open/migrate has no
-        # timeout of its own against a wedged sqlite3.connect, and an unbounded hang wedges the
-        # job's dispatch guard forever. Env: HERMES_CRON_SESSION_DB_TIMEOUT. 0 = unlimited.
-        "session_db_timeout_seconds": 10,
-        # Timeout (seconds) per media attachment send during gateway delivery; large attachments
-        # (long TTS audio, big exports) need more than 30s. Env: HERMES_CRON_MEDIA_SEND_TIMEOUT.
-        # Keep in sync with cron.scheduler._DEFAULT_MEDIA_SEND_TIMEOUT.
-        "media_send_timeout_seconds": 300,
-        # Managed systemd gateway with no user session (containers, no linger): false runs
-        # cron jobs as a direct external subprocess (warns once; no cgroup isolation), true
-        # fails closed with the enable-linger remedy. Kanban always requires a scope.
-        "require_restart_safe_scope": False,
-        # A job failing with the SAME error alerts once, then stays silent for this many hours
-        # before one reminder ping (the run is still recorded; `hermes cron incidents` shows it).
-        # A green run or a different error alerts again immediately; `hermes cron incidents ack`
-        # silences a signature for good. 0 = re-alert on every failing run. Keep in sync with
-        # cron.scheduler.DEFAULT_FAILURE_REPEAT_ALERT_HOURS.
-        "failure_repeat_alert_hours": 6,
     },
     # Kanban multi-agent coordination. The dispatcher ticks every N seconds, reclaims stale claims,
     # promotes dependency-satisfied todos to ready, and fires `hermes -p <assignee> chat -q ...` per
@@ -2259,7 +2185,7 @@ DEFAULT_CONFIG = {
     # inserts, /resume listing, and insights queries.
     "sessions": {
         # Prune ENDED sessions inactive for retention_days (activity = freshest of live activity /
-        # latest message / creation) about once per min_interval_hours at CLI/gateway/cron startup.
+        # latest message / creation) about once per min_interval_hours at CLI/gateway startup.
         # Open, pinned, or mid-turn sessions are never deleted; stale automation sessions whose
         # process died are *closed*, then get a full retention window before removal.
         # Off by default (deleting history is opt-in). While the user's config.yaml has no
@@ -2336,7 +2262,8 @@ DEFAULT_CONFIG = {
     "updates": {
         # Passive version/banner checks only; explicit `hermes update --check` remains enabled.
         "check": True,
-        # Pre-update backup. quick = snapshot small critical state (pairing JSONs, cron jobs,
+        # Pre-update backup. quick = snapshot small critical state (pairing JSONs, pre-fork
+        # job-store files,
         # config.yaml, .env, auth.json, profile DBs) into <HERMES_HOME>/state-snapshots/, skipping
         # files >1 GiB; restore via ``/snapshot``. full = quick PLUS a ``hermes backup`` zip in
         # <HERMES_HOME>/backups/ (``hermes import`` restores; slow on large homes; ``--backup``
@@ -2435,7 +2362,7 @@ DEFAULT_CONFIG = {
     # Browser credential vault: which login sources browser_vault may draw from. The local
     # encrypted vault (`hermes vault add`, Desktop → Settings → Credential Vault) is always on.
     # External password managers are unlocked per session with a masked master-password prompt;
-    # headless sessions (cron, webhook, API) never prompt and see them as locked.
+    # headless sessions (webhook, API) never prompt and see them as locked.
     "vault": {
         "key_storage": "file",  # NEW vault's key: file (0600 vault.key) | keychain (OS; file if none). See `hermes vault key`.
         "onepassword": {  # detected managers are login sources unless the user opts out (enabled: false)
@@ -3063,7 +2990,7 @@ OPTIONAL_ENV_VARS = OptionalEnvVars({
         "QQ Group Allowed Users", password=None),
     "QQ_ALLOW_ALL_USERS": _msg("Allow all QQ users without an allowlist (true/false)",
         "Allow All QQ Users", password=None),
-    "QQBOT_HOME_CHANNEL": _msg("Default QQ channel/group for cron delivery and notifications",
+    "QQBOT_HOME_CHANNEL": _msg("Default QQ channel/group for scheduled delivery and notifications",
         "QQ Home Channel", password=None),
     "QQBOT_HOME_CHANNEL_NAME": _msg("Display name for the QQ home channel", "QQ Home Channel Name",
         password=None),
