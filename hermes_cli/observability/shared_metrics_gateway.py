@@ -1,11 +1,11 @@
-"""Call-site API for messaging-gateway and cron shared metrics.
+"""Call-site API for messaging-gateway and scheduled-run shared metrics.
 
-Platform connection health, outbound delivery outcomes, first-reply latency and cron runs happen on
-the gateway event loop, adapter tasks or the cron ticker, never inside a model or tool call. Every
+Platform connection health, outbound delivery outcomes, first-reply latency and scheduled runs happen on
+the gateway event loop, adapter tasks or the periodic ticker, never inside a model or tool call. Every
 recorder takes RAW runtime objects, derives only closed classes / buckets / public platform names,
 and hands the recording to one background worker so the caller's loop never waits on the first
 runtime build or a config read. The worker runs in a copy of the caller's context, so the profile
-the caller was scoped to (gateway multiplex, cron ``_profile_cron_scope``) owns the row.
+the caller was scoped to (gateway multiplex, scheduled-run profile scope) owns the row.
 
 This module is imported by ``gateway/platforms/base.py`` at class-definition time: keep imports lazy.
 """
@@ -390,17 +390,17 @@ def reply_latency_fields(*, platform: Any, seconds: float) -> dict[str, str]:
     }
 
 
-# ---- hermes.cron.run ----
+# ---- hermes.cron.run ----  (metric name is shared_metrics_contract's persisted series identity)
 
-_CRON_NOTES_MAX = 512
+_RUN_NOTES_MAX = 512
 # execution id -> delivery kind, noted where the job dict is in hand; popped once at the terminal write.
-_cron_delivery: OrderedDict[str, str] = OrderedDict()
-_cron_skipped: set[str] = set()
-_cron_lock = threading.Lock()
+_run_delivery: OrderedDict[str, str] = OrderedDict()
+_run_skipped: set[str] = set()
+_runs_lock = threading.Lock()
 _LOCAL_DELIVERY = frozenset({"local", ""})
 
 
-def cron_delivery_kind(job: Any) -> str:
+def run_delivery_kind(job: Any) -> str:
     """Where a job's output goes, as a closed kind; targets themselves never leave the machine."""
     if not isinstance(job, dict):
         return "other"
@@ -414,24 +414,24 @@ def cron_delivery_kind(job: Any) -> str:
     return "webhook" if kinds == {"webhook"} else "platform"
 
 
-def note_cron_execution(job: Any) -> None:
+def note_run_execution(job: Any) -> None:
     """Remember the delivery kind of an execution about to run (or be refused) in this process."""
     execution_id = job.get("execution_id") if isinstance(job, dict) else None
     if not execution_id:
         return
-    with _cron_lock:
-        _cron_delivery[str(execution_id)] = cron_delivery_kind(job)
-        while len(_cron_delivery) > _CRON_NOTES_MAX:
-            _cron_delivery.popitem(last=False)
+    with _runs_lock:
+        _run_delivery[str(execution_id)] = run_delivery_kind(job)
+        while len(_run_delivery) > _RUN_NOTES_MAX:
+            _run_delivery.popitem(last=False)
 
 
-def note_cron_skipped(job: Any) -> None:
+def note_run_skipped(job: Any) -> None:
     """A gate (pre-run script ``wakeAgent=false`` / no output) decided this run does no agent work."""
     execution_id = job.get("execution_id") if isinstance(job, dict) else None
     if execution_id:
-        with _cron_lock:
-            if len(_cron_skipped) < _CRON_NOTES_MAX:
-                _cron_skipped.add(str(execution_id))
+        with _runs_lock:
+            if len(_run_skipped) < _RUN_NOTES_MAX:
+                _run_skipped.add(str(execution_id))
 
 
 def _iso_seconds(start: Any, end: Any) -> float:
@@ -441,7 +441,7 @@ def _iso_seconds(start: Any, end: Any) -> float:
         return 0.0
 
 
-def cron_run_fields(*, outcome: str, delivery_kind: str, seconds: float) -> dict[str, str]:
+def run_fields(*, outcome: str, delivery_kind: str, seconds: float) -> dict[str, str]:
     from . import shared_metrics_contract as contract
 
     return {
@@ -451,17 +451,17 @@ def cron_run_fields(*, outcome: str, delivery_kind: str, seconds: float) -> dict
     }
 
 
-def record_cron_finish(record: Any, delivery_outcome: Any = None) -> None:
+def record_run_finish(record: Any, delivery_outcome: Any = None) -> None:
     """One execution reached its (write-once) terminal row. A row that never started running was
     refused before any side effect (claim lost, dispatch limit, executor shutdown): ``skipped``,
     unless a failure notice was delivered for it."""
     if not isinstance(record, dict) or not record.get("id"):
         return
     execution_id = str(record["id"])
-    with _cron_lock:
-        delivery_kind = _cron_delivery.pop(execution_id, "other")
-        gated = execution_id in _cron_skipped
-        _cron_skipped.discard(execution_id)
+    with _runs_lock:
+        delivery_kind = _run_delivery.pop(execution_id, "other")
+        gated = execution_id in _run_skipped
+        _run_skipped.discard(execution_id)
     started = record.get("started_at")
     success = record.get("status") == "completed"
     if record.get("status") == "cancelled":  # an operator stop, not a failure
@@ -470,12 +470,12 @@ def record_cron_finish(record: Any, delivery_outcome: Any = None) -> None:
         outcome = "skipped"
     else:
         outcome = "success" if success else "failed"
-    _submit(_emit, "CRON_RUN_MARK", cron_run_fields, outcome=outcome, delivery_kind=delivery_kind,
+    _submit(_emit, "CRON_RUN_MARK", run_fields, outcome=outcome, delivery_kind=delivery_kind,
             seconds=_iso_seconds(started, record.get("finished_at")) if started else 0.0)
 
 
-def record_cron_missed(job: Any) -> None:
+def record_run_missed(job: Any) -> None:
     """A scheduled occurrence the scheduler dropped without running it (catch-up disabled after
     downtime, or a one-shot past its grace window)."""
-    _submit(_emit, "CRON_RUN_MARK", cron_run_fields, outcome="missed",
-            delivery_kind=cron_delivery_kind(job), seconds=0.0)
+    _submit(_emit, "CRON_RUN_MARK", run_fields, outcome="missed",
+            delivery_kind=run_delivery_kind(job), seconds=0.0)

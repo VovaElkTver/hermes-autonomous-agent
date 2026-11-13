@@ -88,7 +88,7 @@ _CLONE_ALL_DEFAULT_EXCLUDE_ROOT: frozenset[str] =  frozenset({
 # (+wal/shm, can reach many GB), session dirs, `hermes backup` archives, quick-backup
 # snapshots, checkpoints. Inheriting them is never useful (restoring one inside the
 # clone would resurrect the SOURCE profile's state) and can balloon the copy by tens of GB.
-# ``cron`` is scheduled work bound to the source profile and its origin channel: a clone
+# Scheduled work is bound to the source profile and its origin channel: a clone
 # that inherits jobs.json runs every job twice (two gateways, same job ids, double spend,
 # duplicate deliveries) the moment its gateway starts. The empty dir is recreated below.
 _CLONE_ALL_HISTORY_EXCLUDE_ROOT: frozenset[str] = frozenset({
@@ -270,7 +270,7 @@ _DEFAULT_EXPORT_INCLUDE_ROOT = frozenset({
     "system_prompt.md", "AGENTS.md", "CLAUDE.md", ".cursorrules",
     # Desktop appearance overlay (written/applied by the desktop app's export/import).
     "desktop.json",
-    # User-facing skill, cron, and session artifacts
+    # User-facing skill, scheduler, and session artifacts
     "skills", "cron", "scripts", "sessions",
     # Plugin / memory surfaces (per-profile overrides live here)
     "plugins", "memories", "knowledge", "preferences",
@@ -486,7 +486,7 @@ def _iter_named_profile_dirs(*, live_only: bool = True) -> list[Path]:
     """Sorted named-profile dirs (valid ids, never ``default``); ``live_only`` skips tombstones.
 
     A dir is a profile only when it carries an identity marker (``named_profile_has_identity``):
-    cron/logging side-effects and pre-tombstone ghost shells leave marker-less dirs that must
+    scheduler/logging side-effects and pre-tombstone ghost shells leave marker-less dirs that must
     not be listed, served, ticked, or ``.env``-seeded — that seeding is what turned a ghost
     shell into a "real" profile on the next ``hermes update`` (#95188, #94823, #99392)."""
     profiles_root = _get_profiles_root()
@@ -504,9 +504,9 @@ def _iter_named_profile_dirs(*, live_only: bool = True) -> list[Path]:
 
 def list_profile_names() -> list[str]:
     """Cheap name-only listing (``default`` + LIVE profile dirs). Unlike :func:`list_profiles` this
-    reads NO per-profile config — safe for hot paths (cron target listings, create validation).
+    reads NO per-profile config — safe for hot paths (scheduled-target listings, create validation).
     Tombstoned shells are skipped like everywhere else: a stale process that re-mkdirs a deleted
-    profile's directory must not resurface it as a ``bot-chat:<name>`` cron target."""
+    profile's directory must not resurface it as a ``bot-chat:<name>`` scheduling target."""
     names = ["default"]
     with contextlib.suppress(OSError):
         names.extend(entry.name for entry in _iter_named_profile_dirs())
@@ -766,7 +766,7 @@ def _served_by_running_multiplexer(profile_name: str) -> bool:
     """True when the live default gateway multiplexes ``profile_name`` (such a profile has no
     gateway.pid of its own, so ``_check_gateway_running`` alone reports it stopped).
 
-    Single shared lookup with the named-profile start guard and cron liveness (#97120).
+    Single shared lookup with the named-profile start guard and scheduled-run liveness (#97120).
     """
     try:
         from hermes_cli.gateway import named_profile_served_by_running_multiplexer
@@ -1673,7 +1673,7 @@ def _print_delete_summary(canon: str, profile_dir: Path, gw_running: bool, wrapp
         if dist_source:
             print(f"Installed from: {dist_source}")
     print("\nThis will permanently delete:")
-    print("  • All config, API keys, memories, sessions, skills, cron jobs")
+    print("  • All config, API keys, memories, sessions, skills, scheduled jobs")
     if wrapper_path is not None:
         print(f"  • Command alias ({wrapper_path})")
     if gw_running:
@@ -1995,7 +1995,7 @@ def get_active_profile_name() -> str:
 
 def current_profile_name(default: str | None = None) -> str | None:
     """Identity of the profile the current task runs FOR: the ``HERMES_HOME`` override when one is
-    bound (a multiplexed cron tick, a routed gateway turn), else a launcher-pinned
+    bound (a multiplexed scheduled tick, a routed gateway turn), else a launcher-pinned
     ``HERMES_PROFILE_NAME``/``HERMES_PROFILE`` (the kanban dispatcher pins it on its workers), else
     the name derived from the process's ``HERMES_HOME``; *default* when nothing names a profile.
 
@@ -2019,7 +2019,7 @@ def current_profile_name(default: str | None = None) -> str | None:
 def _inside_git_checkout(path: Path) -> bool:
     """True when *path* lies inside a Git checkout. Walks the path's OWN resolved ancestry
     (not cwd) so the check holds when HERMES_HOME sits in a checkout but the process runs
-    elsewhere (cron, service manager). Resolution failure reports True (fail closed)."""
+    elsewhere (timer-driven launches, service managers). Resolution failure reports True (fail closed)."""
     try:
         resolved = path.resolve()
     except (OSError, RuntimeError):  # RuntimeError: symlink loops on Python <= 3.12
@@ -2248,7 +2248,7 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 
     # 1b. Unroute the old name from a live multiplexer BEFORE the rename (same protocol as
     # delete_profile). A multiplexed secondary has no gateway.pid of its own, so the check above
-    # reports it stopped while the default gateway still holds its adapters, cron ticker, logging
+    # reports it stopped while the default gateway still holds its adapters, periodic ticker, logging
     # and SQLite handles; those re-``mkdir`` the old home the moment it moves (no tombstone →
     # ``mkdir_under_hermes_home`` does not refuse it) and the periodic reconcile re-adopts the
     # resurrected dir as a ghost served profile (#109267).

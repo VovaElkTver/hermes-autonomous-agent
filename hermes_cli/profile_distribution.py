@@ -46,9 +46,9 @@ USER_OWNED_EXCLUDE: frozenset = DEFAULT_EXPORT_EXCLUDE_ROOT | frozenset({
     "memories", "sessions", "plans", "workspace", "home", "backups", "cache", "local",
 })
 
-# Profile distributions own cron definitions, not scheduler state. The runtime has
-# one canonical multi-record store; every sibling under cron/ is runtime data.
-_CRON_STORE_REL = ("cron", "jobs.json")
+# Profile distributions own scheduled-job definitions, not scheduler state. The runtime has
+# one canonical multi-record store; every sibling under it is runtime data.
+_JOB_STORE_REL = ("cron", "jobs.json")
 
 
 def _is_installer_owned_path(parts: tuple[str, ...]) -> bool:
@@ -59,7 +59,7 @@ def _is_installer_owned_path(parts: tuple[str, ...]) -> bool:
     if len(parts) < 2:
         return False
     if parts[0] == "cron":
-        return parts[:2] != _CRON_STORE_REL
+        return parts[:2] != _JOB_STORE_REL
     # Root-level dot entries under skills are Hermes bookkeeping (.hub,
     # .usage.json, curator state, bundled manifest, locks, archives, ...).
     return parts[0] == "skills" and len(parts) == 2 and parts[1].startswith(".")
@@ -311,8 +311,8 @@ class InstallPlan:
     has_cron: bool = False
 
 
-def _has_cron_jobs(staged: Path) -> bool:
-    return staged.joinpath(*_CRON_STORE_REL).is_file()
+def _has_job_store(staged: Path) -> bool:
+    return staged.joinpath(*_JOB_STORE_REL).is_file()
 
 
 def plan_install(source: str, workdir: Path, override_name: Optional[str] = None) -> InstallPlan:
@@ -341,7 +341,7 @@ def plan_install(source: str, workdir: Path, override_name: Optional[str] = None
     existing = target_dir.is_dir()
     return InstallPlan(
         manifest=manifest, staged_dir=staged, provenance=provenance, target_dir=target_dir, existing=existing,
-        preserves_config=existing, has_cron=_has_cron_jobs(staged),
+        preserves_config=existing, has_cron=_has_job_store(staged),
     )
 
 
@@ -412,18 +412,18 @@ def _replace_entry(src: Path, dest: Path) -> None:
             holder.rmdir()  # kept while it still holds a leftover
 
 
-def _shipped_cron_store(entries: list[tuple[Path, tuple[str, ...]]]) -> Optional[Path]:
-    """Return the staged ``cron/jobs.json`` when the distribution owns it (via ``cron/`` or exactly)."""
+def _shipped_job_store(entries: list[tuple[Path, tuple[str, ...]]]) -> Optional[Path]:
+    """Return the staged legacy job store when the distribution owns it (via its dir or exactly)."""
     for src, rel_parts in entries:
-        if rel_parts == _CRON_STORE_REL:
+        if rel_parts == _JOB_STORE_REL:
             return src
-        if rel_parts == _CRON_STORE_REL[:1] and (src / _CRON_STORE_REL[1]).is_file():
-            return src / _CRON_STORE_REL[1]
+        if rel_parts == _JOB_STORE_REL[:1] and (src / _JOB_STORE_REL[1]).is_file():
+            return src / _JOB_STORE_REL[1]
     return None
 
 
-def _merge_cron_store(src: Path, home: Path) -> None:
-    """Cron was excised from this branch: distribution stores carry no jobs to merge."""
+def _merge_job_store(src: Path, home: Path) -> None:
+    """The scheduler was excised from this branch: distribution stores carry no jobs to merge."""
     del src, home
 
 def _real_dir(base: Path, parts: tuple[str, ...]) -> Path:
@@ -471,7 +471,7 @@ def _merge_dir(src: Path, dest: Path, rel: tuple[str, ...]) -> None:
         parts = (*rel, child.name)
         if _is_installer_owned_path(parts):
             continue
-        if parts == _CRON_STORE_REL:
+        if parts == _JOB_STORE_REL:
             continue  # merged up front by _copy_dist_payload
         if _merges_per_root(child, parts):
             _merge_dir(child, _real_dir(dest, (child.name,)), parts)
@@ -541,7 +541,7 @@ def _copy_dist_payload(staged: Path, target: Path, manifest: DistributionManifes
     as ``.env.EXAMPLE`` so it never shadows a real ``.env``.
 
     A top-level owned directory, and an owned container (``_is_container``), is merged per
-    authored root. ``cron/jobs.json`` is special: it is one multi-record runtime store, so
+    authored root. The legacy job store is special: it is one multi-record runtime store, so
     shipped definitions merge by job id instead of replacing the file."""
     from hermes_cli.config_backend import require_file_tooling
     require_file_tooling("Profile distribution install")
@@ -549,15 +549,15 @@ def _copy_dist_payload(staged: Path, target: Path, manifest: DistributionManifes
     entries = list(_owned_entries(staged, manifest))
     _refuse_symlinked_targets(target, entries)
 
-    # The cron merge runs first: it is the one step that can reject shipped content
+    # The scheduled-job merge runs first: it is the one step that can reject shipped content
     # (an unschedulable job), and rejecting before any file is replaced keeps the profile whole.
-    cron_store = _shipped_cron_store(entries)
-    if cron_store is not None:
-        _real_dir(target, _CRON_STORE_REL[:-1])
-        _merge_cron_store(cron_store, target)
+    shipped_store = _shipped_job_store(entries)
+    if shipped_store is not None:
+        _real_dir(target, _JOB_STORE_REL[:-1])
+        _merge_job_store(shipped_store, target)
 
     for src, rel_parts in entries:
-        if rel_parts == _CRON_STORE_REL:
+        if rel_parts == _JOB_STORE_REL:
             continue
         if len(rel_parts) == 1:
             name = rel_parts[0]

@@ -669,7 +669,7 @@ def _denied(message: str, *, pattern_key: str, description: str, outcome: str, n
 
 
 def _blocked(message: str, *, pattern_key: str, description: str) -> dict:
-    """Non-interactive block (cron / -q / unattended / no-human): no consent keys."""
+    """Non-interactive block (scheduled runs / -q / unattended / no-human): no consent keys."""
     return {"approved": False, "message": message, "pattern_key": pattern_key, "description": description}
 
 
@@ -726,10 +726,10 @@ def _pending_result(spec, session_key: str, *, command: str, description: str,
 @dataclass(frozen=True)
 class _Unattended:
     """One non-interactive context and the text every gate uses to explain it."""
-    name: str       # "single_query" | "cron" | "unattended"
+    name: str       # "single_query" | "cron" | "unattended"  ("cron" id pairs with _get_cron_approval_mode)
     cfg_key: str    # approvals.<cfg_key>: approve|deny
     clause: str     # "why nobody can approve" (lower-case sentence fragment)
-    scope: str      # "in cron jobs" — completes "To allow ... {scope}"
+    scope: str      # "in scheduled runs" — completes "To allow ... {scope}"
     trust: str      # execute_code: "approve only if {trust}"
 
     def mode(self) -> str:
@@ -751,21 +751,21 @@ _SINGLE_QUERY_CTX = _Unattended(
     "single-query mode (-q) runs without a user present to approve it",
     "in single-query mode", "this single-query run is intentionally trusted",
 )
-_CRON_CTX = _Unattended(
-    "cron", "cron_mode", "cron jobs run without a user present to approve it",
-    "in cron jobs", "this cron profile is intentionally trusted",
+_SCHEDULED_RUNS_CTX = _Unattended(
+    "cron", "cron_mode", "scheduled runs execute without a user present to approve it",
+    "in scheduled runs", "this scheduled-run profile is intentionally trusted",
 )
 
 
 def _unattended_contexts() -> list[_Unattended]:
     """Active unattended contexts in evaluation order: single-query first (``hermes chat -q``
-    exports HERMES_INTERACTIVE=1 but nobody answers); cron beats a platform marker because
-    cron binds the platform for delivery routing only."""
+    exports HERMES_INTERACTIVE=1 but nobody answers); the scheduled-run marker beats a platform marker because
+    scheduled runs bind the platform for delivery routing only."""
     contexts = []
     if _is_single_query_approval_context():
         contexts.append(_SINGLE_QUERY_CTX)
     if _is_cron_approval_context():
-        contexts.append(_CRON_CTX)
+        contexts.append(_SCHEDULED_RUNS_CTX)
     elif _is_unattended_platform_approval_context():
         contexts.append(_Unattended(
             "unattended", "unattended_mode",
@@ -821,7 +821,7 @@ def _allowlisted(command: str) -> dict:
 
 
 def _unattended_deny(command: str, ctx: _Unattended) -> dict | None:
-    """Deny-mode handling for one unattended context (cron / -q / webhook); None = allow."""
+    """Deny-mode handling for one unattended context (scheduled runs / -q / webhook); None = allow."""
     if ctx.mode() != "deny":
         return None
 
@@ -1056,7 +1056,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
                             timeout_addendum="", deny_reason=deny_reason)
             return grant(choice)
 
-        # No gateway callback (cron, batch, or ask-mode leaked into an interactive CLI, historically via `import
+        # No gateway callback (a scheduled run, batch, or ask-mode leaked into an interactive CLI, historically via `import
         # gateway.run`): paint the local panel when possible instead of a pending_approval that makes the agent look
         # "auto-blocked".
         if not _should_fall_through_to_cli_approval(
@@ -1099,9 +1099,9 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
 def _presence(approval_callback=None) -> tuple:
     """``(approval_callback, is_cli, is_gateway, is_ask)`` for the current context.
 
-    Single-query ``-q`` and cron clear the presence trio: ``hermes chat -q`` exports
+    Single-query ``-q`` and scheduled runs clear the presence trio: ``hermes chat -q`` exports
     HERMES_INTERACTIVE=1 for sudo prompts, and a gateway sets HERMES_EXEC_ASK=1 at startup and
-    passes its environ to every external cron worker (#110932) — in neither can a human answer
+    passes its environ to every external scheduled worker (#110932) — in neither can a human answer
     the card, so the gate must resolve from ``approvals.<ctx>_mode`` instead of parking on a
     pending approval. Unattended *platforms* keep ``is_ask`` only while a client on the session
     could actually answer: ``/v1/runs`` and streaming chat completions bridge an approval
@@ -1144,7 +1144,7 @@ def _run_approval_gate(
 
     Order: yolo bypass → session-cache short-circuit → interactive/gateway/unattended branch →
     prompt → persistence. Input-shape checks (hardline, allowlist, pattern detection) are the
-    caller's job. ``fail_closed_when_no_human``: a non-interactive, non-gateway, non-cron
+    caller's job. ``fail_closed_when_no_human``: a non-interactive, non-gateway, non-scheduled-run
     context without an ask bridge BLOCKS instead of auto-approving, so a plugin-flagged action
     never runs ungated.
     Unattended deny text is ``ctx.block_message(subject, noun, advice)`` unless the caller passes
@@ -1185,7 +1185,7 @@ def _run_approval_gate(
                 logger.warning("%s (pattern: %s): %s — single-query auto-approve "
                                "(approvals.single_query_mode: approve).", *log_args)
                 return _approved()
-            break  # cron/unattended approve-mode: auto-approve below
+            break  # scheduled/unattended approve-mode: auto-approve below
         else:
             if fail_closed_when_no_human:
                 logger.warning("%s (pattern: %s): %s — no interactive user/gateway present; "
@@ -1235,7 +1235,7 @@ def _user_deny_block(command: str) -> dict | None:
 
 
 def _floor_block(command: str, *, sudo_guard: bool = False) -> dict | None:
-    """Unconditional floors, BEFORE yolo / mode=off / cron approve-mode so no
+    """Unconditional floors, BEFORE yolo / mode=off / scheduled approve-mode so no
     session-level setting can bypass them: hardline catastrophic commands,
     password-piping to ``sudo -S`` with no SUDO_PASSWORD configured (full guard
     only), the user's own approvals.deny rules ("never, even under yolo"), and
@@ -1297,7 +1297,7 @@ def request_tool_approval(tool_name: str, reason: str, *, rule_key: str = "", ap
     Entry point for a plugin ``pre_tool_call`` hook returning ``{"action": "approve", ...}``:
     it asks the SAME human gate as Tier-2 dangerous shell patterns (session/permanent
     allowlist, CLI prompt, gateway pending, once/session/always/deny, timeout fail-closed), so
-    the LLM cannot skip it. Cron honors ``approvals.cron_mode``; any OTHER non-interactive
+    the LLM cannot skip it. Scheduled runs honor ``approvals.cron_mode``; any OTHER non-interactive
     context without an approval bridge fails CLOSED. ``rule_key`` controls the ``[a]lways``
     allowlist grain; when empty it is ``tool_name`` + a hash of ``reason`` so DISTINCT reasons
     on the same tool persist independently. Returns the ``check_dangerous_command`` result shape.
@@ -1419,7 +1419,7 @@ def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = F
 
     # (-q clears the presence flags, but its unattended context resolves first anyway.)
     approval_callback, is_cli, is_gateway, is_ask = _presence()
-    # No user is present to approve arbitrary code in -q / cron / unattended
+    # No user is present to approve arbitrary code in -q / scheduled runs / unattended
     # sessions: the first active context resolves instantly from its mode.
     for ctx in _unattended_contexts():
         if ctx.mode() == "deny":
@@ -1437,7 +1437,7 @@ def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = F
     # engine falls through to the CLI Dangerous Command panel instead of a silent pending_approval.
     # A gateway-run local CLI/TUI/Desktop session's own turns keep that interactive-CLI rule: the script's terminal()
     # calls reach the session's own prompt per call, so no whole-script prompt. Injected and automation turns keep the
-    # gate (cron/-q resolved above; messaging/API unchanged).
+    # gate (scheduled/-q resolved above; messaging/API unchanged).
     if (not is_gateway and not is_ask) or _is_local_viewer_turn():
         return _approved()
 

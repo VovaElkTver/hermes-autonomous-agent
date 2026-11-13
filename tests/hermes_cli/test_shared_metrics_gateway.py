@@ -81,7 +81,7 @@ def test_every_gateway_row_is_contract_valid_and_disabled_config_records_nothing
 
     smg.record_platform_connect(Adapter(), "telegram", is_reconnect=False, ok=False, exc=TimeoutError("x"))
     smg.record_platform_disconnect(Adapter())
-    smg.record_cron_missed({"deliver": "telegram:-100123"})
+    smg.record_run_missed({"deliver": "telegram:-100123"})
     rows = marks()
     assert rows == [
         ("hermes.platform.health", {"error_class": "network", "event": "connect_failed", "platform": "telegram"}),

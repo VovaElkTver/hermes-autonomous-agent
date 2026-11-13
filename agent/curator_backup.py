@@ -2,8 +2,8 @@
 ``~/.hermes/skills/.curator_backups/<utc-iso>/`` with a ``manifest.json``. Rollback first snapshots the CURRENT tree (so it is
 itself undoable), then extracts the chosen snapshot into place. Excluded: ``.curator_backups/``, ``.hub/`` (hub-managed), ``.git/``.
 Included: skill dirs, ``.usage.json``, ``.archive/``, ``.curator_state`` (so rollback also restores last-run-at and the curator
-doesn't re-fire), ``.bundled_manifest``, ``.curator_suppressed``. Each snapshot also copies ``~/.hermes/cron/jobs.json`` as
-``cron-jobs.json``: the consolidation pass rewrites cron ``skills``/``skill`` references in place, so rollback restores those two
+doesn't re-fire), ``.bundled_manifest``, ``.curator_suppressed``. Each snapshot also copies the legacy scheduled-job store
+(:data:`LEGACY_JOB_STORE_COPY`): the consolidation pass rewrites job ``skills``/``skill`` references in place, so rollback restores those two
 fields (only) — the rest is live state."""
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def _excluded_member(ti: tarfile.TarInfo) -> bool:
 # Snapshot id: UTC ISO with colons replaced by dashes (Windows-safe filename); optional ``-NN`` suffix for same-second snapshots.
 _ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(-\d{2})?$")
 
-CRON_JOBS_FILENAME = "cron-jobs.json"
+LEGACY_JOB_STORE_COPY = "cron-jobs.json"
 _ARCHIVE_NAME = "skills.tar.gz"
 _STAGING_PREFIX = ".rollback-staging-"
 _UNRESTORED_PREFIX = ".rollback-unrestored-"  # retained staging; outside _STAGING_PREFIX so _prune_old keeps it
@@ -74,28 +74,28 @@ def _jobs_list(parsed: Any) -> Optional[list]:
     return parsed if isinstance(parsed, list) else None
 
 
-def _backup_cron_jobs_into(dest: Path) -> dict[str, Any]:
-    """Copy the live ``~/.hermes/cron/jobs.json`` into ``dest`` as ``cron-jobs.json``. Never raises: a missing/unreadable
+def _capture_legacy_job_store(dest: Path) -> dict[str, Any]:
+    """Copy the legacy scheduled-job store into ``dest`` under :data:`LEGACY_JOB_STORE_COPY`. Never raises: a missing/unreadable
     file yields ``backed_up=False`` plus a reason, and the snapshot proceeds."""
     src = get_hermes_home() / "cron" / "jobs.json"
     info: dict[str, Any] = {"backed_up": False, "jobs_count": 0}
     if not src.exists():
-        return {**info, "reason": "no cron/jobs.json present"}
+        return {**info, "reason": "no legacy job store present"}
     try:
-        # utf-8-sig, same dialect as cron/jobs.load_jobs: a Windows-editor BOM would otherwise break json.loads
+        # utf-8-sig, same dialect as the pre-excision jobs loader: a Windows-editor BOM would otherwise break json.loads
         # AND be written into the backup.
         raw = src.read_text(encoding="utf-8-sig")
     except OSError as e:
-        logger.debug("Failed to read cron/jobs.json for backup: %s", e)
+        logger.debug("Failed to read the legacy job store for backup: %s", e)
         return {**info, "reason": f"read error: {e}"}
     try:  # jobs_count is a diagnostic only — an unparseable file is still stored raw.
         info["jobs_count"] = len(_jobs_list(json.loads(raw)) or [])
     except (json.JSONDecodeError, TypeError):
         info["parse_warning"] = "jobs.json was not valid JSON at snapshot time"
     try:
-        (dest / CRON_JOBS_FILENAME).write_text(raw, encoding="utf-8")
+        (dest / LEGACY_JOB_STORE_COPY).write_text(raw, encoding="utf-8")
     except OSError as e:
-        logger.debug("Failed to write cron backup file: %s", e)
+        logger.debug("Failed to write the job-store backup copy: %s", e)
         return {**info, "reason": f"write error: {e}"}
     return {**info, "backed_up": True}
 
@@ -130,14 +130,14 @@ def _count_skill_files(base: Path) -> int:
         return 0
 
 
-def _write_manifest(dest: Path, reason: str, archive_path: Path, skills_counted: int, cron_info: dict[str, Any]) -> None:
-    cron_jobs: dict[str, Any] = {"backed_up": bool(cron_info.get("backed_up", False)), "jobs_count": int(cron_info.get("jobs_count", 0))}
-    if not cron_info.get("backed_up"):
-        cron_jobs["reason"] = cron_info.get("reason", "not captured")
-    if cron_info.get("parse_warning"):
-        cron_jobs["parse_warning"] = cron_info["parse_warning"]
+def _write_manifest(dest: Path, reason: str, archive_path: Path, skills_counted: int, store_info: dict[str, Any]) -> None:
+    job_store: dict[str, Any] = {"backed_up": bool(store_info.get("backed_up", False)), "jobs_count": int(store_info.get("jobs_count", 0))}
+    if not store_info.get("backed_up"):
+        job_store["reason"] = store_info.get("reason", "not captured")
+    if store_info.get("parse_warning"):
+        job_store["parse_warning"] = store_info["parse_warning"]
     manifest = {"id": dest.name, "reason": reason, "created_at": datetime.now(UTC).isoformat(), "archive": archive_path.name,
-                "archive_bytes": archive_path.stat().st_size, "skill_files": skills_counted, "cron_jobs": cron_jobs}
+                "archive_bytes": archive_path.stat().st_size, "skill_files": skills_counted, "cron_jobs": job_store}
     (dest / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
 
@@ -178,8 +178,8 @@ def snapshot_skills(reason: str = "manual", *, protect_ids: Optional[set[str]] =
                     # arcname relative to skills/ so extraction drops back in cleanly; the filter excludes nested paths too.
                     tf.add(str(entry), arcname=entry.name, recursive=True,
                            filter=lambda ti: None if _excluded_member(ti) else ti)
-        # Cron capture is additive and never fails the snapshot; the manifest records whether it happened so rollback can say "no cron data".
-        _write_manifest(dest, reason, archive, _count_skill_files(skills), _backup_cron_jobs_into(dest))
+        # Legacy job-store capture is additive and never fails the snapshot; the manifest records whether it happened so rollback can say "no job-store data".
+        _write_manifest(dest, reason, archive, _count_skill_files(skills), _capture_legacy_job_store(dest))
     except (OSError, tarfile.TarError) as e:
         logger.debug("Curator snapshot failed: %s", e, exc_info=True)
         shutil.rmtree(dest, ignore_errors=True)  # clean up partial snapshot
@@ -261,15 +261,15 @@ def _resolve_backup(backup_id: Optional[str]) -> Optional[Path]:
     return next(iter(_restorable_snapshots()), None)
 
 
-def _restore_cron_skill_links(snapshot_dir: Path) -> dict[str, Any]:
-    """Reconcile backed-up cron skill links into the live ``cron/jobs.json`` job store.
+def _restore_scheduled_job_links(snapshot_dir: Path) -> dict[str, Any]:
+    """Reconcile backed-up scheduled-job skill links into the live job store.
 
-    Cron was excised from this branch (no ``cron`` package, no live store), so there
+    The scheduler was excised from this branch (no scheduler package, no live store), so there
     is nothing to reconcile into; the error is reported in the usual report shape
     instead of restoring skill links.
     """
     report: dict[str, Any] = {"attempted": False, "restored": [], "skipped_missing": [], "unchanged": 0, "error": None}
-    report["error"] = "cron excised"
+    report["error"] = "job store excised"
     return report
 
 
@@ -336,18 +336,18 @@ def _unstage(moved: list[tuple[Path, Path]]) -> list[str]:
     return failed
 
 
-def _cron_summary(cron_report: dict[str, Any]) -> Optional[str]:
-    if not cron_report.get("attempted"):
+def _job_link_summary(report: dict[str, Any]) -> Optional[str]:
+    if not report.get("attempted"):
         return None
-    if cron_report.get("error"):
-        return f"cron links: error — {cron_report['error']}"
+    if report.get("error"):
+        return f"scheduled-job links: error — {report['error']}"
     # (attempted with nothing matched — empty snapshot or no overlapping ids — says nothing)
     parts = [f"{n} {label}" for n, label in (
-        (len(cron_report.get("restored") or []), "job(s) had skill links restored"),
-        (len(cron_report.get("skipped_missing") or []), "backed-up job(s) no longer exist (skipped)"),
-        (cron_report.get("unchanged", 0), "already matched"),
+        (len(report.get("restored") or []), "job(s) had skill links restored"),
+        (len(report.get("skipped_missing") or []), "backed-up job(s) no longer exist (skipped)"),
+        (report.get("unchanged", 0), "already matched"),
     ) if n]
-    return "cron links: " + ", ".join(parts) if parts else None
+    return "scheduled-job links: " + ", ".join(parts) if parts else None
 
 
 def rollback(backup_id: Optional[str] = None) -> tuple[bool, str, Optional[Path]]:
@@ -422,10 +422,10 @@ def rollback(backup_id: Optional[str] = None) -> tuple[bool, str, Optional[Path]
         return _retain_staging(staged, unrestored, "snapshot extracted but excluded entries were not carried over")
     shutil.rmtree(staged, ignore_errors=True)
 
-    # Cron reconciliation failures don't fail the rollback — the skills tree (the main guarantee) is already restored.
-    cron_report = _restore_cron_skill_links(target)
-    logger.info("Curator rollback: restored from %s (cron_report=%s)", target.name, cron_report)
-    return (True, "; ".join(filter(None, [f"restored from snapshot {target.name}", _cron_summary(cron_report)])), target)
+    # Scheduled-job link reconciliation failures don't fail the rollback — the skills tree (the main guarantee) is already restored.
+    link_report = _restore_scheduled_job_links(target)
+    logger.info("Curator rollback: restored from %s (link_report=%s)", target.name, link_report)
+    return (True, "; ".join(filter(None, [f"restored from snapshot {target.name}", _job_link_summary(link_report)])), target)
 
 
 # --- Human-readable summary for CLI ---
