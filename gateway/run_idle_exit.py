@@ -94,17 +94,8 @@ def _served_homes(runner) -> list[Path]:
 
 
 def _cron_busy(homes) -> str | None:
-    from cron.jobs import is_job_runnable, is_terminal_job, load_jobs, use_cron_store
-    from cron.scheduler import get_running_job_ids
-    if get_running_job_ids():
-        return "cron job running"
-    for home in homes:
-        if not (home / "cron" / "jobs.json").exists():
-            continue
-        with use_cron_store(home):
-            jobs = load_jobs()
-        if any(is_job_runnable(job) and not is_terminal_job(job) for job in jobs):
-            return f"cron jobs scheduled in {home}"
+    """Cron was excised from this branch: no job can be running or scheduled."""
+    del homes
     return None
 
 

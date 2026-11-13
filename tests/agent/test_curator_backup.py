@@ -230,37 +230,6 @@ def test_real_run_takes_pre_snapshot(backup_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _write_cron_jobs(home: Path, jobs: list) -> Path:
-    """Write a synthetic cron/jobs.json under HERMES_HOME. Returns the path.
-    Mirrors cron.jobs.save_jobs() wrapper shape: `{"jobs": [...], "updated_at": ...}`.
-    """
-    cron_dir = home / "cron"
-    cron_dir.mkdir(parents=True, exist_ok=True)
-    path = cron_dir / "jobs.json"
-    path.write_text(
-        json.dumps({"jobs": jobs, "updated_at": "2026-05-01T00:00:00Z"}, indent=2),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _reload_cron_jobs(home: Path):
-    """Reload cron.jobs so its module-level HERMES_DIR picks up the tmp HOME."""
-    import hermes_constants
-    importlib.reload(hermes_constants)
-    if "cron.jobs" in sys.modules:
-        import cron.jobs as _cj
-        importlib.reload(_cj)
-    else:
-        import cron.jobs as _cj
-    import cron.jobs as cj
-    return cj
-
-
-
-
-
-
 
 
 def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(backup_env):
@@ -288,109 +257,39 @@ def test_snapshot_cron_jobs_utf8_bom_counted_and_backup_bomless(backup_env):
     assert json.loads(backup_bytes) == json.loads(payload)
 
 
-def test_rollback_restores_cron_skill_links(backup_env):
-    """End-to-end: snapshot with job [alpha,beta], curator-style in-place
-    rewrite to [umbrella], then rollback → skills restored to [alpha,beta]."""
+def test_rollback_reports_excised_cron_links(backup_env):
+    """Post-excision rollback must succeed and note that cron links were skipped."""
     cb = backup_env["cb"]
-    home = backup_env["home"]
     _write_skill(backup_env["skills"], "alpha")
-    _write_skill(backup_env["skills"], "beta")
-    _write_skill(backup_env["skills"], "umbrella")
-
-    cj = _reload_cron_jobs(home)
-    cj.create_job(name="weekly", prompt="p", schedule="every 7d",
-                  skills=["alpha", "beta"])
-
     snap = cb.snapshot_skills(reason="pre-curator-run")
     assert snap is not None
 
-    # Simulate the curator's in-place cron rewrite after consolidation
-    cj.rewrite_skill_refs(
-        consolidated={"alpha": "umbrella", "beta": "umbrella"},
-        pruned=[],
-    )
-    live_after_curator = cj.load_jobs()
-    assert live_after_curator[0]["skills"] == ["umbrella"]
-
-    # Now roll back
     ok, msg, _ = cb.rollback(backup_id=snap.name)
     assert ok, msg
-
-    live_after_rollback = cj.load_jobs()
-    # skills restored; legacy `skill` mirror follows first element
-    assert live_after_rollback[0]["skills"] == ["alpha", "beta"]
-
-
-
-
-
-
-def test_rollback_leaves_new_jobs_untouched(backup_env):
-    """Jobs created AFTER the snapshot must pass through rollback unchanged."""
-    cb = backup_env["cb"]
-    home = backup_env["home"]
-    _write_skill(backup_env["skills"], "alpha")
-    _write_cron_jobs(home, [
-        {"id": "original", "name": "o", "schedule": "every 1h", "skills": ["alpha"]},
-    ])
-    snap = cb.snapshot_skills(reason="pre-curator-run")
-
-    cj = _reload_cron_jobs(home)
-    jobs = cj.load_jobs()
-    jobs.append({"id": "new-after-snapshot", "name": "new",
-                 "schedule": "every 15m", "skills": ["brand-new-skill"]})
-    cj.save_jobs(jobs)
-
-    ok, _, _ = cb.rollback(backup_id=snap.name)
-    assert ok
-
-    live = cj.load_jobs()
-    by_id = {j["id"]: j for j in live}
-    assert "new-after-snapshot" in by_id
-    # New job's fields completely preserved
-    assert by_id["new-after-snapshot"]["skills"] == ["brand-new-skill"]
-    assert by_id["new-after-snapshot"]["schedule"] == "every 15m"
+    # No live job store exists any more; the restorer says so instead of failing.
+    report = cb._restore_cron_skill_links(backup_env["home"])
+    assert report == {
+        "attempted": False,
+        "restored": [],
+        "skipped_missing": [],
+        "unchanged": 0,
+        "error": "cron excised",
+    }
 
 
+def test_restore_cron_skill_links_standalone():
+    """The link-restorer reports the structured 'excised' shape unconditionally."""
+    from agent import curator_backup
 
+    report = curator_backup._restore_cron_skill_links(Path("/nonexistent-snapshot"))
+    assert report == {
+        "attempted": False,
+        "restored": [],
+        "skipped_missing": [],
+        "unchanged": 0,
+        "error": "cron excised",
+    }
 
-def test_restore_cron_skill_links_standalone(backup_env):
-    """Unit-level test on _restore_cron_skill_links without the full rollback.
-    Verifies the report structure carefully."""
-    cb = backup_env["cb"]
-    home = backup_env["home"]
-
-    # Prime a snapshot dir manually with cron-jobs.json
-    backups_dir = home / "skills" / ".curator_backups" / "fake-id"
-    backups_dir.mkdir(parents=True)
-    (backups_dir / cb.CRON_JOBS_FILENAME).write_text(json.dumps([
-        {"id": "job-1", "name": "one", "skills": ["narrow-a", "narrow-b"]},
-        {"id": "job-2", "name": "two", "skill": "legacy-single"},
-        {"id": "job-gone", "name": "deleted", "skills": ["whatever"]},
-    ]), encoding="utf-8")
-
-    # Live jobs: job-1 got rewritten, job-2 unchanged, job-gone deleted
-    _write_cron_jobs(home, [
-        {"id": "job-1", "name": "one", "skills": ["umbrella"], "schedule": "every 1h"},
-        {"id": "job-2", "name": "two", "skill": "legacy-single", "schedule": "every 1h"},
-        {"id": "job-new", "name": "new", "skills": ["x"], "schedule": "every 1h"},
-    ])
-    _reload_cron_jobs(home)
-
-    report = cb._restore_cron_skill_links(backups_dir)
-    assert report["attempted"] is True
-    assert report["error"] is None
-    assert report["unchanged"] == 1  # job-2 matched
-    assert len(report["restored"]) == 1  # job-1 got restored
-    assert report["restored"][0]["job_id"] == "job-1"
-    assert report["restored"][0]["to"]["skills"] == ["narrow-a", "narrow-b"]
-    assert len(report["skipped_missing"]) == 1
-    assert report["skipped_missing"][0]["job_id"] == "job-gone"
-
-
-# ---------------------------------------------------------------------------
-# A failed extract must leave the skills tree exactly as it was found
-# ---------------------------------------------------------------------------
 
 def test_rollback_recovers_cleanly_from_a_partial_extract(backup_env, monkeypatch):
     """An extract that dies part-way must restore the original tree exactly.

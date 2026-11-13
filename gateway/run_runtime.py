@@ -400,7 +400,6 @@ async def _retire_profile_authority(authority, timeout=None):
     those turns must be signalled first or the room stop cannot finish. False when a turn or room
     thread misses *timeout* (default TURN_SETTLE_SECONDS): it may still call tools and write
     history, so the caller must keep the profile's reservation and store handles."""
-    from gateway.session_cron import unbind_owner
     from gateway.session_runtime_workers import join_authority_work, stop_authority_work
     timeout = TURN_SETTLE_SECONDS if timeout is None else timeout
     authority.retiring = True
@@ -428,7 +427,7 @@ async def _retire_profile_authority(authority, timeout=None):
         task.cancel()
     if rest:
         await asyncio.gather(*rest, return_exceptions=True)
-    unbind_owner(authority)
+    # session_cron owner binding excised with the cron package.
     # Ownership is released next; until a successor bumps the epoch, A's epoch still fences its
     # writes as current, so a stale connection to A must find it retired instead.
     authority.retired = True

@@ -262,67 +262,14 @@ def _resolve_backup(backup_id: Optional[str]) -> Optional[Path]:
 
 
 def _restore_cron_skill_links(snapshot_dir: Path) -> dict[str, Any]:
-    """Reconcile backed-up cron skill links into the live ``cron/jobs.json``. Only ``skills``/``skill`` are restored,
-    and only on jobs that still exist live (by ``id``) — everything else is live state. Backup-only jobs are skipped
-    and reported; live-only jobs untouched. Never raises; writes through ``cron.jobs`` under the scheduler's lock so
-    we don't race tick()."""
+    """Reconcile backed-up cron skill links into the live ``cron/jobs.json`` job store.
+
+    Cron was excised from this branch (no ``cron`` package, no live store), so there
+    is nothing to reconcile into; the error is reported in the usual report shape
+    instead of restoring skill links.
+    """
     report: dict[str, Any] = {"attempted": False, "restored": [], "skipped_missing": [], "unchanged": 0, "error": None}
-    backup_file = snapshot_dir / CRON_JOBS_FILENAME
-    if not backup_file.exists():
-        return {**report, "error": f"snapshot has no {CRON_JOBS_FILENAME}"}
-    try:
-        backup_jobs = _jobs_list(json.loads(backup_file.read_text(encoding="utf-8-sig")))
-    except (OSError, json.JSONDecodeError) as e:
-        return {**report, "error": f"failed to load backed-up jobs: {e}"}
-    if backup_jobs is None:
-        return {**report, "error": "backed-up cron-jobs.json has no jobs list"}
-
-    # Backed-up skill state keyed by job id (legacy single + modern list field).
-    backup_by_id: dict[str, dict[str, Any]] = {
-        job["id"]: {"skills": job.get("skills"), "skill": job.get("skill"), "name": job.get("name") or job["id"]}
-        for job in backup_jobs if isinstance(job, dict) and isinstance(job.get("id"), str) and job.get("id")
-    }
-    if not backup_by_id:
-        return {**report, "attempted": True}  # we tried but there was nothing to do
-    try:
-        from cron.jobs import load_jobs, save_jobs, _jobs_lock
-    except ImportError as e:
-        return {**report, "error": f"cron module unavailable: {e}"}
-
-    report["attempted"] = True
-    try:
-        with _jobs_lock():
-            live_jobs = load_jobs()
-            changed, live_ids = False, set()
-            for live in live_jobs:
-                jid = live.get("id") if isinstance(live, dict) else None
-                if not isinstance(jid, str) or not jid:
-                    continue
-                live_ids.add(jid)
-                backup = backup_by_id.get(jid)
-                if backup is None:  # live job didn't exist at snapshot time
-                    continue
-                cur = {"skills": live.get("skills"), "skill": live.get("skill")}
-                bkp = {"skills": backup.get("skills"), "skill": backup.get("skill")}
-                if cur == bkp:
-                    report["unchanged"] += 1
-                    continue
-                for key, value in bkp.items():  # Restore, preserving absence (don't add a key the backup lacked).
-                    if value is None:
-                        live.pop(key, None)
-                    else:
-                        live[key] = value
-                report["restored"].append({"job_id": jid, "job_name": backup.get("name") or jid, "from": cur, "to": bkp})
-                changed = True
-
-            # Jobs in backup but not live = user deleted them after the snapshot.
-            report["skipped_missing"] = [{"job_id": jid, "job_name": b.get("name") or jid}
-                                         for jid, b in backup_by_id.items() if jid not in live_ids]
-            if changed:
-                save_jobs(live_jobs)
-    except Exception as e:
-        logger.debug("Cron skill-link restore failed: %s", e, exc_info=True)
-        report["error"] = f"restore failed mid-flight: {e}"
+    report["error"] = "cron excised"
     return report
 
 

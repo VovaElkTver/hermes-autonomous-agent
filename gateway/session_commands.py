@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import shlex
 
-from gateway.session_cron_commands import cron_read
+# /cron slash handling (session_cron_commands) was excised with the cron package.
 from hermes_state_runtime import RuntimeStoreError
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,8 @@ _INFO_READS = frozenset({'toolsets', 'platforms'})
 # (GatewayConnection.call_until), which waits with no deadline. A viewer's own connection (Ink, Desktop, ACP
 # send /cron there) answers its reads, prompts and interrupts one request at a time with a deadline, and a
 # /cron run lasts as long as its job, so it keeps main's refusal whichever surface created the session.
-_OWNER_COMMANDS = frozenset({'cron'})
+# /cron (the only owner command) was excised with the cron package.
+_OWNER_COMMANDS = frozenset()
 # Commands that move the session's goal/loop/heartbeat state: every viewer's cards repaint after them.
 _AUTOMATION_COMMANDS = frozenset({'goal', 'subgoal', 'loop', 'heartbeat'})
 
@@ -124,8 +125,8 @@ def command_verdict(name, arg=''):
     """``read`` / ``control`` / ``refused`` for a canonical registry command on a local session."""
     if _REFUSED_ARGUMENTS.get(name, lambda _a: False)(arg):
         return 'refused'
-    if name in _OWNER_COMMANDS:
-        return 'read' if cron_read(_split(arg)) is not None else 'control'  # main's /cron handler shlex-splits
+    if name in _OWNER_COMMANDS:  # remains: read/command verdicts for future owner-only commands
+        return 'control' 
     if (name in _CONTROL_COMMANDS or name in _HANDLER_CONTROLS or name in _PROMPT_COMMANDS
             or name in _SETTING_COMMANDS or name in _APPROVAL_COMMANDS
             or _CONTROL_ARGUMENTS.get(name, lambda _a: False)(arg)):
@@ -472,9 +473,6 @@ async def execute_command(connection, ref, params, *, dispatch=False):
     if canonical in _INFO_READS:
         from gateway.session_info_reads import run_info_read
         return await run_info_read(authority, live, canonical)
-    if canonical in _OWNER_COMMANDS:
-        from gateway.session_cron_commands import run_cron
-        return await run_cron(authority, arg)
 
     from gateway.platforms.base import MessageEvent
     from gateway.session_command_sink import capture

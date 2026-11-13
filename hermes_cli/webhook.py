@@ -221,14 +221,6 @@ def _cmd_subscribe(args):
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
     if getattr(args, "deliver_only", False):
-        if getattr(args, "cron_job", ""):
-            print(
-                "Error: --deliver-only and --cron-job are mutually exclusive. "
-                "--deliver-only pushes the rendered template as a message; "
-                "--cron-job fires an existing cron job (which handles its own "
-                "delivery)."
-            )
-            return 1
         if route["deliver"] == "log":
             print(
                 "Error: --deliver-only requires --deliver to be a real target "
@@ -237,19 +229,7 @@ def _cmd_subscribe(args):
         route["deliver_only"] = True
     if getattr(args, "mirror_to_session", False):
         route["mirror_to_session"] = True
-    cron_job = (getattr(args, "cron_job", "") or "").strip()
-    if cron_job:
-        # Validate the reference up-front so a typo surfaces here, not on the first inbound event.
-        from cron.jobs import AmbiguousJobReference
-        try:
-            job = _resolve_route_cron_job(profile, cron_job)
-        except AmbiguousJobReference as e:
-            print(f"Error: {e}")
-            return 1
-        if job is None:
-            print(f"Error: no cron job matches '{cron_job}'. List jobs with: hermes cron list")
-            return 1
-        route["cron_job"] = job["id"]
+    # The --cron-job subscription mode was excised together with the cron package.
     script = (getattr(args, "script", "") or "").strip()
     if script:
         route["script"] = script
@@ -271,8 +251,6 @@ def _cmd_subscribe(args):
         print("  Mode: direct delivery (no agent, zero LLM cost)")
     if route.get("mirror_to_session"):
         print("  Replies: each delivery is mirrored into the target chat's session")
-    if route.get("cron_job"):
-        print(f"  Mode: cron-job trigger — fires job '{route['cron_job']}' on each event")
     if route.get("prompt"):
         prompt_preview = route["prompt"][:80] + ("..." if len(route["prompt"]) > 80 else "")
         print(f"  {'Message' if route.get('deliver_only') else 'Prompt'}: {prompt_preview}")
@@ -281,18 +259,6 @@ def _cmd_subscribe(args):
     print("\n  Configure your service to POST to the URL above.")
     print("  Use the secret for HMAC-SHA256 signature validation.")
     print("  The gateway must be running to receive events (hermes gateway run).\n")
-
-
-def _resolve_route_cron_job(profile: str, reference: str):
-    """Match runtime routing without changing the caller's subscription/config home."""
-    from cron.jobs import resolve_job_ref, use_cron_store
-    from hermes_cli.profiles import get_profile_dir
-
-    # Bare/default routes execute in the ambient home, including standalone installs.
-    if profile == "default":
-        return resolve_job_ref(reference)
-    with use_cron_store(get_profile_dir(profile)):
-        return resolve_job_ref(reference)
 
 
 def _cmd_list(args):
@@ -308,8 +274,6 @@ def _cmd_list(args):
         deliver = route.get("deliver", "log")
         if route.get("deliver_only"):
             deliver = f"{deliver} (direct — no agent)"
-        if route.get("cron_job"):
-            deliver = f"cron job '{route['cron_job']}'"
         desc = route.get("description", "")
         print(f"  ◆ {name}")
         if desc:

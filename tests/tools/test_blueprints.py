@@ -1,8 +1,8 @@
-"""Tests for the blueprints layer (skill frontmatter <-> cron automation bridge).
+"""Tests for the blueprints layer (SKILL.md frontmatter <-> job-spec bridge).
 
 A blueprint is a skill with a metadata.hermes.blueprint block. These verify parsing,
-the create-job bridge, and the export round-trip without touching the real
-cron store.
+the job-spec translation, and the export round-trip. The cron store itself was
+excised from this branch; only the metadata shape survives.
 """
 
 import sys
@@ -14,7 +14,7 @@ import pytest
 from tools.blueprints import (
     BlueprintError,
     BlueprintSpec,
-    create_blueprint_job,
+    blueprint_to_job_spec,
     export_blueprint,
     parse_blueprint,
     blueprint_spec_for_installed,
@@ -105,24 +105,18 @@ class TestBlueprintSpecForInstalled:
             assert blueprint_spec_for_installed("not-a-blueprint") is None
 
 
-class TestCreateBlueprintJob:
-    def test_bridges_to_create_job(self):
+class TestBlueprintToJobSpec:
+    def test_translates_spec_to_job_kwargs(self):
         spec = parse_blueprint(BLUEPRINT_SKILL)
         assert spec is not None
-        captured = {}
 
-        def fake_create_job(**kwargs):
-            captured.update(kwargs)
-            return {"id": "abc123", **kwargs}
+        kwargs = blueprint_to_job_spec(spec)
 
-        with patch("cron.jobs.create_job", fake_create_job):
-            job = create_blueprint_job(spec, origin={"platform": "telegram"})
-
-        assert captured["schedule"] == "0 8 * * *"
-        assert captured["skills"] == ["morning-brief"]
-        assert captured["deliver"] == "telegram"
-        assert captured["prompt"].startswith("Summarize")
-        assert job["id"] == "abc123"
+        assert kwargs["schedule"] == "0 8 * * *"
+        assert kwargs["skills"] == ["morning-brief"]
+        assert kwargs["deliver"] == "telegram"
+        assert kwargs["prompt"].startswith("Summarize")
+        assert kwargs["name"] == "blueprint:morning-brief"
 
 
 class TestExportBlueprint:

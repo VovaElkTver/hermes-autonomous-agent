@@ -595,45 +595,17 @@ class WebhookAdapter(BasePlatformAdapter):
 
     def _handle_cron_trigger(self, prompt: str, route_config: dict, route_name: str, event_type: str,
                              delivery_id: str, profile: Optional[str] = None) -> web.Response:
-        """cron_job: fire an EXISTING cron job on this event instead of starting a webhook agent session.
-        The rendered prompt is transient per-run context (same rail as ``cronjob(action='run', prompt=...)``);
-        the job's own prompt, skills, model and delivery apply. Same auth/rate-limit/filter/script/idempotency
-        pipeline as agent routes; 202 immediately, the run happens on a worker thread."""
-        job_ref = str(route_config["cron_job"])
-        # Fork autonomous posture (root flag Вл 09.11): no cron, fail closed.
-        from tools.fork_mode import cron_runtime_enabled
-        if not cron_runtime_enabled():
-            logger.warning("[webhook] cron-trigger route=%s refused: cron is excised under autonomous_mode",
-                           route_name)
-            return web.json_response(
-                {"error": "cron is disabled (fork autonomous_mode)"},
-                status=503,
-                headers={"Retry-After": "3600"},
-            )
-        event_context = (f"This run was triggered by webhook event '{event_type}' on route '{route_name}' "
-                         f"(not the schedule).\n\n{prompt}")
-        logger.info("[webhook] cron-trigger event=%s route=%s job=%s delivery=%s", event_type, route_name, job_ref,
-                    delivery_id)
+        """Legacy ``cron_job`` route mode: fail closed — there is no scheduler left to fire into.
 
-        async def _fire_cron_job() -> None:
-            try:
-                from tools.cronjob_tools import execute_job_for_event
-                # The job store (cron/jobs.json) and the run belong to the ROUTED profile, not the gateway's
-                # default home; to_thread copies contextvars so the scope follows. A cron job is a full agent
-                # run (minutes) — keep it off the gateway event loop.
-                with self._profile_scope(profile):
-                    result = await asyncio.to_thread(execute_job_for_event, job_ref, event_context)
-                if not result.get("success"):
-                    logger.warning("[webhook] cron-trigger job=%s route=%s did not complete cleanly: %s", job_ref,
-                                   route_name, result.get("error"))
-            except Exception:
-                logger.exception("[webhook] cron-trigger failed job=%s route=%s", job_ref, route_name)
-
-        task = asyncio.create_task(_fire_cron_job())
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-        return web.json_response({"status": "accepted", "route": route_name, "cron_job": job_ref, "event": event_type,
-                                  "delivery_id": delivery_id}, status=202)
+        The cron worker/execute path was excised with the cron package; historical
+        subscriptions carrying ``cron_job`` get an explicit 503 instead of a silent drop."""
+        del prompt, profile  # kept for call-site stability across route handlers
+        logger.warning("[webhook] cron-trigger route=%s refused: cron package excised", route_name)
+        return web.json_response(
+            {"error": "cron is disabled (excised)"},
+            status=503,
+            headers={"Retry-After": "3600"},
+        )
 
     def _resolve_route(self, request: web.Request) -> tuple[str, Optional[dict], Any, Optional[web.Response]]:
         """Route + profile lookup for a POST; ``(route_name, route_config, profile, error_response)``."""

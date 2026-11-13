@@ -270,7 +270,7 @@ def _guess_chat_type(message: dict[str, Any], account_id: str) -> tuple[str, str
 
 
 # HTTP helpers enforce timeouts via asyncio.wait_for(), not aiohttp ClientTimeout, which raises
-# "Timeout context manager should be used inside a task" under run_coroutine_threadsafe() from cron.
+# "Timeout context manager should be used inside a task" under run_coroutine_threadsafe() from a cron tick.
 async def _api_request(
     session: aiohttp.ClientSession, method: str, *, base_url: str, endpoint: str, headers: dict[str, str], timeout_ms: int, body: Optional[str] = None,
 ) -> dict[str, Any]:

@@ -21,7 +21,6 @@ __all__ = [
     "BlueprintSpec",
     "blueprint_spec_for_installed",
     "blueprint_to_job_spec",
-    "create_blueprint_job",
     "export_blueprint",
     "parse_blueprint",
     "register_blueprint_suggestion",
@@ -124,8 +123,9 @@ def blueprint_spec_for_installed(skill_name: str) -> Optional[BlueprintSpec]:
 
 
 def blueprint_to_job_spec(spec: BlueprintSpec, *, name: Optional[str] = None) -> dict[str, Any]:
-    """``cron.jobs.create_job`` kwargs for a spec — the single translation used by
-    both ``create_blueprint_job`` and the suggestion path so they never drift."""
+    """Legacy ``cron.jobs.create_job`` kwargs for a spec — the single translation the
+    suggestion path and ``export_blueprint`` round-trips relied on. Cron was excised;
+    kept because SKILL.md blueprint metadata still carries this shape."""
     return {
         "prompt": spec.prompt, "schedule": spec.schedule, "name": name or f"blueprint:{spec.skill_name}",
         "deliver": spec.deliver, "skills": [spec.skill_name] if spec.skill_name else None,
@@ -134,35 +134,14 @@ def blueprint_to_job_spec(spec: BlueprintSpec, *, name: Optional[str] = None) ->
     }
 
 
-def create_blueprint_job(spec: BlueprintSpec, *, origin: Optional[dict[str, Any]] = None,
-                         name: Optional[str] = None) -> dict[str, Any]:
-    """Create the cron job for a spec (skill preloaded via ``skills=[name]``); returns the job dict."""
-    from cron.scheduler import create_job_with_scheduler_registration
-
-    job_spec = blueprint_to_job_spec(spec, name=name)
-    if origin is not None:
-        job_spec["origin"] = origin
-    return create_job_with_scheduler_registration(**job_spec)
-
-
 def register_blueprint_suggestion(spec: BlueprintSpec) -> Optional[dict[str, Any]]:
-    """Register an installed blueprint as a Suggested Cron Job (never auto-scheduled;
-    the user accepts or dismisses it). None when skipped (seen/dismissed/backlog full)."""
-    if not spec.skill_name:
-        return None
-    try:
-        from cron.suggestions import add_suggestion
-    except Exception:  # pragma: no cover - import guard
-        return None
+    """Register an installed blueprint as a Suggested Cron Job (never auto-scheduled).
 
-    deliver = f", delivering to {spec.deliver}" if spec.deliver and spec.deliver != "origin" else ""
-    return add_suggestion(
-        title=f"Schedule '{spec.skill_name}'",
-        description=f"The '{spec.skill_name}' blueprint runs on schedule {spec.schedule}{deliver}.",
-        source="blueprint",
-        job_spec=blueprint_to_job_spec(spec),
-        dedup_key=f"blueprint:{spec.skill_name}:{spec.schedule}",
-    )
+    Cron was excised from this branch (no scheduler, no suggestions store), so every
+    installation reports "skipped": None.
+    """
+    del spec
+    return None
 
 
 def export_blueprint(job: dict[str, Any], body: str, *, blueprint_name: Optional[str] = None) -> str:

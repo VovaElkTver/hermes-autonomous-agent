@@ -1,7 +1,7 @@
 """Root-flag gating of cron (Вл 09.11): «все наши придумки под отдельным корневым
 конфиг флагом». autonomous_mode=true (fork default) ⇒ NO cron anywhere:
 no toolset registration, no ticker in bootstrap, REST/webhook surfaces fail closed.
-autonomous_mode=false → donor upstream parity."""
+autonomous_mode=false → donor upstream parity — except cron itself, which was excised."""
 
 from __future__ import annotations
 
@@ -24,48 +24,19 @@ def test_cron_gate_mirrors_root_flag(fork_cfg) -> None:
     assert cron_runtime_enabled() is True   # donor parity posture
 
 
-def _reload_cronjob_tools(monkeypatch):
-    import tools.cronjob_tools as ct
-    monkeypatch.setattr("tools.cronjob_tools", ct)  # keep ref for reload restore
-    importlib.reload(ct)
-    return ct
-
-
-def test_toolset_registration_follows_root_flag(fork_cfg, monkeypatch) -> None:
-    """Agent-visible surface contract, asserted through registry.dispatch:
-    ON → cronjob_manage unknown to the agent; OFF (donor parity) → works."""
-    import json
-
-    from tools.registry import registry
-
-    def _dispatch():
-        return json.loads(registry.dispatch("cronjob_manage", {"action": "list"}))
-
-    _reload_cronjob_tools(monkeypatch)
-    result = _dispatch()
-    assert "Unknown tool" in str(result.get("error"))
-
-    fork_cfg["autonomous_mode"] = False
-    _reload_cronjob_tools(monkeypatch)
-    result = _dispatch()
-    assert result.get("success") is True and "jobs" in result
-
-
 def test_api_server_cron_surface_fails_closed_under_flag(fork_cfg, monkeypatch) -> None:
     """_CRON_AVAILABLE must follow the root flag so /api/jobs/* and /api/cron/fire
     fail closed in the autonomous posture."""
     import gateway.platforms.api_server as api
 
-    fork_cfg.clear()  # autonomous default → cron unavailable
+    # Cron was excised: the REST surface stays fail-closed in every posture.
+    fork_cfg.clear()  # autonomous default
     mod = importlib.reload(api)
     assert mod._CRON_AVAILABLE is False
 
-    fork_cfg["autonomous_mode"] = False
+    fork_cfg["autonomous_mode"] = False  # donor-parity posture, still no cron package
     mod = importlib.reload(api)
-    try:
-        assert mod._CRON_AVAILABLE is True
-    finally:
-        pass
+    assert mod._CRON_AVAILABLE is False
 
 
 def test_webhook_cron_trigger_refuses_under_flag(fork_cfg, monkeypatch) -> None:

@@ -210,8 +210,8 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         # which is fine for a drain but unsafe for a suspend predicate — a transient read failure would make
         # live work look idle and reopen the mid-job freeze. Here an unreadable source counts as work
         # (sentinel 1) so the machine stays awake until the source is readable again.
-        from cron.scheduler import get_running_job_ids
-        return len(get_running_job_ids())
+        # Cron was excised from this branch: no scheduler registry exists any more.
+        return 0
 
     def _active_cron_job_count(self) -> int:
         """Cron jobs currently executing — they run outside ``_running_agents``; 0 if cron can't import.
@@ -903,72 +903,6 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         )
         return False
 
-    async def _notify_interrupted_cron_jobs(self, job_ids) -> int:
-        """Tell the owner of each just-interrupted cron job that its run died; returns notices sent.
-
-        The cron worker can't (its thread reaches ``_deliver_result`` after teardown closed the
-        transport), so this runs post-interrupt while adapters are still connected. Best-effort.
-
-        Its thread reaches ``_deliver_result`` asynchronously, and by then ``_bounded_adapter_teardown`` has
-        closed the transport — so the notice never leaves the process, and ``_consume_interrupted_flag``
-        discards the resulting ``delivery_error`` along with it. The run's only trace is a line in jobs.json
-        nobody reads (#82232).
-        Must therefore be called from the post-interrupt phase, while adapters are still connected — the
-        same window ``_notify_active_sessions_of_shutdown`` relies on for chat sessions, which is blind to
-        cron work because cron runs on the scheduler's own thread pool rather than ``self._running_agents``
-        (#60432).
-        """
-        if not job_ids:
-            return 0
-        try:
-            from cron.jobs import get_job
-            from cron.scheduler import _resolve_delivery_targets
-        except Exception as e:
-            logger.debug("Cron interrupt notification unavailable: %s", e)
-            return 0
-        action = t("gateway.shutdown.action_restarting" if self._restart_requested else "gateway.shutdown.action_shutting_down")
-        notified: set = set()
-        for job_id in job_ids:
-            try:
-                job = get_job(job_id)
-                if not job:
-                    continue
-                # deliver=local / unresolvable-origin jobs resolve to zero targets and stay silent (no home-
-                # channel fallback). Interrupted notices are failure-category status: honor failure_deliver.
-                # See #43014.
-                targets = _resolve_delivery_targets(job, for_failure=True)
-            except Exception as e:
-                logger.debug("Cron interrupt targets unresolved for %s: %s", job_id, e)
-                continue
-            job_name = job.get("name") or job_id
-            msg = t("gateway.shutdown.cron_interrupted", job=job_name, action=action)
-            for target in targets or ():
-                try:
-                    platform = Platform(str(target.get("platform", "")).lower())
-                except Exception:
-                    continue
-                adapter = self.adapters.get(platform)
-                if adapter is None or not self._restart_notification_allowed(platform):
-                    continue
-                chat_id = str(target.get("chat_id"))
-                thread_id = target.get("thread_id")
-                dedup_key = (job_id, *_notice_target_key(platform.value, chat_id, thread_id))
-                if dedup_key in notified:
-                    continue
-                with _log_suppressed(logging.DEBUG, "Cron interrupt notice to %s:%s raised: %s", platform.value, chat_id):
-                    metadata = self._thread_metadata_for_target(platform, chat_id, thread_id, adapter=adapter)
-                    async def send_notice():
-                        if await self._send_notice_logged(
-                            adapter, chat_id, msg, platform.value, "Cron interrupt notice to %s:%s failed: %s",
-                            "Cron interrupt notice to %s:%s raised: %s", metadata=metadata,
-                        ):
-                            notified.add(dedup_key)
-                    from gateway.warning_notifications import present_notification
-                    await present_notification(send_notice, platform=platform)
-        if notified:
-            logger.info("Shutdown: delivered %d interrupted-cron-job notice(s)", len(notified))
-        return len(notified)
-
     async def _shutdown_notification_target(self, session_key: str):
         """``(source, platform_str, chat_id, thread_id, profile)``: persisted origin > cached source >
         parsed key. ``profile`` is the owning profile from the source or the ``agent:<profile>:`` key
@@ -1496,11 +1430,8 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
         Fail-soft toward waiting: if the split can't be read, every active cron run stays
         awaitable and nothing is excluded.
         """
-        try:
-            from cron.scheduler import get_restart_wait_cron_counts
-            return get_restart_wait_cron_counts()
-        except Exception:
-            return {"awaitable": self._active_cron_job_count(), "wedged": 0, "restart_safe": 0}
+        # Cron was excised: there are no cron runs, so nothing is awaitable/wedged.
+        return {"awaitable": 0, "wedged": 0, "restart_safe": 0}
 
     def _wedged_cron_job_count(self) -> int:
         """Cron runs past ``cron.scheduler.get_wedged_job_ids``'s allowance; 0 if cron can't import."""
@@ -1592,14 +1523,7 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                         unit["current_tool"] = summary.get("current_tool")
                         unit["idle_s"] = summary.get("seconds_since_activity")
             units.append(unit)
-        with suppress(Exception):
-            from cron.scheduler import get_running_job_details, get_wedged_job_ids
-            wedged = get_wedged_job_ids()
-            for job in get_running_job_details():
-                units.append({"kind": "cron", "job_id": job["job_id"], "elapsed_s": job["elapsed_s"],
-                              "pid": job["worker_pid"] or os.getpid(), "external": bool(job["worker_pid"]),
-                              "wedged": job["job_id"] in wedged,
-                              "restart_safe": bool(job.get("restart_safe"))})
+        # Cron work units excised with the cron package.
         units.extend(uncounted_runtime_work_units(self, os.getpid()))
         for kind, count in (("api", self._active_api_run_count()), ("deferred", self._active_deferred_agent_worker_count())):
             units.extend({"kind": kind, "pid": os.getpid()} for _ in range(count))
@@ -1763,22 +1687,8 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
                 lambda: process_registry.kill_all(source="gateway_shutdown"))
 
         def _mark_cron_interrupted() -> list:
-            # kill_all() is global: a cron job mid-dispatch lost its tool subprocess and its agent thread may
-            # still emit a plausible response from truncated output — mark it interrupted, never success.
-            # Any cron job still dispatched at this instant just had its tool subprocess killed above
-            # (kill_all() has no per-job-ID targeting — it's a global sweep). No-op when no cron job is in
-            # flight. See #60432.
-            from cron.scheduler import mark_running_jobs_interrupted
-            _interrupted = mark_running_jobs_interrupted(
-                f"Gateway shutdown ({phase}) killed the job's tool subprocess before the run finished."
-            )
-            if _interrupted:
-                logger.warning(
-                    "Shutdown (%s): marked %d in-flight cron job(s) interrupted: %s",
-                    phase, len(_interrupted), ", ".join(_interrupted),
-                )
-            return _interrupted
-
+            # Cron was excised from this branch: no registry exists to mark interrupted.
+            return []
         def _interrupt_delegations() -> None:
             from tools.async_delegation import interrupt_all as _interrupt_async
             _count_step(
@@ -1932,14 +1842,9 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             logger.debug("Re-signaled interrupt for work still live at settle-window exit")
         # Kill tool subprocesses NOW: deferring past adapter/DB teardown risks the systemd cgroup SIGKILL.
         # Off-loop: the sweep does blocking kills that must not monopolize the event loop (#116327).
-        _interrupted_cron_jobs = await GatewayRunner._stop_kill_tool_subprocesses_off_loop("post-interrupt")
+        await GatewayRunner._stop_kill_tool_subprocesses_off_loop("post-interrupt")
         logger.info("Shutdown phase: post-interrupt tool kill done at +%.2fs", ctx.elapsed())
-        # Last window with the transport up (the cron worker's own notice arrives after teardown).
-        with _log_suppressed(logging.DEBUG, "Cron interrupt notification failed: %s"):
-            # The cron worker whose run we just killed will try to deliver its own "interrupted" notice, but
-            # it gets there after the adapter teardown below and the message is lost (#82232).
-            await self._notify_interrupted_cron_jobs(_interrupted_cron_jobs)
-        logger.info("Shutdown phase: cron interrupt notices done at +%.2fs", ctx.elapsed())
+        # Cron interrupt notices were excised together with the cron package (#82232 machinery).
 
     async def _stop_finalize_agents_and_adapters(self, ctx: GatewayShutdownMixin._StopContext) -> None:
         """Detached restart launch, agent finalization, idle-cache cleanup, adapter teardown."""

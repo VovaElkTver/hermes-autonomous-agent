@@ -423,32 +423,8 @@ def _shipped_cron_store(entries: list[tuple[Path, tuple[str, ...]]]) -> Optional
 
 
 def _merge_cron_store(src: Path, home: Path) -> None:
-    """Merge a distribution's cron store into profile *home* by job id; new jobs arrive paused.
-
-    Nothing is written when a shipped job cannot be scheduled (unparseable schedule, past
-    one-shot for a job the installer resumed); the error names the job."""
-    from cron import jobs as cron_jobs
-    from cron.job_definition import import_job_definitions
-
-    dest = home.joinpath(*_CRON_STORE_REL)
-    try:
-        with tempfile.TemporaryDirectory(prefix="hermes_dist_cron_") as tmp:
-            staged_store = Path(tmp) / "cron"
-            staged_store.mkdir()
-            shutil.copy2(src, staged_store / "jobs.json")
-            with cron_jobs.use_cron_store(tmp):
-                shipped = {
-                    job["id"]: job for job in cron_jobs.load_jobs()
-                    if isinstance(job, dict) and job.get("id")
-                }
-        with cron_jobs.use_cron_store(home):
-            import_job_definitions(
-                shipped, paused_reason="Installed from a profile distribution; review it, then resume.")
-    except (RuntimeError, ValueError) as exc:
-        # RuntimeError: load_jobs on a corrupt/unreadable store; ValueError: a job-labelled
-        # unschedulable definition. OSError propagates as-is like every other copy step.
-        raise DistributionError(f"Could not merge cron jobs into {dest}: {exc}") from exc
-
+    """Cron was excised from this branch: distribution stores carry no jobs to merge."""
+    del src, home
 
 def _real_dir(base: Path, parts: tuple[str, ...]) -> Path:
     """Return ``base/parts`` as a chain of real directories.

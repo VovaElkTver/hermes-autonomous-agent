@@ -117,40 +117,11 @@ def test_same_second_reruns_get_unique_dirs(curator_env):
 # cron_rewrites.json.
 
 
-@pytest.fixture
-def curator_env_with_cron(curator_env, monkeypatch):
-    """Extend curator_env with an initialized + repointed cron.jobs module."""
-    home = curator_env["home"]
-    (home / "cron").mkdir(exist_ok=True)
-    (home / "cron" / "output").mkdir(exist_ok=True)
+def test_cron_rewrite_fields_zeroed_after_excision(curator_env):
+    """Cron was excised: run.json still carries rewrite fields, but they report
+    an empty, successful sweep and no cron_rewrites.json sidecar is written."""
+    curator = curator_env["curator"]
 
-    import importlib
-    import cron.jobs as jobs_mod
-    importlib.reload(jobs_mod)
-    monkeypatch.setattr(jobs_mod, "HERMES_DIR", home)
-    monkeypatch.setattr(jobs_mod, "CRON_DIR", home / "cron")
-    monkeypatch.setattr(jobs_mod, "JOBS_FILE", home / "cron" / "jobs.json")
-    monkeypatch.setattr(jobs_mod, "OUTPUT_DIR", home / "cron" / "output")
-
-    return {**curator_env, "jobs": jobs_mod}
-
-
-def test_curator_rewrites_cron_skills_when_skill_consolidated(curator_env_with_cron):
-    """A skill consolidated into an umbrella should be rewritten in any
-    cron job's skills list; the rewrite should be visible in run.json
-    and cron_rewrites.json."""
-    curator = curator_env_with_cron["curator"]
-    jobs = curator_env_with_cron["jobs"]
-
-    # Create a cron job that depends on a soon-to-be-consolidated skill
-    job = jobs.create_job(
-        prompt="",
-        schedule="every 1h",
-        skills=["foo"],
-        name="foo-watcher",
-    )
-
-    # Simulate a curator pass that consolidated `foo` → `foo-umbrella`
     before = [{"name": "foo", "state": "active", "pinned": False}]
     after = [{"name": "foo-umbrella", "state": "active", "pinned": False}]
 
@@ -178,30 +149,8 @@ def test_curator_rewrites_cron_skills_when_skill_consolidated(curator_env_with_c
         ),
     )
 
-    # Cron job is rewritten on disk
-    loaded = jobs.get_job(job["id"])
-    assert loaded["skills"] == ["foo-umbrella"]
-    assert loaded["skill"] == "foo-umbrella"
-
-    # Rewrite is recorded in run.json
     payload = json.loads((run_dir / "run.json").read_text())
-    assert payload["cron_rewrites"]["jobs_updated"] == 1
-    assert payload["counts"]["cron_jobs_rewritten"] == 1
-    rewrites = payload["cron_rewrites"]["rewrites"]
-    assert len(rewrites) == 1
-    assert rewrites[0]["mapped"] == {"foo": "foo-umbrella"}
-
-    # Separate cron_rewrites.json is written for convenience
-    cron_file = run_dir / "cron_rewrites.json"
-    assert cron_file.exists()
-    detail = json.loads(cron_file.read_text())
-    assert detail["jobs_updated"] == 1
-
-    # Markdown surfaces the change
-    md = (run_dir / "REPORT.md").read_text()
-    assert "foo-watcher" in md
-    assert "foo-umbrella" in md
-
-
-
+    assert payload["cron_rewrites"] == {"rewrites": [], "jobs_updated": 0, "jobs_scanned": 0}
+    assert payload["counts"]["cron_jobs_rewritten"] == 0
+    assert not (run_dir / "cron_rewrites.json").exists()
 

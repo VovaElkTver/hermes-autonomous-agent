@@ -34,16 +34,9 @@ def _cache_scope_from_session_id(session_id: Optional[str]) -> str:
     match = _CRON_SESSION_ID_RE.match(sid)
     if match:
         return match.group(1)
-    # The unified scheduler admits cron fires into a ``local-*`` session. Its
-    # physical id is intentionally opaque and changes on every fire, so recover
-    # the stable job scope from the bound scheduler admission instead.
-    from gateway.session_cron import current_execution
-
-    execution = current_execution()
-    if execution is not None and str(execution[1]) == sid:
-        job_id = str(execution[2] or "").strip()
-        if job_id:
-            return f"cron_{job_id}"
+    # The unified scheduler used to admit cron fires into a ``local-*`` session
+    # and recover a stable job scope from the bound admission; that producer was
+    # excised with the cron package.
     return sid
 
 

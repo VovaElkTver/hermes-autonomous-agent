@@ -22,6 +22,18 @@ def _local_session(runner, source):
     return local_authority_live(runner, source)
 
 
+def _managed_side_agent(authority, policy, live, ref, target):
+    """Transient-агент фазы ANALYZE для cold/local сессий managed_refine."""
+    import uuid as _uuid
+
+    from gateway.session_tui_side import _side_agent
+    task_id = f'refine_{_uuid.uuid4().hex[:6]}'
+    agent = _side_agent(authority, policy, live, task_id, session_id=target, skip_memory=True)
+    agent._end_session_on_close = False
+    agent._print_fn = lambda *_a, **_k: None
+    return agent
+
+
 async def refine_local_session(runner, source, focus):
     """The ``/refine`` reply for a local session, or None when ``source`` is not one."""
     authority, live = _local_session(runner, source)
@@ -42,6 +54,26 @@ async def refine_local_session(runner, source, focus):
     target, history = await asyncio.to_thread(load)
     if not history:
         return t('gateway.refine.nothing_yet')
+    # managed_refine (ТЗ «Управляемый анализ», правки Вл 10.11): локальная сессия уходит на
+    # управляемые рельсы — transient-агент собирается билдером только на фазе ANALYZE.
+    from gateway.refine_managed import intercept_cold, managed_refine_enabled
+
+    def _managed_publish(message):
+        current = authority.sessions.get(ref.session_id)
+        if current is not None:
+            current.event_stream.publish(ref.session_id, {'text': str(message)},
+                                         event_type='review.summary')
+
+    if managed_refine_enabled():
+        _plat = getattr(getattr(source, 'platform', None), 'name', 'local').lower()
+        consumed = intercept_cold(
+            messages_snapshot=list(history),
+            chat_key=f"{_plat}:{getattr(source, 'chat_id', '')}",
+            publish=_managed_publish,
+            builder=lambda: _managed_side_agent(authority, policy, live, ref, target),
+            focus=focus or None)
+        if consumed:
+            return '[managed_refine] прогон создан: материал PREPARE опубликован в сессию.'
     from agent.background_review import finish_background_review_run, prepare_background_review_run
     from gateway.session_tui_side import _side_agent, _side_scope, _spawn
     # The guard is the session's (its side agent is per call): a /refine while one runs joins it, as

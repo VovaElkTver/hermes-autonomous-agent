@@ -981,22 +981,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         event.text = _init_prompt
         return False, None
 
-    async def _hm_cmd_blueprint(self, event, source, _quick_key):
-        _blueprint_result = await self._handle_blueprint_command(event)
-        _text = getattr(_blueprint_result, "text", "") or ""
-        _blueprint_seed = getattr(_blueprint_result, "agent_seed", None)
-        if not _blueprint_seed:
-            return True, _text or None
-        # Blueprint matched — rewrite the turn to the seed and fall through so the agent collects
-        # each slot value conversationally, then calls the cronjob tool (the /steer pattern).
-        if _text:
-            await self._send_command_ack(source, _text, "blueprint")
-        try:
-            event.text = _blueprint_seed
-        except Exception:
-            return True, _text or None
-        return False, None
-
+    # /blueprint went with the cron package; its handler slot is gone with it.
     async def _hm_cmd_undo(self, event, source, _quick_key):
         _undo_n = 1
         _undo_raw = event.get_command_args().strip()

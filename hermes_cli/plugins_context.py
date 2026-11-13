@@ -216,9 +216,9 @@ class PluginContext(PluginCapabilityCtxMixin):
             return "default"
 
     def current_cron_execution(self) -> Any:
-        """The cron run executing now (``cron.execution_identity.CronExecution``), else ``None``."""
-        from cron.execution_identity import current_cron_execution
-        return current_cron_execution()
+        """Legacy plugin-API hook: no cron run can execute now that the cron
+        package is excised, so this is always ``None``."""
+        return None
 
     def on_unload(self, callback: Callable[[], None]) -> PluginRegistration:
         """Register a cleanup callback for unload: runs in reverse acquisition order interleaved
