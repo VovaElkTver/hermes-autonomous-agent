@@ -20,12 +20,17 @@ def _signed(secret, body, delivery):
 
 
 @pytest.mark.asyncio
-async def test_cron_route_replay_fires_the_job_once():
-    """cron_job routes never reach the durable ledger, so a replayed signed delivery must not re-fire."""
-    a = _adapter({"nightly": {"secret": "s", "prompt": "x", "cron_job": "job1"}})
+async def test_deliver_only_route_replay_fires_once():
+    """deliver_only routes never reach the durable ledger, so a replayed signed delivery must not re-fire."""
+    a = _adapter({"nightly": {"secret": "s", "prompt": "x", "deliver_only": True, "deliver": "telegram"}})
     fired = []
-    a._handle_cron_trigger = lambda *args, **kw: (fired.append(args[4]),
-                                                 web.json_response({"status": "accepted"}, status=202))[1]
+
+    async def fake_deliver_only(prompt, payload, route_config, route_name, event_type, delivery_id,
+                                profile=None):
+        fired.append(delivery_id)
+        return web.json_response({"status": "accepted"}, status=202)
+
+    a._handle_deliver_only = fake_deliver_only
     app = web.Application()
     app.router.add_post("/webhooks/{route_name}", a._handle_webhook)
     body = b'{"k":1}'

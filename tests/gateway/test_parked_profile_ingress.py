@@ -388,17 +388,16 @@ async def test_a_route_rule_admission_never_matches_does_not_refuse_the_coalesce
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['deliver_only', 'cron_job'])
 async def test_a_non_durable_webhook_for_a_parked_profile_is_refused_before_its_id_is_recorded(
-        tmp_path, monkeypatch, mode):
-    """``deliver_only`` and ``cron_job`` act without an admission: the in-memory delivery id is their
+        tmp_path, monkeypatch):
+    """``deliver_only`` acts without an admission: the in-memory delivery id is its
     only replay guard, so a parked profile must refuse before recording it."""
     from gateway.platforms.webhook import _INSECURE_NO_AUTH
     homes = _homes(tmp_path, monkeypatch)
     runner = await _runner_with_beta_parked(tmp_path, monkeypatch, homes)
-    route = {'secret': _INSECURE_NO_AUTH, 'prompt': 'event {id}', 'profile': 'beta', mode: True}
-    if mode == 'deliver_only':
-        route['deliver'] = 'log'
+    route = {'secret': _INSECURE_NO_AUTH, 'prompt': 'event {id}', 'profile': 'beta',
+             'deliver_only': True}
+    route['deliver'] = 'log'
     adapter = _webhook(runner, {'events': route})
     try:
         refused = await adapter._handle_webhook(_webhook_request('delivery-1', {'id': 17}))

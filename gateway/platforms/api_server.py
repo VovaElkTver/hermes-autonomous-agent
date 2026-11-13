@@ -1,7 +1,7 @@
 """OpenAI-compatible API server platform adapter (aiohttp).
 
 Serves /v1/chat/completions, /v1/responses, /v1/models, /v1/capabilities, /api/sessions,
-/v1/runs, /api/jobs and /health* (full table: ``APIServerAdapter._http_route_table``); any
+/v1/runs and /health* (full table: ``APIServerAdapter._http_route_table``); any
 OpenAI-compatible frontend connects at http://localhost:8642/v1 with API_SERVER_KEY. Under
 ``gateway.multiplex_profiles`` secondary profiles live at ``/p/<profile>/...``.
 """
@@ -891,29 +891,6 @@ def _derive_chat_session_id(system_prompt: Optional[str], first_user_message: st
     return f"api-{digest}"
 
 
-# Fork autonomous posture (root flag Вл 09.11): this branch carries no cron at all — the
-# ``cron`` package was excised, so the REST surface (/api/jobs/*) permanently fails closed.
-_CRON_AVAILABLE = False
-_cron_list = _cron_get = _cron_create = _cron_update = None
-_cron_remove = _cron_pause = _cron_resume = _cron_trigger = None
-
-
-class _CronSchedulerRegistrationError(RuntimeError):
-    pass
-
-
-def _notify_cron_provider_jobs_changed() -> None:
-    """Best-effort notify of the active cron provider after a REST mutation.
-
-    Cron was excised: there is no provider to notify."""
-    return
-
-
-# Defense-in-depth prompt-injection scan shared with the (excised) cronjob tool:
-# the scanner went with that toolset, so the REST endpoints skip the scan today.
-_scan_cron_prompt = None
-
-
 # English labels stay as constants: ``gateway.run._GATEWAY_AUTH_ERROR_RE`` / ``_GATEWAY_RATE_LIMIT_RE``
 # sniff these words in failure envelopes, so matchers and tests key off them regardless of the
 # display language. ``user_text()`` renders the human-facing line through ``t()``.
@@ -1364,17 +1341,6 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
         fields = [f"{key}={value!r}" for key, value in ctx.items() if value]
         return " ".join(fields) if fields else "source='unknown'"
 
-    def _cron_origin_from_request(self, request: web.Request) -> dict[str, str]:
-        """Persist safe API source metadata on cron jobs created over HTTP."""
-        ctx = self._request_audit_context(request)
-        origin = {"platform": "api_server", "chat_id": "api"}
-        for ctx_key, origin_key in (("remote", "source_ip"), ("peer_ip", "peer_ip"),
-                                    ("forwarded_for", "forwarded_for"), ("real_ip", "real_ip"),
-                                    ("user_agent", "user_agent")):
-            if ctx.get(ctx_key):
-                origin[origin_key] = ctx[ctx_key]
-        return origin
-
     def _expected_api_key(self) -> str:
         """Return the API key authorized for the URL-selected profile."""
         profile = _api_request_profile.get()
@@ -1565,18 +1531,9 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             ("DELETE", "/v1/responses/{response_id}", self._handle_delete_response),
             # Platform event ingress: authenticated by the target adapter's own verifier,
             # NOT API_SERVER_KEY (external platforms hold no API server key).
-            ("POST", "/api/platforms/{platform}/events", self._handle_platform_event_callback),
-            ("GET", "/api/jobs", self._handle_list_jobs),
-            ("POST", "/api/jobs", self._handle_create_job),
-            ("GET", "/api/jobs/{job_id}", self._handle_get_job),
-            ("PATCH", "/api/jobs/{job_id}", self._handle_update_job),
-            ("DELETE", "/api/jobs/{job_id}", self._handle_delete_job),
-            ("POST", "/api/jobs/{job_id}/pause", self._handle_pause_job),
-            ("POST", "/api/jobs/{job_id}/resume", self._handle_resume_job),
-            ("POST", "/api/jobs/{job_id}/run", self._handle_run_job)]
+            ("POST", "/api/platforms/{platform}/events", self._handle_platform_event_callback)]
         routes.extend(_room_grants._http_routes(self))
         routes.extend(_api_runs._http_routes(self))
-        # POST /api/cron/fire (Chronos) excised together with the cron package/plugins.
         return routes
 
     # -- Session header helpers -------------------------------------------------------
@@ -3259,186 +3216,6 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             model_lock="accepted")
         return web.json_response(
             {"object": "hermes.session.model_lock", "session_id": session_id, "runtime": runtime})
-
-    # -- Cron jobs API ----------------------------------------------------------------
-
-    _JOB_ID_RE = re.compile(r"[a-f0-9]{12}")
-    # Update whitelist — prevents clients injecting arbitrary keys.
-    _UPDATE_ALLOWED_FIELDS = {"name", "schedule", "prompt", "deliver", "skills", "skill", "repeat", "enabled"}
-    _MAX_NAME_LENGTH = 200
-    _MAX_PROMPT_LENGTH = 5000
-
-    def _cron_request_guard(
-        self, request: web.Request, *, need_job_id: bool = False, check_draining: bool = False,
-    ) -> tuple:
-        """Shared /api/jobs prelude: auth → (drain) → cron available → (job_id). Returns (job_id, err)."""
-        auth_err = self._check_auth(request)
-        if auth_err:
-            return None, auth_err
-        if check_draining:
-            draining = self._draining_response()
-            if draining is not None:
-                return None, draining
-        if not _CRON_AVAILABLE:
-            return None, web.json_response({"error": "Cron module not available"}, status=501)
-        if not need_job_id:
-            return None, None
-        job_id = request.match_info["job_id"]
-        if not self._JOB_ID_RE.fullmatch(job_id):
-            logger.warning(
-                "Cron jobs API rejected invalid job_id %r: %s", job_id, self._request_audit_log_suffix(request))
-            return job_id, web.json_response({"error": "Invalid job ID format"}, status=400)
-        return job_id, None
-
-    @staticmethod
-    def _cron_error_response(exc: BaseException) -> web.Response:
-        return web.json_response({"error": _redact_api_error_text(exc)}, status=500)
-
-    def _validate_cron_prompt(self, prompt: str) -> Optional[web.Response]:
-        """Length cap + injection scan shared by create/update/run."""
-        if len(prompt) > self._MAX_PROMPT_LENGTH:
-            return web.json_response({"error": f"Prompt must be ≤ {self._MAX_PROMPT_LENGTH} characters"}, status=400)
-        if prompt and _scan_cron_prompt is not None:
-            scan_error = _scan_cron_prompt(prompt)
-            if scan_error:
-                return web.json_response({"error": scan_error}, status=400)
-        return None
-
-    def _job_response(self, fn, job_id: str, *, notify: bool) -> web.Response:
-        """Run ``fn(job_id)``: 404 when falsy, else ``{"job": ...}``; exceptions -> 500."""
-        try:
-            job = fn(job_id)
-            if not job:
-                return web.json_response({"error": "Job not found"}, status=404)
-            if notify:
-                _notify_cron_provider_jobs_changed()
-            return web.json_response({"job": job})
-        except Exception as e:
-            return self._cron_error_response(e)
-
-    async def _job_lookup_or_mutate(self, request: web.Request, fn, *, notify: bool) -> web.Response:
-        job_id, err = self._cron_request_guard(request, need_job_id=True)
-        return err if err else self._job_response(fn, job_id, notify=notify)
-
-    async def _handle_list_jobs(self, request: web.Request) -> web.Response:
-        """GET /api/jobs — list all cron jobs."""
-        _, err = self._cron_request_guard(request)
-        if err:
-            return err
-        try:
-            include_disabled = request.query.get("include_disabled", "").lower() in {"true", "1"}
-            return web.json_response({"jobs": _cron_list(include_disabled=include_disabled)})
-        except Exception as e:
-            return self._cron_error_response(e)
-
-    async def _handle_create_job(self, request: web.Request) -> web.Response:
-        """POST /api/jobs — create a new cron job."""
-        _, err = self._cron_request_guard(request)
-        if err:
-            return err
-        try:
-            body = await request.json()
-            name = (body.get("name") or "").strip()
-            schedule = (body.get("schedule") or "").strip()
-            prompt = body.get("prompt", "")
-            skills = body.get("skills")
-            repeat = body.get("repeat")
-            if not name:
-                return web.json_response({"error": "Name is required"}, status=400)
-            if len(name) > self._MAX_NAME_LENGTH:
-                return web.json_response({"error": f"Name must be ≤ {self._MAX_NAME_LENGTH} characters"}, status=400)
-            if not schedule:
-                return web.json_response({"error": "Schedule is required"}, status=400)
-            prompt_err = self._validate_cron_prompt(prompt)
-            if prompt_err:
-                return prompt_err
-            if repeat is not None and (not isinstance(repeat, int) or repeat < 1):
-                return web.json_response({"error": "Repeat must be a positive integer"}, status=400)
-            kwargs = {
-                "prompt": prompt, "schedule": schedule, "name": name,
-                "deliver": body.get("deliver", "local"),
-                "origin": self._cron_origin_from_request(request)}
-            for key in ("paused", "paused_reason"):
-                if key in body:
-                    kwargs[key] = body[key]
-            if skills:
-                kwargs["skills"] = skills
-            if repeat is not None:
-                kwargs["repeat"] = repeat
-            return web.json_response({"job": _cron_create(**kwargs)})
-        except _CronSchedulerRegistrationError as e:
-            return web.json_response(e.to_dict(), status=424)
-        except ValueError as e:
-            return web.json_response({"error": str(e)}, status=400)
-        except Exception as e:
-            return self._cron_error_response(e)
-
-    async def _handle_get_job(self, request: web.Request) -> web.Response:
-        """GET /api/jobs/{job_id} — get a single cron job."""
-        return await self._job_lookup_or_mutate(request, _cron_get, notify=False)
-
-    async def _handle_update_job(self, request: web.Request) -> web.Response:
-        """PATCH /api/jobs/{job_id} — update a cron job."""
-        job_id, err = self._cron_request_guard(request, need_job_id=True)
-        if err:
-            return err
-        try:
-            body = await request.json()
-            # Whitelist allowed fields to prevent arbitrary key injection
-            sanitized = {k: v for k, v in body.items() if k in self._UPDATE_ALLOWED_FIELDS}
-            if not sanitized:
-                return web.json_response({"error": "No valid fields to update"}, status=400)
-            if "name" in sanitized and len(sanitized["name"]) > self._MAX_NAME_LENGTH:
-                return web.json_response({"error": f"Name must be ≤ {self._MAX_NAME_LENGTH} characters"}, status=400)
-            if "prompt" in sanitized:
-                prompt_err = self._validate_cron_prompt(sanitized["prompt"])
-                if prompt_err:
-                    return prompt_err
-        except Exception as e:
-            return self._cron_error_response(e)
-        return self._job_response(lambda jid: _cron_update(jid, sanitized), job_id, notify=True)
-
-    async def _handle_delete_job(self, request: web.Request) -> web.Response:
-        """DELETE /api/jobs/{job_id} — delete a cron job."""
-        job_id, err = self._cron_request_guard(request, need_job_id=True)
-        if err:
-            return err
-        try:
-            if not _cron_remove(job_id):
-                return web.json_response({"error": "Job not found"}, status=404)
-            _notify_cron_provider_jobs_changed()
-            return web.json_response({"ok": True})
-        except Exception as e:
-            return self._cron_error_response(e)
-
-    async def _handle_pause_job(self, request: web.Request) -> web.Response:
-        """POST /api/jobs/{job_id}/pause — pause a cron job."""
-        return await self._job_lookup_or_mutate(request, _cron_pause, notify=True)
-
-    async def _handle_resume_job(self, request: web.Request) -> web.Response:
-        """POST /api/jobs/{job_id}/resume — resume a paused cron job."""
-        return await self._job_lookup_or_mutate(request, _cron_resume, notify=True)
-
-    async def _handle_run_job(self, request: web.Request) -> web.Response:
-        """POST /api/jobs/{job_id}/run — trigger immediate execution."""
-        job_id, err = self._cron_request_guard(request, need_job_id=True, check_draining=True)
-        if err:
-            return err
-        # Optional transient per-run context (standalone `hermes cron run` /
-        # cronjob(action='run', prompt=...)) — same cap + scan as a stored prompt.
-        extra_prompt = body = None
-        with suppress(Exception):
-            body = await request.json()
-        if isinstance(body, dict):
-            raw_prompt = body.get("prompt")
-            if raw_prompt is not None:
-                extra_prompt = str(raw_prompt)
-                prompt_err = self._validate_cron_prompt(extra_prompt)
-                if prompt_err:
-                    return prompt_err
-                extra_prompt = extra_prompt or None
-        return self._job_response(
-            lambda jid: _cron_trigger(jid, extra_prompt=extra_prompt), job_id, notify=False)
 
     async def _run_agent(
         self, user_message: str, conversation_history: list[dict[str, str]],
