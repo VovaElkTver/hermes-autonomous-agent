@@ -725,8 +725,8 @@ def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
             "  ✓ Removed security.tirith_* — the tirith scanner is no longer bundled with Hermes.")
 
 
-def _migrate_to_53(results: dict[str, Any], quiet: bool) -> None:
-    # 52 → 53: the memory/skills write-approval gate was retired (writes are direct; the
+def _migrate_to_54(results: dict[str, Any], quiet: bool) -> None:
+    # 53 → 54 (fork): the memory/skills write-approval gate was retired (writes are direct; the
     # unattended background-review guard refuses destructive ops outright). Drop any persisted
     # gate keys — including the fork plugin's companion flag — so nothing reads a flag no
     # runtime consumes anymore.
@@ -907,8 +907,14 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     # 51 -> 52: browser.backend + browser.extension_control dropped, AGENT_BROWSER_* .env settings ->
     # browser.* (see config_migrations_browser.migrate_to_52).
     (52, migrate_to_52),
-    # 52 -> 53: the write-approval gate is retired — memory/skill writes are direct; drop the keys.
-    (53, _migrate_to_53),
+    # 52 -> 53: clarify_timeout 3600 -> 90. An hour-long wait held the chat's turn hostage; a
+    # value the user picked themselves is kept.
+    (53, _rewrite_stale_default(
+        section="agent", key="clarify_timeout", old=3600, new=90,
+        added="agent.clarify_timeout=90",
+        message="  ✓ Lowered agent.clarify_timeout from 3600 to 90 seconds (unanswered questions no longer hold the chat for an hour)")),
+    # 53 -> 54 (fork): the write-approval gate is retired — memory/skill writes are direct; drop the keys.
+    (54, _migrate_to_54),
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or
@@ -920,7 +926,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
 #: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose
 #: provenance the config stamp says nothing about.
-LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 53})
+LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 54})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at
 #: or past their version does not prove they ran: unreleased builds of the gateway-runtime branch
