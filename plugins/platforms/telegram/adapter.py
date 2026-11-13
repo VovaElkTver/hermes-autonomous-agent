@@ -618,7 +618,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, TelegramTopicRoutingMixin, Teleg
         # see a wedged getUpdates) / finding the updater stopped with no reconnect in flight; escalate after two.
         self._polling_pending_stuck_count = self._polling_not_running_count = 0
         # Degraded until getUpdates makes progress; while True, send() short-circuits to failure so callers
-        # (cron live-adapter branch) fall through to standalone delivery.
+        # (scheduled-send live-adapter branch) fall through to standalone delivery.
         # Consecutive heartbeat probes that saw queued updates the running poller is not consuming. get_me()
         # can't see this — the send path is healthy while the getUpdates consumer is wedged — so the
         # heartbeat also probes get_webhook_info().pending_update_count and escalates to recovery after two
@@ -4762,7 +4762,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, TelegramTopicRoutingMixin, Teleg
             return
         success = False
         try:
-            # A user script under HERMES_HOME the agent can write: scrubbed like cron and quick-command scripts.
+            # A user script under HERMES_HOME the agent can write: scrubbed like scheduled-task and quick-command scripts.
             from tools.environments.local import build_subprocess_env
             proc = await asyncio.create_subprocess_exec(
                 str(script_path), arg, *extra_args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,

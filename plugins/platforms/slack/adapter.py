@@ -1003,7 +1003,7 @@ class SlackAdapter(BasePlatformAdapter):
     # Slack rejects slash commands inside threads; "!" is rewritten to "/" for known commands.
     typed_command_prefix = "!"
     # ``reply_in_thread: false`` gives both a flat outbound reply and a whole-channel
-    # session bucket, so a flat continuable cron continues on a plain reply.
+    # session bucket, so a flat continuable scheduled job continues on a plain reply.
     supports_inchannel_continuable = True
 
     # Bounded-cache caps (instance assignment in tests overrides per adapter).
@@ -2809,8 +2809,8 @@ class SlackAdapter(BasePlatformAdapter):
         ``dm_top_level_threads_as_sessions: false`` for one session per DM channel)."""
         return self._extra_flag("dm_top_level_threads_as_sessions", default=True)
 
-    def _cron_continuable_surface(self) -> str:
-        """Continuable-cron surface: ``"thread"`` (default; seeded hidden thread) or
+    def _continuable_surface_mode(self) -> str:
+        """Continuable-schedule surface: ``"thread"`` (default; seeded hidden thread) or
         ``"in_channel"`` (flat; shared session ``(slack, channel_id, None)``), from
         ``extra.cron_continuable_surface`` paired with ``reply_in_thread: false``. Unrecognised →
         ``"thread"`` (fail safe)."""
@@ -2819,14 +2819,14 @@ class SlackAdapter(BasePlatformAdapter):
 
     def _warn_if_inchannel_without_flat_reply(self, team_name: str) -> None:
         """Warn when ``in_channel`` is set without ``reply_in_thread: false``: both must hold for a
-        flat cron seed to continue on a plain reply (same flat session). Warn only — the misconfig
+        flat scheduled seed to continue on a plain reply (same flat session). Warn only — the misconfig
         fails safe to a threaded continuation, never an orphaned session."""
         try:
-            if self._cron_continuable_surface() == "in_channel" and self.config.extra.get(
+            if self._continuable_surface_mode() == "in_channel" and self.config.extra.get(
                 "reply_in_thread", True):
                 logger.warning(
                     "[Slack] %s: cron_continuable_surface=in_channel is set WITHOUT "
-                    "reply_in_thread=false. A continuable in-channel cron job will deliver flat, "
+                    "reply_in_thread=false. A continuable in-channel job will deliver flat, "
                     "but the bot will still reply to your continuation in a thread — so it falls "
                     "back to a threaded continuation (\u2248 default behaviour), not the flat "
                     "channel session you asked for. Set platforms.slack.extra.reply_in_thread: "
@@ -6732,7 +6732,7 @@ def _standalone_format_mrkdwn(text: str) -> str:
 async def _standalone_send(
     pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False,
     caption=None):
-    """Out-of-process delivery (``standalone_sender_fn``) for cron/tool processes not co-located
+    """Out-of-process delivery (``standalone_sender_fn``) for scheduled/tool processes not co-located
     with the gateway: text via ``chat.postMessage`` (aiohttp), media via ``files_upload_v2``."""
     del force_document  # signature parity with other standalone senders
     media_files = media_files or []
@@ -6745,7 +6745,7 @@ async def _standalone_send(
     token = tokens[0]
     # Slack rejects bare user IDs (U.../W...) with channel_not_found; open the DM first.
     # User-targeted delivery: chat.postMessage / files_upload_v2 reject bare user IDs (U.../W...) — resolve
-    # to a DM conversation ID (D...) first via conversations.open so `deliver=slack:U…` cron jobs reach the
+    # to a DM conversation ID (D...) first via conversations.open so `deliver=slack:U…` scheduled sends reach the
     # user's DM instead of failing with channel_not_found (#17444).
     chat_id = str(chat_id or "")
     if chat_id[:1] in ("U", "W"):
@@ -6804,7 +6804,7 @@ _SETUP_STEPS = (
     "   3. Install to Workspace: Settings → Install App",
     "   4. After installing, invite the bot to channels: /invite @YourBot",)
 _SETUP_HOME_CHANNEL_HELP = (
-    "📬 Home Channel: where Hermes delivers cron job results,",
+    "📬 Home Channel: where Hermes delivers scheduled job results,",
     "   cross-platform messages, and notifications.",
     "   To get a channel ID: open the channel in Slack, then right-click",
     "   the channel name → Copy link — the ID starts with C (e.g. C01ABC2DE3F).",
@@ -6939,8 +6939,8 @@ def register(ctx) -> None:
         # gateway/config.py. Hook contract: #24849.
         apply_yaml_config_fn=_apply_yaml_config,
         cron_deliver_env_var="SLACK_HOME_CHANNEL",
-        # Out-of-process cron delivery; without it deliver=slack cron jobs fail with
-        # "No live adapter" when cron runs apart from the gateway.
+        # Out-of-process scheduled delivery; without it deliver=slack scheduled sends fail with
+        # "No live adapter" when the sender runs apart from the gateway.
         standalone_sender_fn=_standalone_send,
         # Slack allows 40,000 chars; leave margin.
         max_message_length=39000,

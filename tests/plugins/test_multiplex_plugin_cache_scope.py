@@ -176,7 +176,7 @@ def test_memory_provider_skill_prune_only_touches_the_active_home(homes, monkeyp
         _reset_plugin_managers_for_tests()
 
 
-def test_disk_cleanup_protected_cron_paths_follow_the_active_home(homes):
+def test_disk_cleanup_protected_schedule_paths_follow_the_active_home(homes):
     """The protected-path guard must protect the ACTIVE profile's cron dir, not the first one asked."""
     spec = importlib.util.spec_from_file_location(
         "disk_cleanup_mux_scope", REPO / "plugins" / "disk-cleanup" / "disk_cleanup.py")
@@ -186,7 +186,7 @@ def test_disk_cleanup_protected_cron_paths_follow_the_active_home(homes):
     for home in (a, b):
         (home / "cron").mkdir()
     with scoped(a):
-        assert dc._is_protected_cron_path(a / "cron")
+        assert dc._is_protected_schedule_path(a / "cron")
     with scoped(b):
-        assert dc._is_protected_cron_path(b / "cron")
-        assert not dc._is_protected_cron_path(a / "cron")
+        assert dc._is_protected_schedule_path(b / "cron")
+        assert not dc._is_protected_schedule_path(a / "cron")

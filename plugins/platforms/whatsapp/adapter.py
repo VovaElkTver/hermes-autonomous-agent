@@ -945,7 +945,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         result = await self._post_bridge_message("send-media", payload, timeout=120)
         if result.success and result.message_id:
             # A later quote of this attachment carries only a thumbnail stub; the bridge's cache
-            # knows inbound media only, so index our own sends (the cron-delivered image case).
+            # knows inbound media only, so index our own sends (the scheduled-delivered image case).
             from gateway import rich_sent_store
             mime = mimetypes.guess_type(file_path)[0] or _MEDIA_INFO.get(_MEDIA_TYPE_BY_BRIDGE_KIND.get(media_type), ("", ""))[1]
             await rich_sent_store.record_media_async(jid, result.message_id, [(file_path, mime or "application/octet-stream")])
@@ -1145,7 +1145,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         """``(path, mime)`` for the quoted message's attachment, folded into this event's own media so the
         vision/audio pipeline sees it like a direct send. ``contextInfo.quotedMessage`` carries only a
         thumbnail stub, so the bridge resolves INBOUND quotes from its download cache (``quotedMediaUrls``,
-        guarded like direct media: a rogue bridge could hand back /etc/passwd); quotes of OUR media (cron
+        guarded like direct media: a rogue bridge could hand back /etc/passwd); quotes of OUR media (scheduled
         chart, generated image — any path we chose) resolve from the outbound index written by
         ``_send_media_to_bridge``."""
         quoted_type = str(data.get("quotedMediaType") or "").strip()
@@ -1232,7 +1232,7 @@ def _normalize_outbound_mentions(mentions: list[str] | None) -> list[str]:
 
 async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_files=None, force_document=False,
                            caption=None, mentions=None):
-    """Out-of-process delivery via the bridge HTTP API (standalone_sender_fn: cron apart from the gateway); ``caption`` rides on the media bubble."""
+    """Out-of-process delivery via the bridge HTTP API (standalone_sender_fn: scheduled sends apart from the gateway); ``caption`` rides on the media bubble."""
     try:
         import aiohttp
     except ImportError:
@@ -1338,7 +1338,7 @@ def interactive_setup() -> None:
     if allowed_users:
         save_env_value("WHATSAPP_ALLOWED_USERS", allowed_users.replace(" ", ""))
         print_success("WhatsApp allowlist configured")
-    home_channel = prompt("Home chat ID for cron delivery (leave empty to skip)").strip()
+    home_channel = prompt("Home chat ID for scheduled delivery (leave empty to skip)").strip()
     if home_channel:
         save_env_value("WHATSAPP_HOME_CHANNEL", home_channel)
     elif remove_env_value("WHATSAPP_HOME_CHANNEL"):
