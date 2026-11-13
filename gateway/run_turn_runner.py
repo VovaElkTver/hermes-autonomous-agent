@@ -1387,6 +1387,15 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
         try:
             agent_history, observed_group_context, history_media_paths = self._load_turn_history(agent, reused_cached_agent)
             persist_msg, persist_ts = self._prepare_turn_message(agent_history)
+            # planning.multistage auto-start (delivery 2): mode=always plans here — once per turn,
+            # before the agent loop, with the resolved child-routing agent in hand. Planner failure
+            # annotates ctx.message visibly; admission bugs log-and-continue either way.
+            try:
+                from agent.planning_coordinator import maybe_prepare_plan
+
+                maybe_prepare_plan(agent, ctx)
+            except Exception:
+                logger.exception("planning auto-start admission failed")
             compressions = getattr(getattr(agent, "context_compressor", None), "compression_count", None)
             from gateway.session_cli_turn import run_classic_cli_turn
             from gateway.session_secret_prompt import secret_prompt_scope
