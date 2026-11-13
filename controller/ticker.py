@@ -62,6 +62,13 @@ TICK_S = 1.0   # базовый такт: внутренние часы ядра
 
 PUMP_STALE_S = 25 * 60   # the watchdog ticker's own freshness rule
 MACHINE_PARK_S = 30 * 60  # machine-parked longer than this is an incident
+RESUME_GRACE_S = 120.0    # resume-interrupted grace: cover the loop's own
+                          # post-pause bookkeeping (the pump parks task+step
+                          # moments before it moves on; resuming inside that
+                          # window races a live dispatcher over the same step)
+INTERRUPT_BASIS = "worker interrupted"  # loop.py park basis prefix — ONLY this
+                                        # resume class. 'out-of-band preempt'
+                                        # and budget/human pauses are NOT.
 HB_BUSY_TIMEOUT_MS = 5_000   # heartbeat waits on a write lock, bounded
 HB_RETRIES = 3               # then the row is skipped, the tick stays alive
 TICK_ERROR_RE_ALERT_S = 60.0  # base of the growing tick-error re-alert interval
@@ -620,8 +627,31 @@ class Ticker:
         for key in list(self._known_alert_keys(conn, "machine-park:")):
             if key not in live_keys:
                 alerts.clear_alert(conn, key)
+        # 3) resume-interrupted repair (go Вл 13.11): a task parked by
+        #    'worker interrupted (resume pending)' has NO auto-resume anywhere
+        #    else — paused->ready is legal in the graph but unowned. The worker
+        #    cannot die silently (reap/adoption above), so a paused task past
+        #    the grace with no open run is exactly 'activated but never
+        #    reported': re-arm its step and requeue. (ready with no
+        #    dispatchable step would be the 22.10 false gate — the step re-arm
+        #    runs FIRST and a task without one is left alone + alerted.)
+        repaired_ids, stuck_ids = [], []
+        for c in self._interrupted_resume_candidates(conn):
+            key = f"resume-interrupted:{c['task_id']}"
+            if self._attempt_resume(conn, c):
+                repaired_ids.append(c["task_id"])
+                alerts.clear_alert(conn, key)  # recurrence after recovery is news again
+                continue
+            stuck_ids.append(c["task_id"])
+            line = alerts.maybe_alert(conn, key, "resume-interrupted",
+                                      task_id=c["task_id"],
+                                      parked_min=int(c["parked_for"] // 60))
+            if line:
+                self._journal_and_deliver(conn, line)
         self._heartbeat(conn, "watchdog",
-                        {"machine_park": [c["task_id"] for c in cands]})
+                        {"machine_park": [c["task_id"] for c in cands],
+                         "resume_repaired": repaired_ids,
+                         "resume_stuck": stuck_ids})
 
     def _machine_park_candidates(self, conn) -> list[dict]:
         out = []
@@ -657,6 +687,70 @@ class Ticker:
             "AND r.created_at=(SELECT MAX(r2.created_at) FROM ctl_review r2"
             "                  WHERE r2.step_id=r.step_id)", (task_id,)).fetchall()
         return bool(rows) and all(r["verdict"] == "pass" for r in rows)
+
+    def _interrupted_resume_candidates(self, conn) -> list[dict]:
+        """Paused tasks whose LAST pause was the worker-interruption park.
+        'out-of-band preempt', budget and human pauses stay paused: only
+        loop.py's 'worker interrupted (resume pending)' class is mechanically
+        resumable. An open run means somebody may still be alive on it —
+        liveness (not age) is the guard; the reap pass converts dead tracked
+        workers to interrupted, reconcile covers restarts."""
+        out = []
+        for t in conn.execute("SELECT task_id, workdir FROM ctl_task"
+                              " WHERE state='paused'").fetchall():
+            row = conn.execute(
+                "SELECT basis, ts FROM ctl_state_transition"
+                " WHERE task_id=? AND to_state='paused'"
+                " ORDER BY ts DESC LIMIT 1", (t["task_id"],)).fetchone()
+            if row is None:
+                continue
+            if not (row["basis"] or "").startswith(INTERRUPT_BASIS):
+                continue
+            if Q.has_open_run(conn, t["task_id"]):
+                continue
+            parked_for = self._now() - row["ts"]
+            if parked_for < RESUME_GRACE_S:
+                continue
+            out.append({"task_id": t["task_id"], "workdir": t["workdir"],
+                        "parked_for": parked_for})
+        return out
+
+    def _attempt_resume(self, conn, cand: dict) -> bool:
+        """Re-arm the parked step(s) FIRST, then requeue — the 22.10 false-gate
+        lesson: a ready task without a dispatchable step pumps into a bogus
+        needs_human gate. A mandate change (stale_reason) parks the task on its
+        merits: resume must not silently continue an old mandate under a new
+        policy (same revalidation the needs_human/failed->ready guards apply)."""
+        tid = cand["task_id"]
+        from . import mandate
+        reason = mandate.stale_reason(conn, tid)
+        if reason:
+            model.emit(conn, kind="ticker-resume-skipped",
+                       origin="controller.ticker", task_id=tid,
+                       payload={"reason": f"mandate: {reason}"[:300]})
+            return False
+        parked = conn.execute("SELECT step_id FROM ctl_step WHERE task_id=?"
+                              " AND status='paused'", (tid,)).fetchall()
+        for s in parked:
+            model.resume_step(conn, s["step_id"])  # paused -> pending (CAS)
+        if Q.next_step(conn, tid) is None:
+            # nothing dispatchable even after re-arm: not ours to invent work
+            return False
+        try:
+            perm = model.get_permission(conn, cand["workdir"])
+            transitions.transition(
+                conn, tid, "ready",
+                basis="ticker-resume: worker interrupted, step re-armed, no open run",
+                expected_epoch=perm["execution_epoch"])
+            model.emit(conn, kind="ticker-resume", origin="controller.ticker",
+                       task_id=tid, payload={"parked_for": cand["parked_for"]})
+            logger.info("controller ticker: resumed %s (worker interrupted)", tid)
+            return True
+        except (ValueError, LookupError) as exc:
+            model.emit(conn, kind="ticker-resume-failed",
+                       origin="controller.ticker", task_id=tid,
+                       payload={"error": str(exc)})
+            return False
 
     def _attempt_requeue(self, conn, cand: dict) -> bool:
         try:
