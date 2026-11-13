@@ -75,17 +75,17 @@ async def _open_bound_branch(store, runner, title="work"):
     return parent_entry, child_id, branch_id
 
 
-class TestForkbStickyThread:
+class TestForkbBlockingThread:
     @pytest.mark.asyncio
     async def test_predicate_binds_only_thread_children(self, store):
         runner = _make_runner(store)
         parent_entry, child_id, branch_id = await _open_bound_branch(store, runner)
-        lock = await runner._bound_branch_lock(child_id)
+        lock = await runner._blocking_branch_lock(child_id)
         assert lock is not None and lock["status"] == "active"
-        assert await runner._bound_branch_lock(parent_entry.session_id) is None
+        assert await runner._blocking_branch_lock(parent_entry.session_id) is None
         # closing releases the predicate
         store._db.set_branch_status(branch_id, "joined")
-        assert await runner._bound_branch_lock(child_id) is None
+        assert await runner._blocking_branch_lock(child_id) is None
 
     @pytest.mark.asyncio
     async def test_resume_name_refused_inside_bound_thread(self, store):

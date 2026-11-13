@@ -108,9 +108,9 @@ class SessionBranchMixin:
             return None
         return dict(row) if row else None
 
-    def get_bound_active_branch(self, child_session_id: str) -> dict | None:
-        """Branch row for ``child_session_id`` iff it is an ACTIVE branch whose child session is
-        bound to a chat thread (``/forkb``). This row is the sticky lock: while it stays active,
+    def get_active_blocking_branch(self, child_session_id: str) -> dict | None:
+        """Branch row for ``child_session_id`` iff it is an ACTIVE branch whose child session
+        owns its own chat thread (``/forkb``). This row is the sticky lock: while it stays active,
         the thread's console must not be repointed to another stream except by closing the branch
         (``/return`` / ``/leave``) — Вл 31.10."""
         try:
@@ -124,10 +124,10 @@ class SessionBranchMixin:
             return None
         return dict(row) if row else None
 
-    def get_any_active_bound_branch(self) -> dict | None:
-        """The oldest ACTIVE branch whose child session is bound to its own chat
-        thread (``/forkb``), regardless of which session asks — the variant-A
-        focus holder (Вл 13.11). While it exists, /forkb must not open another."""
+    def get_any_active_blocking_branch(self) -> dict | None:
+        """The oldest ACTIVE blocking branch (child session owning its own chat
+        thread), regardless of which session asks — the variant-A focus holder
+        (Вл 13.11). While it exists, /forkb must not open another."""
         try:
             row = self._read_one(
                 """SELECT b.* FROM session_branches b
