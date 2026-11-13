@@ -208,9 +208,9 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
         # Sticky /forkb branch (Вл 31.10): /new would rotate this thread's console to a blank
         # stream mid-branch; close the branch first with /return or /leave.
         _entry = self.session_store._entries.get(session_key)
-        _lock = await self._bound_branch_lock(str(getattr(_entry, "session_id", "") or ""))  # type: ignore[attr-defined]
+        _lock = await self._blocking_branch_lock(str(getattr(_entry, "session_id", "") or ""))  # type: ignore[attr-defined]
         if _lock is not None:
-            return self._bound_locked_reply("/new", _lock)  # type: ignore[attr-defined]
+            return self._blocked_reply("/new", _lock)  # type: ignore[attr-defined]
         await self._hm_stop_owner_turn(session_key)  # idle and confirmed resets too (N53)
         self._invalidate_session_run_generation(session_key, reason="session_reset")
         # Evict the running-agent slot now that the generation is bumped: the in-flight run's own
@@ -1190,9 +1190,9 @@ class GatewaySessionCommandsMixin(PlatformLayerHooksMixin):
             _cur_sid = None
         # Sticky /forkb branch (Вл 31.10): a bound thread's console keeps its stream until the
         # branch is closed with /return or /leave — /resume must not silently repoint the thread.
-        _lock = await self._bound_branch_lock(_cur_sid or "")  # type: ignore[attr-defined]
+        _lock = await self._blocking_branch_lock(_cur_sid or "")  # type: ignore[attr-defined]
         if _lock is not None:
-            return self._bound_locked_reply("/resume", _lock)  # type: ignore[attr-defined]
+            return self._blocked_reply("/resume", _lock)  # type: ignore[attr-defined]
         resolved = await self._resolve_resume_target(source, session_key, name, allow_all,
                                                      current_session_id=_cur_sid)
         if isinstance(resolved, str):
