@@ -1,0 +1,6 @@
+name: skill-gate
+version: 1.0.0
+description: "Skill regression gate: verify the accepted skill set still passes the wiki-gate bench after any skill edit. Tool + slash command; engine lives outside the agent repo (outer contour)."
+author: "VovaElkTver (wiki-gate program, Вл 03.11)"
+provides_tools:
+  - skill_gate
