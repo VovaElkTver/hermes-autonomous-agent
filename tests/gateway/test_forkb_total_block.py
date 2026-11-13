@@ -188,3 +188,24 @@ class TestForkbVariantATotalBlock:
         assert all(b["branch_id"] != branch_id
                    for b in store._db.list_active_branches(parent_entry.session_id))
         assert await runner._forkb_pause_reply(parent_entry.session_id) is None
+
+    @pytest.mark.asyncio
+    async def test_forkb_without_thread_refused_not_degraded(self, store):
+        """No thread host -> loud refusal; a blocking branch must not silently
+        degrade into a non-blocking in-place fork (variant A integrity)."""
+        runner = _make_runner(store)
+        parent_entry, _child_id, _ = await _open_bound_branch(store, runner)
+        # release the fixture's holder so the gate is about thread failure only
+        ev0 = MessageEvent(text="/leave", source=_thread_source("$threadB"), message_id="m0")
+        await runner._handle_leave_command(ev0)
+
+        async def _no_thread(src, title):
+            return None
+        runner._branch_open_thread = _no_thread
+        root_sid = parent_entry.session_id
+        ev = MessageEvent(text="/forkb blocked2", source=_thread_source(""), message_id="m1")
+        reply = await runner._handle_forkb_command(ev)
+        assert "⛔" in reply and "/fork" in reply
+        rows = store._db.list_active_branches(root_sid)
+        assert len(rows) == 1  # no new child session/branch row created
+
