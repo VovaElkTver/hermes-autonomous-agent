@@ -213,6 +213,14 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
         if resolved is None:
             return
         source, session_entry, session_key = resolved
+
+        # Variant A (Вл 13.11): an open /forkb holds its tree's whole execution.
+        # Every other branch of that lineage stays paused — not one step — until
+        # /return or /leave releases it; unrelated conversations run as normal.
+        pause_reply = await self._forkb_pause_reply(session_entry.session_id)
+        if pause_reply:
+            return pause_reply
+
         prepared, _session_env_tokens = await self._hmwa_prepare_turn(
             event, source, session_entry, session_key, _quick_key, run_generation,
         )

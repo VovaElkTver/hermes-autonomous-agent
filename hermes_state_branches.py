@@ -124,6 +124,51 @@ class SessionBranchMixin:
             return None
         return dict(row) if row else None
 
+    def get_any_active_bound_branch(self) -> dict | None:
+        """The oldest ACTIVE branch whose child session is bound to its own chat
+        thread (``/forkb``), regardless of which session asks — the variant-A
+        focus holder (Вл 13.11). While it exists, /forkb must not open another."""
+        try:
+            row = self._read_one(
+                """SELECT b.* FROM session_branches b
+                   JOIN sessions s ON s.id = b.child_session_id
+                   WHERE b.status = 'active'
+                     AND s.thread_id IS NOT NULL AND s.thread_id <> ''
+                   ORDER BY b.created_at LIMIT 1""")
+        except Exception:
+            return None
+        return dict(row) if row else None
+
+    def _fork_tree_root(self, session_id: str) -> str | None:
+        seen: set[str] = set()
+        cur: str | None = session_id
+        while cur and cur not in seen:
+            seen.add(cur)
+            try:
+                row = self._read_one(
+                    "SELECT parent_session_id FROM sessions WHERE id = ?", (cur,))
+            except Exception:
+                return cur or None
+            if row is None:
+                break
+            nxt = row["parent_session_id"]
+            if not nxt or nxt == cur:
+                break
+            cur = nxt
+        return cur
+
+    def same_fork_tree(self, session_a: str, session_b: str) -> bool:
+        """True when both sessions hang off one fork lineage (same root by the
+        ``parent_session_id`` chain). Sessions outside any fork share no root row
+        only if their chains never meet; standalone un-forked chats resolve to
+        themselves as roots and so count as separate trees."""
+        if not session_a or not session_b:
+            return False
+        if session_a == session_b:
+            return True
+        ra, rb = self._fork_tree_root(session_a), self._fork_tree_root(session_b)
+        return bool(ra and rb and ra == rb)
+
     def list_active_branches(self, parent_session_id: str) -> list[dict]:
         """Active branches of a session, oldest first."""
         try:
