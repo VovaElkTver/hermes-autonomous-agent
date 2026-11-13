@@ -17,6 +17,12 @@ import pytest
 from hermes_cli import update_cmd
 
 
+@pytest.fixture(autouse=True)
+def _upstream_sync_opt_in(monkeypatch):
+    """Legacy prompt tests run behind the fork gate: arm the opt-in first."""
+    monkeypatch.setenv("HERMES_UPDATE_UPSTREAM_SYNC", "1")
+
+
 @pytest.fixture
 def fork_without_upstream(tmp_path):
     with patch.object(

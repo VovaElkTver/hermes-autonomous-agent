@@ -280,6 +280,18 @@ OFFICIAL_REPO_URLS = {
 OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
+# Fork builds of this agent update from origin only; reaching NousResearch during
+# `hermes update` (remote add + fetch + possible ff-merge) is an explicit opt-in.
+UPSTREAM_SYNC_ENV = "HERMES_UPDATE_UPSTREAM_SYNC"
+UPSTREAM_SYNC_OFF_NOTICE = (
+    "  (fork update touches origin only; set HERMES_UPDATE_UPSTREAM_SYNC=1 to"
+    " also sync with the official upstream)")
+
+
+def _upstream_sync_requested() -> bool:
+    """True only when an operator explicitly asks for upstream sync this run."""
+    return os.environ.get(UPSTREAM_SYNC_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
     """Get the URL of the origin remote, or None if not set."""
@@ -392,6 +404,10 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path, *, assume_yes: 
     from hermes_cli.update_cmd import _count_commits_between, _has_upstream_remote, _no_prompt_git_kwargs, _should_skip_upstream_prompt
     from hermes_cli.update_cmd_check import tracking_refspec
     from hermes_cli.update_custody import run_git
+    if not _upstream_sync_requested():
+        # Fork default: never add/fetch/merge the official repo during update.
+        print(UPSTREAM_SYNC_OFF_NOTICE)
+        return False
     if not _has_upstream_remote(git_cmd, cwd) and (
         _should_skip_upstream_prompt() or not _offer_upstream_remote(git_cmd, cwd, assume_yes=assume_yes, input_fn=input_fn)
     ):
