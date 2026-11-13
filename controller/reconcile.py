@@ -6,7 +6,7 @@ verify_fn that inspects actual side effects (audit log, git state, artifact hash
 any attempt>1 is allowed.
 
 Liveness first (incident 02.11 20:49): EVERY process that registers this plugin calls
-recover() — cron ticks, CLI boots, the worker itself. Without a pid check that stamped a
+recover() — periodic ticks, CLI boots, the worker itself. Without a pid check that stamped a
 live external worker's run 'unknown' seconds after spawn. An open run whose recorded
 worker_pid is not provably dead is left alone; liveness is fail-closed ('unknown' counts
 as alive, same contract as pump_lock._pid_liveness).

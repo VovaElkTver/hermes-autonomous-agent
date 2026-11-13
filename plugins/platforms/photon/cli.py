@@ -196,7 +196,7 @@ def _cmd_setup(args: argparse.Namespace) -> int:
             opted = _wait_for_opt_in(dashboard_id, secret, phone, agent_number)
             routing_live = opted is not None
             agent_number = photon_auth.user_assigned_line(opted) or agent_number
-        # Otherwise the gateway denies the operator's own inbound and has no cron home space.
+        # Otherwise the gateway denies the operator's own inbound and has no scheduled-delivery home space.
         _autoconfigure_access(phone)
     # 5. Surface the agent's iMessage number.
     if not agent_number and not phone:  # the phone path already looked the line up
@@ -296,7 +296,7 @@ def _autoconfigure_access(phone: str) -> None:
     except ImportError:
         return
     for key, label in (("PHOTON_ALLOWED_USERS", "allowlisted your number"),
-                       ("PHOTON_HOME_CHANNEL", "set your DM as the cron home channel")):
+                       ("PHOTON_HOME_CHANNEL", "set your DM as the scheduled-delivery home channel")):
         try:
             if get_env_value(key):
                 print(f"      {key} already set — leaving it as-is.")

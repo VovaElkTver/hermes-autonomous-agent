@@ -178,7 +178,7 @@ def _env_enablement() -> dict | None:
     """``env_enablement_fn``: seed ``PlatformConfig.extra`` from the profile's env before adapter construction
     so ``gateway status`` reflects env-only setups without the SDK; ``None`` when not minimally configured.
     Every identity/endpoint is per-profile (the app the secret belongs to, its regional service URL, the
-    cron home conversation), so a secondary is never seeded with the default profile's Teams app."""
+    scheduled home conversation), so a secondary is never seeded with the default profile's Teams app."""
     seed = _seed_extra_from_env((
         ("TEAMS_CLIENT_ID", "client_id", None), ("TEAMS_CLIENT_SECRET", "client_secret", None),
         ("TEAMS_TENANT_ID", "tenant_id", None), ("TEAMS_PORT", "port", int), ("TEAMS_SERVICE_URL", "service_url", None),
@@ -194,7 +194,7 @@ async def _standalone_send(
 ) -> dict[str, Any]:
     """Acquire a Bot Framework bearer token and POST a single message activity; used by
     ``send_message_tool._send_via_adapter`` when the gateway runner is not in this process
-    (``hermes cron``). ``TEAMS_SERVICE_URL`` is allowlisted and ``chat_id`` charset-checked
+    (a detached one-shot send). ``TEAMS_SERVICE_URL`` is allowlisted and ``chat_id`` charset-checked
     (SSRF/path traversal). ``media_files`` / ``force_document`` are signature parity only — text-only."""
     extra = getattr(pconfig, "extra", {}) or {}
     client_id, client_secret, tenant_id = _credentials(pconfig)
@@ -865,8 +865,8 @@ def register(ctx) -> None:
         required_env=["TEAMS_CLIENT_ID", "TEAMS_CLIENT_SECRET", "TEAMS_TENANT_ID"],
         install_hint=_install_hint(), setup_fn=interactive_setup,
         env_enablement_fn=_env_enablement,  # env-only setups show up in gateway status
-        cron_deliver_env_var="TEAMS_HOME_CHANNEL",  # deliver=teams cron home-channel routing
-        standalone_sender_fn=_standalone_send,  # out-of-process cron delivery via Bot Framework REST
+        cron_deliver_env_var="TEAMS_HOME_CHANNEL",  # deliver=teams scheduled home-channel routing
+        standalone_sender_fn=_standalone_send,  # out-of-process scheduled delivery via Bot Framework REST
         allowed_users_env="TEAMS_ALLOWED_USERS", allow_all_env="TEAMS_ALLOW_ALL_USERS",
         max_message_length=28000,  # Teams supports up to ~28 KB per message
         emoji="💼", allow_update_command=True,

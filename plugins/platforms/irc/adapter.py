@@ -421,7 +421,7 @@ def is_connected(config) -> bool:
 def _env_enablement() -> dict | None:
     """``env_enablement_fn``: seed ``PlatformConfig.extra`` from the profile's env BEFORE adapter construction;
     ``None`` when IRC isn't minimally configured. Passwords also live in extra for back-compat with
-    config.yaml users; env wins at construct time. Home channel defaults to IRC_CHANNEL so cron
+    config.yaml users; env wins at construct time. Home channel defaults to IRC_CHANNEL so scheduled
     ``deliver=irc`` has a target without extra config."""
     server = _get_scoped_secret("IRC_SERVER", "").strip()
     channel = _get_scoped_secret("IRC_CHANNEL", "").strip()
@@ -486,7 +486,7 @@ class _StandaloneConn:
 async def _sa_register(conn: _StandaloneConn, nick_base: str, server_password: str) -> Optional[dict[str, Any]]:
     """PASS/NICK/USER and wait for 001, retrying nick collisions; returns an error dict or None on success."""
     nick_attempts = 0
-    standalone_nick = f"{nick_base}-cron"[:30]
+    standalone_nick = f"{nick_base}-sched"[:30]
 
     async def _on_registration(cmd: str):
         nonlocal nick_attempts, standalone_nick
@@ -495,7 +495,7 @@ async def _sa_register(conn: _StandaloneConn, nick_base: str, server_password: s
             if nick_attempts > 5:
                 return _sa_error("too many nick collisions")
             # Build from the stable base, not the mutated nick, so the suffix stays bounded.
-            standalone_nick = f"{nick_base}-cron-{nick_attempts}"[:30]
+            standalone_nick = f"{nick_base}-sched-{nick_attempts}"[:30]
             await conn.raw(f"NICK {standalone_nick}")
         elif cmd in {"464", "465"}:
             return _sa_error(f"server rejected client ({cmd})")
@@ -503,7 +503,7 @@ async def _sa_register(conn: _StandaloneConn, nick_base: str, server_password: s
     if server_password:
         await conn.raw(f"PASS {_strip_irc_control_chars(server_password)}")
     await conn.raw(f"NICK {standalone_nick}")
-    await conn.raw(f"USER {standalone_nick} 0 * :Hermes Agent (cron)")
+    await conn.raw(f"USER {standalone_nick} 0 * :Hermes Agent (scheduled)")
     registered = await conn.pump(15.0, _on_registration)
     if registered is None:
         return _sa_error("registration timeout (no RPL_WELCOME)")
@@ -526,8 +526,8 @@ async def _sa_join(conn: _StandaloneConn, target: str) -> Optional[dict[str, Any
 
 async def _standalone_send(pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
                            media_files: Optional[list[str]] = None, force_document: bool = False) -> dict[str, Any]:
-    """Open an ephemeral IRC connection, send a PRIVMSG, and quit (out-of-process cron delivery via
-    ``send_message_tool``). Uses a distinct ``-cron`` nick so it never collides with the live gateway adapter.
+    """Open an ephemeral IRC connection, send a PRIVMSG, and quit (out-of-process scheduled delivery via
+    ``send_message_tool``). Uses a distinct ``-sched`` nick so it never collides with the live gateway adapter.
     ``thread_id``/``media_files`` are accepted for signature parity only."""
     extra = getattr(pconfig, "extra", {}) or {}
     server, channel = _server_channel(pconfig)
@@ -604,7 +604,7 @@ def register(ctx):
         setup_fn=interactive_setup,
         env_enablement_fn=_env_enablement,  # env-only setups show in gateway status
         cron_deliver_env_var="IRC_HOME_CHANNEL",  # defaults to IRC_CHANNEL (see _env_enablement)
-        standalone_sender_fn=_standalone_send,  # cron running separately from the gateway
+        standalone_sender_fn=_standalone_send,  # scheduled sends running separately from the gateway
         allowed_users_env="IRC_ALLOWED_USERS",
         allow_all_env="IRC_ALLOW_ALL_USERS",
         max_message_length=450,  # IRC line limit after protocol overhead

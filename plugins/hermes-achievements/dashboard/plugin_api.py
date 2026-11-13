@@ -62,7 +62,7 @@ ACHIEVEMENTS: list[dict[str, Any]] = [
     _ach("full_send", "Full Send", "Terminal, files, and web/browser all get involved in one real run.", "Agent Autonomy", "rocket", requires=[("max_terminal_calls_in_session", 180), ("max_file_tool_calls_in_session", 120), ("max_web_browser_calls_in_session", 60)]),
     _ach("subagent_commander", "Subagent Commander", "Coordinate delegated agent work.", "Agent Autonomy", "branch", metric="total_delegate_calls", tiers=[5, 40, 100, 1000, 5000]),
     _ach("background_process_enjoyer", "Background Process Enjoyer", "Start or control enough long-running processes to deserve the title.", "Agent Autonomy", "daemon", metric="total_process_calls", tiers=[300, 800, 2000, 6000, 15000]),
-    _ach("cron_necromancer", "Cron Necromancer", "Raise scheduled autonomous jobs from the dead.", "Agent Autonomy", "clock", metric="total_cron_calls", tiers=[1000, 3000, 8000, 20000, 50000]),
+    _ach("cron_necromancer", "Scheduler Necromancer", "Raise scheduled autonomous jobs from the dead.", "Agent Autonomy", "clock", metric="total_cron_calls", tiers=[1000, 3000, 8000, 20000, 50000]),
 
     # Debugging Chaos — higher thresholds + multi-condition events
     _ach("red_text_connoisseur", "Red Text Connoisseur", "Encounter enough errors to develop a palate for red text.", "Debugging Chaos", "warning", metric="total_errors", tiers=[1500, 4000, 10000, 25000, 75000]),

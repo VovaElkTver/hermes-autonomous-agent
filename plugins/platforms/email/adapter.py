@@ -450,7 +450,7 @@ def _attach_file(msg: MIMEMultipart, path: Path, filename: str) -> None:
 class EmailAdapter(BasePlatformAdapter):
     """Email gateway adapter using IMAP (receive) and SMTP (send)."""
     serial_receive_loop = True  # the IMAP poll loop awaits each message before dispatching the next
-    # One email carries the whole body, so cron delivery hands over the full payload untruncated.
+    # One email carries the whole body, so scheduled delivery hands over the full payload untruncated.
     splits_long_messages = True
 
     # Per-account seen-UID snapshot surviving adapter recreation: the reconnect watcher builds a FRESH

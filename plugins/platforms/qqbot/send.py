@@ -1,4 +1,4 @@
-"""Out-of-process QQ Bot sender (cron / CLI). Text tries guild, then C2C, then group.
+"""Out-of-process QQ Bot sender (scheduled sends / CLI). Text tries guild, then C2C, then group.
 Media uploads through C2C then group; guild channels have no native media path.
 """
 

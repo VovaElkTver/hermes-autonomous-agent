@@ -2,7 +2,7 @@
 
 Run: python -m controller.pump_cli [--scope DIR] (default: every workdir that has
 queued tasks). Invoked by the controller plugin after operator sessions (and safe
-to cron). The drain goes through the SAME ``controller.pump_lock`` as the in-thread
+from a periodic tick). The drain goes through the SAME ``controller.pump_lock`` as the in-thread
 ticker: a contender against a live holder prints status «held» and exits without
 run_cycle — one worker at a time per scope by construction, the subprocess dies
 when the queue empties.

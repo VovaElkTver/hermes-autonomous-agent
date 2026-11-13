@@ -629,7 +629,7 @@ def _is_connected(config) -> bool:
 
 async def _standalone_send(pconfig, chat_id: str, message: str, *, thread_id: Optional[str] = None,
                            media_files: Optional[list] = None, force_document: bool = False, **_kw) -> dict[str, Any]:
-    """Out-of-process send (cron without a co-resident gateway): one-shot adapter connect → send →
+    """Out-of-process send (one-shot sends without a co-resident gateway): one-shot adapter connect → send →
     disconnect against the BlueBubbles REST API. Text only; ``thread_id``/``media_files``/
     ``force_document`` are signature parity (send_message drops media with a warning)."""
     from gateway.platforms._shared import send_error
@@ -676,7 +676,7 @@ def interactive_setup() -> None:
           "   Use iMessage addresses: email (user@icloud.com) or phone (+15551234567)", None)
     _prompt_allowlist("BLUEBUBBLES_ALLOWED_USERS", "Allowed iMessage addresses (comma-separated, leave empty for open access)",
                       "BlueBubbles allowlist configured", "⚠️  No allowlist set — anyone who can iMessage you can use the bot!")
-    _info(None, "📬 Home Channel: phone or email for cron job delivery and notifications.",
+    _info(None, "📬 Home Channel: phone or email for scheduled job delivery and notifications.",
           "   You can also set this later with /set-home in your iMessage chat.")
     save_prompted("BLUEBUBBLES_HOME_CHANNEL", "Home channel address (leave empty to set later)")
     _info(None, "Advanced settings (defaults are fine for most setups):")
@@ -713,7 +713,7 @@ def register(ctx) -> None:
         required_env=["BLUEBUBBLES_SERVER_URL", "BLUEBUBBLES_PASSWORD"], install_hint=_INSTALL_HINT,
         setup_fn=interactive_setup,
         cron_deliver_env_var="BLUEBUBBLES_HOME_CHANNEL",
-        standalone_sender_fn=_standalone_send,  # out-of-process cron / send_message
+        standalone_sender_fn=_standalone_send,  # out-of-process scheduled sends / send_message
         # 0 = send_message does not pre-chunk: the adapter's send() splits per paragraph and
         # truncates itself (MAX_MESSAGE_LENGTH), exactly as the former core sender did.
         max_message_length=0, pii_safe=True, emoji="💬", allow_update_command=True,
