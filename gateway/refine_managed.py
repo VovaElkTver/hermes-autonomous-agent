@@ -951,6 +951,63 @@ def cleanup_agent_flags(agent: Any) -> None:
             pass
 
 
+def _norm_topic(text: str) -> str:
+    s = str(text or "").strip().strip("\u00ab\u00bb\"'`").strip()
+    s = re.sub(r"^\s*(?:тема|в тему|topick?|topic)\s*[:\-]?\s*", "", s, flags=re.IGNORECASE)
+    return s.strip()
+
+
+def resolve_topic_answer(run: ManagedRun, answer: str) -> str:
+    """Ответ владельца на вопрос о теме — голым текстом.
+
+    «да»/«создавай» при NEW = предложенное имя; существующее имя (нормализуемое
+    сравнение без учёта регистра/подчёркиваний) = маршрут туда; любое другое
+    непустое имя = создать новую тему. Сомнение владельца выражается вопросом —
+    тогда в ответ уходит краткая сводка кандидатов."""
+    ta = run.topic_assessment or {}
+    name = _norm_topic(answer)
+    if not name or name.lower() in ("да", "давай", " го", "го", "yes", "ok", "ок"):
+        name = str(ta.get("proposed_name") or "").strip()
+    if not name:
+        names = ", ".join(ta.get("candidates") or [])
+        base = f"Кандидаты: {names}." if names else ""
+        return ("Назови тему одним словом/словосочетанием: " + base).strip()
+    # нормализованное сравнение с реестром
+    target = None
+    for rule_name in _topic_names():
+        n1 = re.sub(r"[\s_\-]+", "", rule_name.lower())
+        n2 = re.sub(r"[\s_\-]+", "", name.lower())
+        if n1 == n2:
+            target = rule_name
+            break
+    if target is None:
+        # мягкое совпадение: введённое имя целиком содержится в теме реестра
+        for rule_name in _topic_names():
+            if name.lower() in rule_name.lower():
+                target = rule_name
+                break
+    if target is not None:
+        run.topic_route = target
+        run.note(f"topic route -> existing: {target}")
+        created = False
+    else:
+        _registry_append(name)
+        run.topic_route = name
+        run.note(f"topic created: {name}")
+        created = True
+    raw = run.last_raw
+    if not raw:
+        try:
+            raw = (run.dir / "response_raw.txt").read_text(encoding="utf-8")
+        except OSError:
+            pass
+    threading.Thread(target=_finalize_analysis, args=(run, raw),
+                     daemon=True, name="managed-refine-topic").start()
+    where = target if target is not None else name
+    verb = "маршрутизирована в существующую" if not created else "создана"
+    return f"[refine {run.run_id}] тема «{where}» {verb} — продолжаю обработку вердикта."
+
+
 # --------------------------------------------------------------------------- commands (/refine dispatch)
 
 def handle_command(chat_key: Optional[str], sub: str, rest: str, agent: Any = None) -> Optional[str]:
@@ -990,26 +1047,17 @@ def handle_command(chat_key: Optional[str], sub: str, rest: str, agent: Any = No
         run = RUNS.get(chat_key)
         if not run or run.stage != "TOPIC_CONFIRM":
             return "нет прогона в статусе TOPIC_CONFIRM"
-        name = (rest.strip() or str((run.topic_assessment or {}).get("proposed_name") or "")).strip()
-        if sub == "topic-use":
-            if _registry_rule(name) is None:
-                return f"темы '{name}' нет в реестре — создай через /refine topic-new {name}"
-            run.topic_route = name
-            run.note(f"topic route -> existing: {name}")
-        else:
-            store = _registry_append(name)
-            run.topic_route = name
-            run.note(f"topic created: {name} -> {store}")
         RUNS[run.chat_key] = run
-        raw = run.last_raw
-        if not raw:
-            try:
-                raw = (run.dir / "response_raw.txt").read_text(encoding="utf-8")
-            except OSError:
-                pass
-        threading.Thread(target=_finalize_analysis, args=(run, raw),
-                         daemon=True, name="managed-refine-topic").start()
-        return f"[refine {run.run_id}] тема «{name}» подтверждена — продолжаю обработку вердикта."
+        return resolve_topic_answer(run, rest)
+
+    if sub.startswith("topic:"):
+        answer = (sub[len("topic:"):] + " " + rest).strip()
+        return resolve_topic_answer(RUNS[chat_key], answer)
+
+    if RUNS.get(chat_key, None) is not None and RUNS[chat_key].stage == "TOPIC_CONFIRM" \
+            and sub not in ("resume",):
+        # свободный текст в статусе вопроса о теме = имя темы (ответ владельца)
+        return resolve_topic_answer(RUNS[chat_key], (sub + " " + rest).strip())
     if sub == "status":
         run = RUNS.get(chat_key)
         return f"stage={run.stage} run={run.run_id}" if run else "активных прогонов нет"

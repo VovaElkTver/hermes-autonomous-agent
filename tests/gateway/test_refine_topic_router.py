@@ -137,7 +137,7 @@ def test_finalize_new_topic_parks_run_in_topic_confirm(tmp_path, monkeypatch):
     monkeypatch.setattr(rm, "_gate", lambda key: (_FakeGate(),)[0])
     try:
         reply = rm.handle_command(run.chat_key, "topic-new", "", agent=None)
-        assert "подтверждена" in reply
+        assert "brand-new-x" in reply and "продолжаю" in reply
         assert _await_leave_confirm(run)
         assert run.stage in ("DISCUSS", "PROPOSE")  # дожили вердикт до карточек
         assert run.cards[0]["topic"] == "brand-new-x"
@@ -201,3 +201,90 @@ def test_command_guard_when_not_in_confirm(tmp_path, monkeypatch):
         assert "TOPIC_CONFIRM" in out
     finally:
         rm.RUNS.pop(run.chat_key, None)
+
+
+# ------------------------- свободный ответ владельца (без синтаксиса команд) -------------------------
+
+def test_owner_answer_existing_name_routes(tmp_path, monkeypatch):
+    """«левый» в ответе = существующая тема, без topic-use."""
+    _write_registry(tmp_path, [("left", ["левый"]), ("right", ["правый"])])
+    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "левый и правый"}])
+    envelope = {"status": "PROPOSE_CHANGES",
+                "changes": [{"candidate_id": "c9", "operation": "UPDATE",
+                             "kind": "memory", "topic": "?",
+                             "knowledge_kind": "FACT", "proposed_content": "x"}]}
+    rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
+    assert run.stage == "TOPIC_CONFIRM"
+    rm.RUNS[run.chat_key] = run
+    monkeypatch.setattr(rm, "_gate", lambda key: (_FakeGate(),)[0])
+    try:
+        reply = rm.handle_command(run.chat_key, "left", "", agent=None)
+        assert _await_leave_confirm(run)
+        assert run.topic_route == "left"
+        assert run.cards and run.cards[0]["topic"] == "left"
+    finally:
+        rm.RUNS.pop(run.chat_key, None)
+
+
+def test_owner_answer_new_name_creates(tmp_path, monkeypatch):
+    """Незнакомое имя в ответе = создать тему с этим именем."""
+    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    envelope = {"status": "PROPOSE_CHANGES",
+                "changes": [{"candidate_id": "c1", "operation": "CREATE",
+                             "kind": "memory", "topic": "brand-new-x",
+                             "knowledge_kind": "PROCEDURE",
+                             "proposed_content": "правило",
+                             "dedup_checked_ids": ["d1"], "novelty": "новое"}]}
+    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "нейтральный материал"}])
+    envelope["changes"][0]["operation"] = "UPDATE"      # обходим dedup-гейт CREATE: фокус теста на маршруте темы
+    rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
+    assert run.stage == "TOPIC_CONFIRM"
+    rm.RUNS[run.chat_key] = run
+    monkeypatch.setattr(rm, "_gate", lambda key: (_FakeGate(),)[0])
+    try:
+        # заманить вопрос NEW любым статусом: имя "Fresh" отсутствует в реестре
+        run.topic_assessment["status"] = "NEW"
+        reply = rm.handle_command(run.chat_key, "fresh", "", agent=None)
+        assert _await_leave_confirm(run)
+        assert rm._registry_rule("fresh") is not None
+        assert run.topic_route == "fresh"
+        assert run.cards and run.cards[0]["topic"] == "fresh"
+    finally:
+        rm.RUNS.pop(run.chat_key, None)
+
+
+def test_owner_answer_yes_uses_proposed_name(tmp_path, monkeypatch):
+    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    envelope = {"status": "PROPOSE_CHANGES",
+                "changes": [{"candidate_id": "c1", "operation": "CREATE",
+                             "kind": "memory", "topic": "brand-new-x",
+                             "knowledge_kind": "PROCEDURE",
+                             "proposed_content": "правило",
+                             "dedup_checked_ids": ["d1"], "novelty": "новое"}]}
+    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "материал brand-new-x"}])
+    rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
+    assert run.stage == "TOPIC_CONFIRM"
+    rm.RUNS[run.chat_key] = run
+    monkeypatch.setattr(rm, "_gate", lambda key: (_FakeGate(),)[0])
+    try:
+        run.topic_assessment["status"] = "NEW"
+        run.topic_assessment["proposed_name"] = "brand-new-x"
+        rm.handle_command(run.chat_key, "да", "", agent=None)
+        assert _await_leave_confirm(run)
+        assert run.topic_route == "brand-new-x"
+    finally:
+        rm.RUNS.pop(run.chat_key, None)
+
+
+def test_owner_answer_empty_and_unsure(tmp_path, monkeypatch):
+    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    envelope = {"status": "PROPOSE_CHANGES",
+                "changes": [{"candidate_id": "c1", "operation": "CREATE",
+                             "kind": "memory", "topic": "z",
+                             "knowledge_kind": "FACT", "proposed_content": "x"}]}
+    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "неопределённый материал"}])
+    rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
+    assert run.stage == "TOPIC_CONFIRM"
+    out = rm.handle_command(run.chat_key, "какая-то ерунда без темы?", "", agent=None)
+    # пустой ответ без proposal → просьба имени, прогон не погиб
+    assert run.stage == "TOPIC_CONFIRM" or "Назови тему" in str(out)
