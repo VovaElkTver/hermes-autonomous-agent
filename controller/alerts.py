@@ -32,6 +32,10 @@ ALERT_TEMPLATES = {
     # Watchdog: a machine-parked task (verify: basis, not a revise question)
     # is stuck, not a human question — the executor/pump owns it.
     "machine-park": "⚙ машинная парковка зависла: {task_id} (basis: {basis})",
+    # Watchdog: a worker-interrupted task the resume rule could not requeue
+    # (no dispatchable step after re-arm / mandate stale / guard denial).
+    "resume-interrupted": "⚙ прерванный воркер не возобновляется: {task_id} "
+                          "(припаркован {parked_min} мин)",
     # Ticker mechanics: a tick crashed.
     "tick-error": "TICKER: ошибка тика {kind}: {error}",
     # Pump lock takeover decisions (first sighting / self-hold), pre-kill signal.
