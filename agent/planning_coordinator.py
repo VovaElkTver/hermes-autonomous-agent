@@ -65,6 +65,26 @@ def _next_work_id(runs_dir: str) -> str:
         return "w-0001"
 
 
+def _run_async(coro, timeout: float):
+    """Drive the async MultiStagePlanner.plan from this (possibly sync) context.
+
+    The gateway turn body runs on an executor thread WITHOUT a running loop -> plain
+    asyncio.run. If a loop IS running in this thread, delegate to a worker so we do not
+    touch that loop. Mirrors tools/planning_tool._run_async. A non-coroutine result
+    (sync test double) passes through untouched."""
+    import asyncio
+    import concurrent.futures
+
+    if not hasattr(coro, "__await__"):
+        return coro
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result(timeout=timeout)
+
+
 @dataclass
 class PrepareResult:
     status: str  # direct | prepared | failed
@@ -95,7 +115,8 @@ class PlanningCoordinator:
         try:
             self._event("planning.started", work_id=work_id, session_key=session_key,
                         request=request_text[:200])
-            result = self.planner.plan(task=request_text)
+            result = _run_async(self.planner.plan(task=request_text),
+                                timeout=float(_load_cfg().get("stage_timeout", 600.0)) * 10)
             if result.get("status") != "approved":
                 # needs_input / needs_revision park WITH artifacts, no plan enters execution.
                 self._event("planning.parked", work_id=work_id, status=result.get("status"),

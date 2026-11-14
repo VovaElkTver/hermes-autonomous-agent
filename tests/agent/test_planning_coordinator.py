@@ -156,3 +156,23 @@ def test_service_turns_skip_without_pipeline(monkeypatch, tmpdir):
                 make_ctx(message="/plan something"), make_ctx(message="")):
         pc.maybe_prepare_plan(None, ctx)
     assert planner.calls == []
+
+
+class AsyncPlanner(Cfg):
+    """Regression for the 14.11 live failure: plan() is genuinely async in production."""
+
+    def __init__(self, approved_tasks):
+        super().__init__(approved_tasks)
+
+    async def plan(self, *, task):
+        self.calls.append(task)
+        return self.approved_tasks
+
+
+def test_async_planner_coroutine_is_driven(monkeypatch, tmpdir):
+    patched(monkeypatch, tmpdir)
+    planner = AsyncPlanner(APPROVED)
+    install_planner(monkeypatch, planner)
+    ctx = make_ctx()
+    pc.maybe_prepare_plan(None, ctx)
+    assert ctx.message.startswith("[АКТИВНЫЙ ПЛАН w-0001 v1")
