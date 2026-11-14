@@ -1234,12 +1234,43 @@ class GatewayBusySessionMixin:
         never cleans itself up — sqlite commits per message already, nothing in memory
         is worth saving, that is the whole point."""
         import subprocess
+        import sys
         from pathlib import Path
+        if sys.platform == "win32":
+            # Native Windows has neither systemd-run nor /bin/bash: the plain Popen below
+            # raised FileNotFoundError [WinError 2] and /reset was a guaranteed failure.
+            self._hard_reboot_windows(mode)
+            return
         script = Path(__file__).resolve().parent.parent / "scripts" / "hard_reboot.sh"
         subprocess.Popen(
             ["systemd-run", "--user", "--collect", "/bin/bash", str(script), mode],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+
+    def _hard_reboot_windows(self, mode: str) -> None:
+        """Windows twin of :meth:`_hard_reboot`: arm the detached restart watcher that
+        ``hermes update`` already uses post-update (it waits for THIS pid to die, then
+        respawns the captured argv with Windows-safe detach flags — Job-Object breakaway
+        included), set/clear the one-shot safe boot flag the bash script would have
+        touched, and self-kill through the same 2 s reply beat. The gateway still never
+        cleans itself up: ``os._exit`` skips drain/atexit exactly like the external
+        SIGKILL, and a watcher that fails to spawn leaves the gateway RUNNING on purpose
+        — a visible no-op beats a restart that strands the node."""
+        import sys
+        import threading
+        from hermes_cli.gateway import launch_detached_gateway_restart_by_cmdline
+        argv = [sys.executable, *sys.argv]
+        if not launch_detached_gateway_restart_by_cmdline(
+                os.getpid(), argv, home=os.environ.get("HERMES_HOME") or None):
+            logger.warning("hard_reboot: restart watcher failed to spawn — leaving gateway running")
+            return
+        from agent.safe_mode import BOOT_FLAG_NAME, home_dir
+        flag = home_dir() / BOOT_FLAG_NAME
+        if mode == "safe":
+            flag.touch()
+        else:
+            flag.unlink(missing_ok=True)
+        threading.Timer(2.0, lambda: os._exit(0)).start()
 
     async def _handle_reset_safe_command(self, event: MessageEvent):
         """/reset-safe — quit force (no drain, no save) and boot the SAFE identity:
