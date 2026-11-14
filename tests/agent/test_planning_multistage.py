@@ -361,9 +361,9 @@ def test_stage_deadline_actually_fires(tmpdir):
         task = asyncio.ensure_future(planner.plan(task="t"))
         done, pending = await asyncio.wait({task}, timeout=2.0)
         assert task in done and not pending, "stage deadline did not fire within 2s"
-        task.result()  # re-raise the planner's own TimeoutError
+        task.result()  # re-raise the planner's own deadline error
 
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(PlanningBudgetExhausted):
         asyncio.run(main())
 
 
@@ -391,8 +391,24 @@ def test_wallclock_budget_caps_each_dispatch(tmpdir):
     planner = MultiStagePlanner(config=cfg, run_stage=sleepy,
                                 store=FileArtifactStore(str(tmpdir)))
     t0 = _time.monotonic()
-    with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+    with pytest.raises(PlanningBudgetExhausted):
         asyncio.run(planner.plan(task="t"))
     # the coroutine itself failed at ~1s; asyncio.run teardown additionally joins the
     # abandoned 3s worker thread, hence the generous wall-clock ceiling.
     assert _time.monotonic() - t0 < 4.0
+
+
+def test_stage_timeout_error_names_the_stage(tmpdir):
+    """Bare 'TimeoutError: ' in the journal told nothing; PlanningBudgetExhausted must."""
+    import time as t2
+
+    def sleepy(*, role, model_alias, system_prompt, user_prompt):
+        t2.sleep(3)
+        return "{}"
+
+    planner = MultiStagePlanner(config=PlannerConfig(budget_seconds=1.0), run_stage=sleepy,
+                                store=FileArtifactStore(str(tmpdir)))
+    with pytest.raises(PlanningBudgetExhausted) as ei:
+        import asyncio
+        asyncio.run(planner.plan(task="t"))
+    assert "stage contract:" in str(ei.value) and "exceeded" in str(ei.value)

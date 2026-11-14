@@ -409,16 +409,24 @@ class MultiStagePlanner:
                 "previous_output": previous_output,
                 "validation_errors": feedback,
             }
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.run_stage,
-                    role=role,
-                    model_alias=alias,
-                    system_prompt=system,
-                    user_prompt=json.dumps(request, ensure_ascii=False),
-                ),
-                timeout=self._stage_deadline(),
-            )
+            deadline = self._stage_deadline()
+            try:
+                raw = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.run_stage,
+                        role=role,
+                        model_alias=alias,
+                        system_prompt=system,
+                        user_prompt=json.dumps(request, ensure_ascii=False),
+                    ),
+                    timeout=deadline,
+                )
+            except TimeoutError as exc:
+                # Bare TimeoutError journals uselessly ("TimeoutError: "); name the stage.
+                raise PlanningBudgetExhausted(
+                    f"stage {role}: deadline {deadline:.0f}s exceeded "
+                    f"(turn budget {float(getattr(self.config, 'budget_seconds', 0) or 0):.0f}s, "
+                    f"elapsed {time.monotonic() - self._t0:.0f}s)") from exc
             if not isinstance(raw, str):
                 # Adapter-contract violation is not the model's format error.
                 raise TypeError(f"run_stage({role}) должен возвращать str")
