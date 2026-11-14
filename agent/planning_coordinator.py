@@ -191,13 +191,18 @@ class PlanningCoordinator:
             return  # file ledger is best-effort; push must not crash the conveyor thread
         if notify_target and PlanningCoordinator._push_via_cli(notify_target, note):
             # Keep a short receipt so the NEXT turn joins this message into the session
-            # context (owner lesson vs scheduled pushes: 'это не моё сообщение'). Full
-            # removal happens at context-consumption, never at visual delivery.
+            # context (owner lesson vs scheduled pushes: 'это не моё сообщение'). The
+            # receipt quotes the actual outcome head - a failure must not read as a
+            # delivered result (owner catch 14.11 on w-0037).
             try:
                 with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(f"[фон {work_id}: результат доставлен выше в этот чат]")
+                    fh.write(f"[фон {work_id}: {PlanningCoordinator._receipt_head(note)}]")
             except Exception:
                 pass
+
+    @staticmethod
+    def _receipt_head(note: str) -> str:
+        return " ".join(str(note).split())[:140]
 
     @staticmethod
     def _push_via_cli(target: str, text: str) -> bool:

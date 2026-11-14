@@ -146,7 +146,7 @@ def test_push_success_leaves_receipt_for_context_join(monkeypatch, tmpdir):
     # next trivial remark consumes the receipt => context join happens exactly once
     ctx2 = make_ctx(message="ок")
     pc.maybe_prepare_plan(None, ctx2)
-    assert "доставлен выше" in ctx2.message
+    assert "АКТИВНЫЙ ПЛАН" in ctx2.message  # receipt quotes the outcome, not a placeholder
     assert _pending(penddir) == []
 
 
