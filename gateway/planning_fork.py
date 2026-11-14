@@ -229,6 +229,10 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
             with _ctxlib.suppress(Exception):
                 await self._db_call("set_branch_status", row["branch_id"], "joined",
                                     join_strategy="note")
+                self._journal_fork(row.get("parent_session_id", ""),
+                                   {"event": "planning.fork.joined",
+                                    "branch_id": row["branch_id"],
+                                    "join_strategy": "boot_sweep"})
         if swept:
             self._journal_fork("", {"event": "planning.fork.boot_sweep", "swept": swept})
         return swept
