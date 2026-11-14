@@ -66,3 +66,56 @@ def _pending(penddir):
         return sorted(n for n in __import__("os").listdir(penddir) if n.endswith(".md"))
     except OSError:
         return []
+
+
+def test_interim_push_delivers_proactively(monkeypatch, tmpdir):
+    """interim_push: conveyor finish pushes via hermes send AND removes pending note."""
+    from types import SimpleNamespace
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    art = tmpdir.mkdir("artp")
+    open(str(art.join("plan_candidate-001.json")), "w").write(json.dumps(
+        {"version": 1, "plan": {"tasks": [{"id": "T1", "goal": "g", "verification": ["v"]}]}}))
+    install_planner(monkeypatch, Cfg({**APPROVED, "artifact_dir": str(art)}))
+    sent = []
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: sent.append((target, text)) or True))
+    ctx = make_ctx(message="составь план миграции")
+    ctx.source = SimpleNamespace(platform="matrix", chat_id="!ROOM:mx.elk.mobi")
+    pc.maybe_prepare_plan(None, ctx)
+    assert not _pending(f"{tmpdir}/pending/sess-1"), "pushed => no next-turn duplicate"
+    deadline = time.time() + 5
+    while time.time() < deadline and not sent:
+        time.sleep(0.05)
+    assert sent and sent[0][0] == "matrix:!ROOM:mx.elk.mobi"
+    assert "АКТИВНЫЙ ПЛАН" in sent[0][1]
+
+
+def test_interim_push_failure_keeps_pending_note(monkeypatch, tmpdir):
+    """hermes send fails (rc!=0 / exception) -> pending fallback survives."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: False))
+    ctx = make_ctx(message="составь план доставки")
+    pc.maybe_prepare_plan(None, ctx)
+    deadline = time.time() + 5
+    penddir = f"{tmpdir}/pending/sess-1"
+    while time.time() < deadline and not _pending(penddir):
+        time.sleep(0.05)
+    assert len(_pending(penddir)) == 1  # next-turn consumption still delivers
+
+
+def test_notify_target_skips_local(monkeypatch, tmpdir):
+    """No platform/chat context -> notify stays None, file-only delivery."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    seen = {}
+    orig = pc.PlanningCoordinator.prepare_async
+    def spy(self, *, request_text, session_key="", notify_target=None):
+        seen["t"] = notify_target
+        return orig(self, request_text=request_text, session_key=session_key,
+                    notify_target=notify_target)
+    monkeypatch.setattr(pc.PlanningCoordinator, "prepare_async", spy)
+    ctx = make_ctx(message="составь план")  # no .source attribute at all
+    pc.maybe_prepare_plan(None, ctx)
+    assert seen["t"] is None

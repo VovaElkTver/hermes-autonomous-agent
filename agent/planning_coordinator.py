@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import contextvars
 import json
+import shutil
+import subprocess
 import threading
 import os
 import time
@@ -126,7 +128,8 @@ class PlanningCoordinator:
 
     # ---- main entry ----
     def prepare(self, *, request_text: str, session_key: str = "", work_id: str | None = None,
-                defer_note_dir: str | None = None) -> PrepareResult:
+                defer_note_dir: str | None = None,
+                defer_notify_target: str | None = None) -> PrepareResult:
         if PLANNING_PURPOSE.get() == "planning":
             self._event("planning.skipped_recursive", session_key=session_key)
             return PrepareResult(status="direct")
@@ -146,7 +149,7 @@ class PlanningCoordinator:
                 note = (f"[планирование приостановлено: статус {result.get('status')}"
                         + (f"; вопросы: {questions}" if questions else "")
                         + f"; артефакты: {result.get('artifact_dir')}]")
-                self._defer_note(defer_note_dir, work_id, note)
+                self._defer_note(defer_note_dir, work_id, note, defer_notify_target)
                 return PrepareResult(status="failed", work_id=work_id, note=note)
             pkg = self._work_package(result, work_id)
             self._event("planning.completed", work_id=work_id, artifact_dir=result.get("artifact_dir"),
@@ -154,13 +157,14 @@ class PlanningCoordinator:
             self._record_work(work_id, request_text, session_key, result)
             approved = self._approved_plan(result)
             self._defer_note(defer_note_dir, work_id,
-                             PlanningCoordinator.render_work_package_note(pkg, approved))
+                             PlanningCoordinator.render_work_package_note(pkg, approved),
+                             defer_notify_target)
             return PrepareResult(status="prepared", work_id=work_id, work_package=pkg)
         except Exception as exc:
             self._event("planning.failed", work_id=work_id, error=f"{type(exc).__name__}: {exc}")
             self._record_work(work_id, request_text, session_key, {"status": "failed"})
             note = f"[планирование не удалось: {type(exc).__name__}: {exc}; исполнение без плана]"
-            self._defer_note(defer_note_dir, work_id, note)
+            self._defer_note(defer_note_dir, work_id, note, defer_notify_target)
             return PrepareResult(status="failed", work_id=work_id, note=note
                                  if not defer_note_dir else "")
         finally:
@@ -168,25 +172,46 @@ class PlanningCoordinator:
 
     # ---- interim delivery: background conveyor -> pending note for the next turn ----
     @staticmethod
-    def _defer_note(defer_dir: str | None, work_id: str, note: str) -> None:
-        """Land a finished-conveyor note for next-turn injection (voice-assistant UX)."""
+    def _defer_note(defer_dir: str | None, work_id: str, note: str,
+                    notify_target: str | None = None) -> None:
+        """Land a finished-conveyor note for next-turn injection (voice-assistant UX).
+
+        With interim_push, proactively deliver via `hermes send`; on success the
+        pending note is consumed immediately so the next turn gets no duplicate."""
         if not defer_dir:
             return
+        path = os.path.join(defer_dir, f"{work_id}.md")
         try:
             os.makedirs(defer_dir, exist_ok=True)
-            tmp = os.path.join(defer_dir, f"{work_id}.tmp")
+            tmp = f"{path[:-3]}.tmp" if path.endswith(".md") else f"{path}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(note)
-            os.replace(tmp, os.path.join(defer_dir, f"{work_id}.md"))
+            os.replace(tmp, path)
         except Exception:
-            pass
+            return  # file ledger is best-effort; push must not crash the conveyor thread
+        if notify_target and PlanningCoordinator._push_via_cli(notify_target, note):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _push_via_cli(target: str, text: str) -> bool:
+        """Fire-and-forget proactive delivery outside the gateway process/loop."""
+        try:
+            cmd = [shutil.which("hermes") or "hermes", "send", "-t", target, "-q"]
+            r = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=120)
+            return r.returncode == 0
+        except Exception:
+            return False
 
     @staticmethod
     def _approved_plan(planner_result: dict) -> dict | None:
         plan = planner_result.get("plan")
         return plan if isinstance(plan, dict) else None
 
-    def prepare_async(self, *, request_text: str, session_key: str = "") -> PrepareResult:
+    def prepare_async(self, *, request_text: str, session_key: str = "",
+                      notify_target: str | None = None) -> PrepareResult:
         """Interim mode: conveyor on a daemon thread, chat continues on the light model now.
 
         Returns immediately with a work_id; the outcome lands as a pending note consumed
@@ -196,7 +221,8 @@ class PlanningCoordinator:
         worker = threading.Thread(
             target=self.prepare,
             kwargs={"request_text": request_text, "session_key": session_key,
-                    "work_id": work_id, "defer_note_dir": defer_dir},
+                    "work_id": work_id, "defer_note_dir": defer_dir,
+                    "defer_notify_target": notify_target},
             name=f"planning-{work_id}", daemon=True)
         worker.start()
         self._event("planning.started_async", work_id=work_id, session_key=session_key,
@@ -315,8 +341,18 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
         coordinator = PlanningCoordinator(planner=planner,
                                           runs_dir=str(cfg["runs_dir"]) if cfg.get("runs_dir") else None)
         if cfg.get("interim"):
+            notify = None
+            if cfg.get("interim_push"):
+                src_obj = getattr(ctx, "source", None)
+                plat = str(getattr(src_obj, "platform", "") or "")
+                chat_id = getattr(src_obj, "chat_id", "") or ""
+                # Platform enum renders "<Platform.MATRIX>"; accept plain names too
+                plat_name = plat.split(".")[-1].rstrip(">").lower() if plat else ""
+                if chat_id and (plat_name and plat_name != "local"):
+                    notify = f"{plat_name}:{chat_id}"
             outcome = coordinator.prepare_async(request_text=message,
-                                                session_key=getattr(ctx, "session_key", "") or "")
+                                                session_key=getattr(ctx, "session_key", "") or "",
+                                                notify_target=notify)
             if outcome.note:
                 ctx.message = f"{ctx.message}\n\n{outcome.note}"
             return  # status direct by design; the turn proceeds on the light model now
