@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 FORK_SCHEMA: dict[str, Any] = {
     "name": "session_fork",
     "description": (
-        "Fork this conversation into an independent branch that shares the parent history "
+        "Fork this conversation into an independent branch. The new branch shares the parent history "
         "(lazy overlay — no copy). Use when the discussion splits into a side-topic that "
         "deserves its own context window; announce the branch id in your reply."
     ),

@@ -17,7 +17,9 @@ DELEGATE_BLOCKED_TOOLS = frozenset(
         "clarify",  # no user interaction
         "memory",  # no writes to shared MEMORY.md
         "send_message",  # no cross-platform side effects
-        "cronjob_manage",  # no scheduling more work in the parent's name
+        # cronjob_manage (removed in the 10.11 excision) used to sit here blocking
+        # scheduling in the parent's name; task_queue.emit stays allowed for children
+        # on purpose — deferred continuation is the excision's replacement mechanism.
     ]
 )
 DEFAULT_TOOLSETS = ["terminal", "file", "web"]

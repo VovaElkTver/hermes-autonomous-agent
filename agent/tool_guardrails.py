@@ -29,7 +29,7 @@ IDEMPOTENT_TOOL_NAMES = frozenset({
 MUTATING_TOOL_NAMES = frozenset({
     "terminal", "execute_code", "write_file", "patch", "todo_list", "memory", "skill_manage",
     "browser_click", "browser_type", "browser_press", "browser_scroll", "browser_navigate",
-    "send_message", "cronjob_manage", "delegate_task", "process_manage",
+    "send_message", "delegate_task", "process_manage",
 })
 
 # Pollers: legitimately re-invoked with identical args; the identical-call NOTICE never fires.
@@ -63,7 +63,7 @@ FAILURE_TOLERANT_TOOL_NAMES = frozenset({
 PROGRESS_RESET_TOOL_NAMES = frozenset({
     "write_file", "patch", "terminal", "execute_code", "browser_click", "browser_type", "browser_press",
     "browser_navigate", "process_manage", "process", "delegate_task", "send_message", "scheduled job",
-    "cronjob_manage", "todo", "todo_list", "memory", "skill_manage",
+    "todo", "todo_list", "memory", "skill_manage",
 })
 
 _BOOL_FIELDS = ("warnings_enabled", "hard_stop_enabled", "non_interactive_hard_stop_enabled")

@@ -672,8 +672,8 @@ PLATFORM_HINTS = {
         "You are in a plain terminal (CLI). Markdown does NOT render — asterisks, headers, and fences appear as "
         "literal characters, so write plain text (indentation and blank lines are your only layout tools). Files: "
         "there is no attachment channel and MEDIA:/path tags are NOT intercepted here (they print as literal text) — "
-        # The scheduled local-only delivery caveat lives in cronjob_manage's deliver description (deferred: paid
-        # only when the tool is loaded), not in every CLI/TUI prompt.
+        # The scheduled local-only delivery caveat lives in the scheduled-run carriers
+        # (task_queue / controller.followups), not in every CLI/TUI prompt.
         "deliver a file by stating its absolute path or URL in plain text; the user opens it themselves."
     ),
     "tui": (

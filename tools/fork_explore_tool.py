@@ -607,7 +607,7 @@ def fork_explore(args: dict, session_id: str = "") -> str:
 FORK_EXPLORE_SCHEMA: dict[str, Any] = {
     "name": "fork_explore",
     "description": (
-        "Dry-rollout развилки направлений: прогоняет по каждому пути траекторию (куда пойдёт "
+        "Dry-rollout развилки направлений. Прогоняет по каждому пути траекторию (куда пойдёт "
         "работа, 1..N модельных шагов, read-only по построению — записи только как intents), "
         "судит слепым pairwise-сравнением, может родить путь В из слабостей A/Б. Возвращает "
         "один JoinPacket (≤1500 токенов) с выбранным направлением, находками и open_issues; "

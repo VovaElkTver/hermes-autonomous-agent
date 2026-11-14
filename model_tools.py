@@ -415,12 +415,12 @@ def _rewrite_delegate_task(td: dict[str, Any], available: set) -> Optional[dict[
     the line when none apply, so the model never learns ghost vocabulary. Two
     source variants exist (depth-off also names delegate_task itself); test the
     longer one first because the sibling list is a substring of it."""
-    blocked_present = [t for t in ("clarify", "memory", "cronjob_manage") if t in available]
-    if len(blocked_present) == 3:
+    blocked_present = [t for t in ("clarify", "memory") if t in available]
+    if len(blocked_present) == 2:
         return td
     fn = td.get("function", {})
     desc = fn.get("description", "")
-    for full, self_named in (("delegate_task, clarify, memory, or cronjob", True), ("clarify, memory, or cronjob", False)):
+    for full, self_named in (("delegate_task, clarify, or memory", True), ("clarify or memory", False)):
         if full in desc:
             break
     else:
