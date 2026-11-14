@@ -320,7 +320,6 @@ def test_park_returns_carry_artifact_dir(tmpdir):
 def test_turn_budget_exhaustion_is_a_distinct_error(tmpdir):
     """EAA Д1 regression: per-stage timeouts exist; now the whole turn also has a hard cap."""
     import asyncio
-
     script = [
         _contract_json(),
         json.dumps({"facts": [{"claim": "c", "source": "f:1"}], "assumptions": [],
@@ -342,3 +341,37 @@ def test_turn_budget_exhaustion_is_a_distinct_error(tmpdir):
     with pytest.raises(PlanningBudgetExhausted):
         asyncio.run(planner.plan(task="t"))
     assert len(dispatched) == 3
+
+
+def test_stage_deadline_actually_fires(tmpdir):
+    """analysis-v1 Д1 regression: build_planner left asyncio_timeout=None -> wait_for waited
+    forever on a hung stage. The plan() coroutine must fail ON ITS OWN well before the runner's
+    5s sleep ends; the abandoned worker thread is joined afterwards by executor shutdown."""
+    import asyncio
+    import time as _time
+
+    def sleepy_runner(*, role, model_alias, system_prompt, user_prompt):
+        _time.sleep(5)
+        return "{}"
+
+    planner = MultiStagePlanner(config=PlannerConfig(), run_stage=sleepy_runner,
+                                store=FileArtifactStore(str(tmpdir)), asyncio_timeout=0.2)
+
+    async def main():
+        task = asyncio.ensure_future(planner.plan(task="t"))
+        done, pending = await asyncio.wait({task}, timeout=2.0)
+        assert task in done and not pending, "stage deadline did not fire within 2s"
+        task.result()  # re-raise the planner's own TimeoutError
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(main())
+
+
+def test_build_planner_wires_stage_deadline(tmpdir, monkeypatch):
+    """analysis-v1 Д1: the assembled planner must carry a NON-None per-stage timeout."""
+    import agent.planning_multistage as pm
+
+    monkeypatch.setattr(pm.HermesSubagentRunner, "__call__", lambda self, **kw: "{}")
+    planner = pm.build_planner(parent_agent=None,
+                               planning_cfg={"runs_dir": str(tmpdir), "stage_timeout": 777.0})
+    assert planner.timeout == 777.0

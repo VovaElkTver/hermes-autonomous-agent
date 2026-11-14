@@ -260,6 +260,10 @@ def build_planner(parent_agent: Any, planning_cfg: dict) -> MultiStagePlanner:
             "planner": config.planner_alias, "reviewer": config.reviewer_alias,
         }, timeout=config.stage_timeout),
         store=FileArtifactStore(base),
+        # EAA/v1 Д1: the per-stage deadline lives HERE — without it wait_for(None) means
+        # a hung stage blocks the user's turn forever; wall-clock budget alone cannot
+        # interrupt an in-flight dispatch.
+        asyncio_timeout=config.stage_timeout,
     )
 
 
@@ -281,6 +285,8 @@ class HermesSubagentRunner:
     delegated task; nothing here spawns a second agent loop. The stage alias is resolved against
     model_switch's direct-alias registry (falling back to the raw string); provider, base_url and
     api_key are inherited from the parent via credentials_cfg={"model": ...}.
+    The ``timeout`` ctor arg is informational: the enforced stage deadline is
+    MultiStagePlanner's asyncio.wait_for(asyncio_timeout) around the to_thread call.
     """
 
     def __init__(self, *, parent_agent: Any, aliases: dict[str, str], timeout: float = 600.0):
