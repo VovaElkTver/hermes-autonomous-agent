@@ -110,7 +110,15 @@ def route_with_state(message: str, runs_dir: str, session_key: str) -> tuple[str
         _persist(runs_dir, session_key, st, depth=new_depth)  # decay MUST stick across reads
         # below full-depth the turn is cheap again: only depth>=2 runs the conveyor
         return ("direct" if new_depth < _DEPTH_FULL else "plan", f"{reason}:decay{new_depth}")
-    # plan-route without raising reasons keeps current depth (grey zone)
-    if depth >= _DEPTH_FULL or st.get("active_plan_ref"):
-        return "continue" if st.get("active_plan_ref") else "plan", f"{reason}:keep"
+    # plan-route without raising reasons keeps current depth (grey zone).
+    # Hot-session guard (owner catch 14.11: casual "работать пока комфортно" spawned a
+    # conveyor): grey-zone wording must not START a fresh conveyor while the session is
+    # already at full depth with no active plan ref - it decays like chatter instead.
+    if depth >= _DEPTH_FULL:
+        new_depth = depth - 1
+        _persist(runs_dir, session_key, st, depth=new_depth)
+        return ("direct" if new_depth < _DEPTH_FULL else "plan",
+                f"{reason}:hot_grey_decay{new_depth}")
+    if st.get("active_plan_ref"):
+        return "continue", f"{reason}:keep"
     return "plan", f"{reason}:grey"

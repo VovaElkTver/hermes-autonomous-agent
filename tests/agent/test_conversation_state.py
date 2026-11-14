@@ -71,3 +71,19 @@ def test_corrupt_or_missing_file_is_idle(tmpdir):
     p.write_text("{oops", encoding="utf-8")
     st2 = load_state(str(tmpdir), "bad")
     assert st2["depth"] == 0
+
+
+def test_hot_session_grey_zone_does_not_spawn_conveyor(monkeypatch, tmpdir):
+    """Owner catch 14.11: 'работать пока комфортно' at depth>=2 spawned a fork.
+    Grey-zone wording in a hot session must decay, not start a fresh conveyor."""
+    from agent.conversation_state import save_state, route_with_state
+    save_state(str(tmpdir), "s", {"phase": "рабочая", "goal": "g",
+                                  "active_plan_ref": "", "depth": 2})
+    route, reason = route_with_state("работать пока комфортно. можно понаблюдать.", str(tmpdir), "s")
+    assert route == "direct" and "hot_grey_decay" in reason
+    st = __import__("json").load(open(f"{tmpdir}/state/s.json", encoding="utf-8"))
+    assert st["depth"] == 1
+
+    # explicit signals still raise the session back to full depth
+    route2, reason2 = route_with_state("почини гонку в agent/foo.py: шаг1, потом шаг2", str(tmpdir), "s")
+    assert route2 == "plan" and ":depth" in reason2  # fresh work signal re-raises
