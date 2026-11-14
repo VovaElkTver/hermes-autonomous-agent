@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import threading
 import os
 import time
 from dataclasses import dataclass, field
@@ -124,11 +125,12 @@ class PlanningCoordinator:
         _journal(self.journal_path, {"event": name, **kw})
 
     # ---- main entry ----
-    def prepare(self, *, request_text: str, session_key: str = "") -> PrepareResult:
+    def prepare(self, *, request_text: str, session_key: str = "", work_id: str | None = None,
+                defer_note_dir: str | None = None) -> PrepareResult:
         if PLANNING_PURPOSE.get() == "planning":
             self._event("planning.skipped_recursive", session_key=session_key)
             return PrepareResult(status="direct")
-        work_id = _next_work_id(self.runs_dir)
+        work_id = work_id or _next_work_id(self.runs_dir)
         token = PLANNING_PURPOSE.set("planning")
         try:
             self._event("planning.started", work_id=work_id, session_key=session_key,
@@ -141,26 +143,68 @@ class PlanningCoordinator:
                             artifact_dir=result.get("artifact_dir"))
                 self._record_work(work_id, request_text, session_key, result)
                 questions = "; ".join(result.get("questions", []))[:400]
-                return PrepareResult(
-                    status="failed",
-                    work_id=work_id,
-                    note=(f"[планирование приостановлено: статус {result.get('status')}"
-                          + (f"; вопросы: {questions}" if questions else "")
-                          + f"; артефакты: {result.get('artifact_dir')}]"),
-                )
+                note = (f"[планирование приостановлено: статус {result.get('status')}"
+                        + (f"; вопросы: {questions}" if questions else "")
+                        + f"; артефакты: {result.get('artifact_dir')}]")
+                self._defer_note(defer_note_dir, work_id, note)
+                return PrepareResult(status="failed", work_id=work_id, note=note)
             pkg = self._work_package(result, work_id)
             self._event("planning.completed", work_id=work_id, artifact_dir=result.get("artifact_dir"),
                         version=result.get("version"))
             self._record_work(work_id, request_text, session_key, result)
+            approved = self._approved_plan(result)
+            self._defer_note(defer_note_dir, work_id,
+                             PlanningCoordinator.render_work_package_note(pkg, approved))
             return PrepareResult(status="prepared", work_id=work_id, work_package=pkg)
         except Exception as exc:
             self._event("planning.failed", work_id=work_id, error=f"{type(exc).__name__}: {exc}")
             self._record_work(work_id, request_text, session_key, {"status": "failed"})
-            return PrepareResult(status="failed", work_id=work_id,
-                                 note=f"[планирование не удалось: {type(exc).__name__}: {exc}; "
-                                      f"исполнение без плана]")
+            note = f"[планирование не удалось: {type(exc).__name__}: {exc}; исполнение без плана]"
+            self._defer_note(defer_note_dir, work_id, note)
+            return PrepareResult(status="failed", work_id=work_id, note=note
+                                 if not defer_note_dir else "")
         finally:
             PLANNING_PURPOSE.reset(token)
+
+    # ---- interim delivery: background conveyor -> pending note for the next turn ----
+    @staticmethod
+    def _defer_note(defer_dir: str | None, work_id: str, note: str) -> None:
+        """Land a finished-conveyor note for next-turn injection (voice-assistant UX)."""
+        if not defer_dir:
+            return
+        try:
+            os.makedirs(defer_dir, exist_ok=True)
+            tmp = os.path.join(defer_dir, f"{work_id}.tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(note)
+            os.replace(tmp, os.path.join(defer_dir, f"{work_id}.md"))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _approved_plan(planner_result: dict) -> dict | None:
+        plan = planner_result.get("plan")
+        return plan if isinstance(plan, dict) else None
+
+    def prepare_async(self, *, request_text: str, session_key: str = "") -> PrepareResult:
+        """Interim mode: conveyor on a daemon thread, chat continues on the light model now.
+
+        Returns immediately with a work_id; the outcome lands as a pending note consumed
+        by the NEXT turn of this session (consume_pending)."""
+        work_id = _next_work_id(self.runs_dir)
+        defer_dir = os.path.join(self.runs_dir, "pending", session_key or "default")
+        worker = threading.Thread(
+            target=self.prepare,
+            kwargs={"request_text": request_text, "session_key": session_key,
+                    "work_id": work_id, "defer_note_dir": defer_dir},
+            name=f"planning-{work_id}", daemon=True)
+        worker.start()
+        self._event("planning.started_async", work_id=work_id, session_key=session_key,
+                    request=request_text[:200])
+        return PrepareResult(
+            status="direct", work_id=work_id,
+            note=(f"[план {work_id} строится в фоне тяжёлой моделью; ответь собеседнику сейчас"
+                  f" коротко и при необходимости уточняющим вопросом, без ожидания плана]"))
 
     # ---- persistence of the link request->plan ----
     def _record_work(self, work_id: str, request: str, session_key: str, result: dict) -> None:
@@ -247,6 +291,11 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
             runs_dir_cfg = str(cfg["runs_dir"]) if cfg.get("runs_dir") else None
             state_runs = runs_dir_cfg or _default_runs_dir()
             session_key = getattr(ctx, "session_key", "") or ""
+            # interim delivery first: a finished background conveyor surfaces on ANY next
+            # remark (even trivial acks), exactly-once, before routing decisions.
+            done_note = consume_pending(state_runs, session_key)
+            if done_note:
+                ctx.message = done_note + "\n\n" + message
             from agent.conversation_state import route_with_state
 
             route, reason = route_with_state(message, state_runs, session_key)
@@ -265,6 +314,12 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
         planner = _build_planner_for(agent, cfg)
         coordinator = PlanningCoordinator(planner=planner,
                                           runs_dir=str(cfg["runs_dir"]) if cfg.get("runs_dir") else None)
+        if cfg.get("interim"):
+            outcome = coordinator.prepare_async(request_text=message,
+                                                session_key=getattr(ctx, "session_key", "") or "")
+            if outcome.note:
+                ctx.message = f"{ctx.message}\n\n{outcome.note}"
+            return  # status direct by design; the turn proceeds on the light model now
         outcome = coordinator.prepare(request_text=message, session_key=getattr(ctx, "session_key", "") or "")
         if outcome.status == "direct":
             return
@@ -319,3 +374,25 @@ def _build_planner_for(agent: Any, cfg: dict):
 
 def _default_runs_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".hermes", WORK_DIRNAME)
+
+
+def consume_pending(runs_dir: str, session_key: str) -> str:
+    """Pop ONE pending background-conveyor note for this session (oldest first).
+
+    Returns "" when nothing finished. Consumed notes are gone - delivery is
+    exactly-once per remark, remaining notes surface on later turns."""
+    pending = os.path.join(runs_dir, "pending", session_key or "default")
+    try:
+        names = sorted(n for n in os.listdir(pending) if n.endswith(".md"))
+    except OSError:
+        return ""
+    if not names:
+        return ""
+    path = os.path.join(pending, names[0])
+    try:
+        with open(path, encoding="utf-8") as fh:
+            note = fh.read().strip()
+        os.remove(path)
+        return note
+    except OSError:
+        return ""
