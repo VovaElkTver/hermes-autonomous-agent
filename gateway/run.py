@@ -3293,7 +3293,8 @@ class GatewayRunner(
     GatewayVoiceMixin, GatewayAdapterLifecycleMixin, GatewayTopicThreadsMixin, GatewayTurnMixin,
     GatewayShutdownMixin, GatewayBusySessionMixin, GatewayConfigLoadersMixin, GatewayStartupMixin,
     GatewaySessionWatchersMixin, GatewayNotificationsMixin, GatewayInboundMixin, GatewayGoalsMixin,
-    GatewayAgentCacheMixin, GatewayRuntimeInitMixin, GatewayProfileReconcileMixin, GatewayPluginRewireMixin):
+    GatewayAgentCacheMixin, GatewayRuntimeInitMixin, GatewayProfileReconcileMixin, GatewayPluginRewireMixin,
+    GatewayPlanningForkMixin):
     """Main gateway controller: manages adapter lifecycles, routes messages to/from the agent."""
 
     def _adapter_for_source(self, source):
