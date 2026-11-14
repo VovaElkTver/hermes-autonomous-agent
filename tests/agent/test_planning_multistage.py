@@ -375,3 +375,24 @@ def test_build_planner_wires_stage_deadline(tmpdir, monkeypatch):
     planner = pm.build_planner(parent_agent=None,
                                planning_cfg={"runs_dir": str(tmpdir), "stage_timeout": 777.0})
     assert planner.timeout == 777.0
+
+
+def test_wallclock_budget_caps_each_dispatch(tmpdir):
+    """speedup-v1 P0: a tighter budget_seconds must bound EVERY dispatch, not just the
+    between-dispatch checks — one hung stage may not outlive the whole-turn budget."""
+    import asyncio
+    import time as _time
+
+    def sleepy(*, role, model_alias, system_prompt, user_prompt):
+        _time.sleep(3)
+        return "{}"
+
+    cfg = PlannerConfig(stage_timeout=600.0, budget_seconds=1.0)
+    planner = MultiStagePlanner(config=cfg, run_stage=sleepy,
+                                store=FileArtifactStore(str(tmpdir)))
+    t0 = _time.monotonic()
+    with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+        asyncio.run(planner.plan(task="t"))
+    # the coroutine itself failed at ~1s; asyncio.run teardown additionally joins the
+    # abandoned 3s worker thread, hence the generous wall-clock ceiling.
+    assert _time.monotonic() - t0 < 4.0

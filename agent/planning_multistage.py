@@ -384,6 +384,19 @@ class MultiStagePlanner:
             raise PlanningBudgetExhausted(
                 f"budget_exhausted: wall clock {spent:.0f}s > {budget:.0f}s")
 
+    def _stage_deadline(self) -> float:
+        """Per-dispatch wait_for cap: the smaller of the configured per-stage timeout
+        (constructor override wins over config.stage_timeout) and the REMAINING turn
+        budget (planning-speedup-recommendations-v1 P0): otherwise one hung stage could
+        block up to stage_timeout seconds regardless of a tighter budget_seconds."""
+        explicit = getattr(self, "timeout", None)
+        base = float(explicit) if explicit is not None \
+            else float(getattr(self.config, "stage_timeout", 600.0) or 600.0)
+        budget = float(getattr(self.config, "budget_seconds", 0) or 0)
+        if budget:
+            return max(0.05, min(base, budget - (time.monotonic() - self._t0)))
+        return base
+
     async def _generate(self, *, role: str, alias: str, system: str, payload: dict,
                         schema: type[_T], validate: Callable[[_T], None] | None = None) -> _T:
         feedback: list[dict] | None = None
@@ -404,7 +417,7 @@ class MultiStagePlanner:
                     system_prompt=system,
                     user_prompt=json.dumps(request, ensure_ascii=False),
                 ),
-                timeout=self.timeout,
+                timeout=self._stage_deadline(),
             )
             if not isinstance(raw, str):
                 # Adapter-contract violation is not the model's format error.
