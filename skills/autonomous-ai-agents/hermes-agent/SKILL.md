@@ -24,7 +24,7 @@ What makes Hermes different:
 - **Many surfaces** — the same agent core drives the CLI, the Ink TUI, a native Electron desktop app, a web dashboard, and an ACP server for IDEs (VS Code / Zed / JetBrains).
 - **Provider-agnostic** — swap models and providers mid-workflow; credential pools rotate across multiple API keys automatically.
 - **Profiles** — run multiple independent Hermes instances with isolated configs, sessions, skills, and memory.
-- **Extensible & themeable** — plugins, MCP servers, custom tools, webhook triggers, cron scheduling, skins that theme every surface, desktop UI plugins, TUI widgets, and pet mascots.
+- **Extensible & themeable** — plugins, MCP servers, custom tools, webhook triggers, deferred-continuation queues, skins that theme every surface, desktop UI plugins, TUI widgets, and pet mascots.
 
 **This skill is a hub.** The body covers identity, quick start, spawning/orchestration, and hard invariants. Everything else lives in reference files — **load the matching reference (below) before answering**; do not answer detail questions from the body alone.
 
@@ -96,7 +96,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
 | AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
 | Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
-| Delegation, cron, curator, kanban | `references/background-systems.md` |
+| Delegation, scheduled followups, curator, kanban | `references/background-systems.md` |
 | `hermes project` workspaces, multi-folder projects, desktop sidebar groups | `references/projects-and-folders.md` |
 | MCP servers (add, catalog, `hermes mcp`) | `references/native-mcp.md` |
 | Webhook routes and event-driven runs | `references/webhooks.md` |
@@ -208,7 +208,7 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Set timeouts** for one-shot mode — complex tasks can take 5-10 minutes
 - **Use `hermes chat -q` for fire-and-forget** — no PTY needed
 - **Prefer tmux for interactive sessions when it is installed** — `capture-pane` reads the rendered screen; the PTY-background fallback only has the raw output log
-- **For scheduled tasks**, use the `cronjob` tool instead of spawning — handles delivery and retry
+- **For deferred/scheduled work**, use the `task_queue` tool (event-driven continuation) or `ctl_followup` (durable re-arming by the ticker) instead of spawning a waiter — there is no in-process scheduler; the fork excised cron.
 - **"delegate_task is capped at N" reports** — see `references/delegate-task-concurrency-diagnosis.md`. Three real cap paths in Hermes; if none fired, the model is self-limiting and rationalising it as "the runtime caps."
 - **"Can $external_app use my Nous Portal subscription / OAuth?"** — see `references/portal-auth-for-third-party-apps.md`. Walk the user through three layers (plugin-vs-app, what Portal actually exposes, local-broker-proxy option).
 

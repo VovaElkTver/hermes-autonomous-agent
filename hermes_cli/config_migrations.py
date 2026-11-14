@@ -781,6 +781,45 @@ def _migrate_to_55(results: dict[str, Any], quiet: bool) -> None:
                 "approvals.cron_mode → scheduled_mode")
 
 
+def _migrate_to_56(results: dict[str, Any], quiet: bool) -> None:
+    # 55 → 56: the retired cronjob toolset — the 10.11 excision deleted the toolset and every
+    # name-surface around it, but backfills/picker saves left "cronjob" / "cronjob_manage" in
+    # stored lists. Strip them so stale config can't reference an unknown toolset (migration 39
+    # "bfl" is the exact precedent). Unknown names resolve to ∅ at runtime, so this is hygiene,
+    # not a break fix.
+    config = read_raw_config()
+    changed = []
+    for section in ("platform_toolsets", "known_builtin_toolsets"):
+        mapping = config.get(section)
+        if not isinstance(mapping, dict):
+            continue
+        dirty = False
+        for platform, toolsets in mapping.items():
+            if isinstance(toolsets, list) and "cronjob" in toolsets:
+                mapping[platform] = [ts for ts in toolsets if ts != "cronjob"]
+                dirty = True
+        if dirty:
+            config[section] = mapping
+            changed.append(section)
+    agent = _dict_at(config, "agent")
+    disabled = agent.get("disabled_toolsets")
+    if isinstance(disabled, list) and "cronjob" in disabled:
+        agent["disabled_toolsets"] = [ts for ts in disabled if ts != "cronjob"]
+        config["agent"] = agent
+        changed.append("agent.disabled_toolsets")
+    tools = _dict_at(config, "tools")
+    tool_search = tools.get("tool_search")
+    if isinstance(tool_search, dict) and isinstance(tool_search.get("defer"), list) \
+            and "cronjob_manage" in tool_search["defer"]:
+        tool_search["defer"] = [t for t in tool_search["defer"] if t != "cronjob_manage"]
+        changed.append("tools.tool_search.defer")
+    if changed:
+        results["config_added"].append("removed retired cronjob toolset from " + ", ".join(changed))
+        _commit(config, results, quiet, None,
+                "  ✓ Removed the retired cronjob toolset from saved toolset lists — deferred "
+                "continuation is task_queue events / ctl followups now.")
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (12, _migrate_to_12),
     (13, _migrate_to_13),
@@ -938,6 +977,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     # 53 -> 54 (fork): the write-approval gate is retired — memory/skill writes are direct; drop the keys.
     (54, _migrate_to_54),
     (55, _migrate_to_55),
+    (56, _migrate_to_56),
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or
@@ -949,7 +989,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
 #: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose
 #: provenance the config stamp says nothing about.
-LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 54, 55})
+LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52, 54, 55, 56})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at
 #: or past their version does not prove they ran: unreleased builds of the gateway-runtime branch
