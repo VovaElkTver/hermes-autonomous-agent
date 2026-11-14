@@ -1549,17 +1549,21 @@ class GatewayStartupMixin:
                 len(startup_retryable_errors), "; ".join(startup_retryable_errors),
             )
             _write_runtime_status_quiet(gateway_state="degraded", exit_reason=None)
-        # No adapter for any enabled platform: fleet nodes share one config.yaml but hold a subset of
-        # credentials, so degrade gracefully.
-        logger.warning(
-            # Fall through to the normal "running" state — reconnect watcher takes it from here. In fleet
-            # deployments the same config.yaml is shared across nodes that may only have credentials for a
-            # subset of platforms. Rather than failing hard, degrade gracefully and allow scheduled jobs to run
-            # (#5196).
-            "No adapter could be created for any of the %d configured platform(s). "
-            "Check that required dependencies are installed and credentials are set. "
-            "Gateway will continue for scheduled job execution; platforms whose plugin may still register "
-            "are queued for background retry.", enabled_platform_count,
+        # No adapter for any enabled platform. Fleet nodes holding a credential subset do not
+        # reach here with a live heal story: platforms without a bot credential are skipped before
+        # the enabled count or park as needs-config. A node that reaches this line is the
+        # "active but deaf" class (rtx5000 gateway-deafness 14.11): systemd reports active while no
+        # human can reach the agent. Stamp it LOUD and degraded, and let healable platforms
+        # (missing deps — _adapter_may_heal) be retried by the reconnect watcher with backoff.
+        self._startup_parked_platforms = True
+        _write_runtime_status_quiet(gateway_state="degraded", exit_reason=None)
+        logger.error(
+            "DEAF GATEWAY: no adapter could be created for any of the %d configured platform(s) — "
+            "serving local clients and scheduled only (gateway_state: degraded). Check dependencies "
+            "and credentials; platforms classified healable are queued for background retry. "
+            "Previously this was a silent warning and the node sat active-but-unreachable "
+            "(#5196 degrade-gracefully, tightened by rtx5090-gateway-deafness-2026-11-14 R1).",
+            enabled_platform_count,
         )
         return False
 
@@ -1589,7 +1593,15 @@ class GatewayStartupMixin:
             from gateway.channel_directory import build_channel_directory
             directory = await build_channel_directory(self.adapters)
             ch_count = sum(len(chs) for chs in directory.get("platforms", {}).values())
-            logger.info("Channel directory built: %d target(s)", ch_count)
+            if ch_count == 0 and (self._startup_parked_platforms or getattr(self, "_failed_platforms", None)):
+                # 0 targets while platforms are enabled-but-failed is the deaf-node fingerprint;
+                # it used to hide here as an INFO line while systemd reported active (R1, 14.11).
+                logger.error(
+                    "Channel directory built with 0 target(s) while configured platforms are "
+                    "unavailable — outbound sends cannot resolve any chat target.",
+                )
+            else:
+                logger.info("Channel directory built: %d target(s)", ch_count)
         # Restarting after a /update still in progress: keep watching so we notify when it finishes.
         notified = await self._send_update_notification()
         if not notified and any(

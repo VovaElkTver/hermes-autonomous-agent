@@ -1705,6 +1705,25 @@ def _restart_gateway_fleet_after_update(_pre_update_plan, gateway_mode: bool):
         incomplete=False, phase_errors=[], pre_restart_gateway_pids=[], restarted_services=[], failed_or_stale_units=[],
         relaunched_profiles=[], externally_supervised_profiles=[], killed_pids=set(),
     )
+    # R2 (rtx5090-gateway-deafness-2026-11-14): a restart onto an environment that lost a
+    # platform dependency yields an active-but-DEAF unit. Probe before touching any unit;
+    # on risk the restart stays a pending obligation and the serving gateway keeps serving.
+    from hermes_cli.update_preflight import deafness_risk_platforms
+
+    try:
+        _risky = deafness_risk_platforms()
+    except Exception:
+        _risky = []  # fail-open per module contract
+    if _risky:
+        for _label, _hint in _risky:
+            print(f"✗ Deafness preflight: platform '{_label}' dependencies unavailable in the target environment — {_hint}")
+        print("✗ Gateway restart DEFERRED (pending-restart marker armed): heal the environment "
+              "(hermes pm install / uv sync), then the next CLI or 'hermes gateway restart' completes it.")
+        out.incomplete = True
+        out.phase_errors.append("preflight_deafness_risk:" + ",".join(label for label, _ in _risky))
+        _write_fleet_restart_pending_marker(expected_sha=_current_checkout_sha() or "")
+        out.record_receipt()
+        return out
     # Scope-qualified twin (``user/hermes-serve`` vs ``system/hermes-serve`` are different
     # processes; abort recovery needs WHICH settled). Bare names stay in
     # ``restarted_services`` for the fleet probe, receipt and summary.

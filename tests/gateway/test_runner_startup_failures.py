@@ -385,13 +385,11 @@ async def test_start_gateway_replace_clears_marker_on_permission_denied(
 
 @pytest.mark.asyncio
 async def test_runner_degrades_gracefully_when_all_adapters_missing(monkeypatch, tmp_path, caplog):
-    """When all enabled platforms have no adapter (missing library or credentials),
-    the gateway should NOT return failure — it should warn and continue running for
-    scheduled job execution, matching the behaviour of 'no platforms enabled' (#5196).
-
-    In fleet deployments the same config.yaml is shared across nodes that may only
-    have credentials for a subset of platforms.  Requiring perfect credentials on
-    every node makes fleet operation impossible."""
+    """When all enabled platforms have no adapter, the gateway should NOT return failure — it
+    keeps running for local clients and scheduled, but stamps itself DEGRADED and LOUD: an
+    active-but-deaf unit is exactly the incident class rtx5090-gateway-deafness-2026-11-14 R1
+    closes (tightens the old silent-'running' behaviour of #5196; fleet subset nodes skip
+    credential-less platforms before the enabled count and are unaffected)."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     config = GatewayConfig(
         platforms={
@@ -416,19 +414,20 @@ async def test_runner_degrades_gracefully_when_all_adapters_missing(monkeypatch,
     assert ok is True
     assert runner.should_exit_cleanly is False
     assert runner.adapters == {}
-    # Scheduled still runs; missing enabled platforms are flagged and queued for the reconnect watcher.
+    # R1 (rtx5090-gateway-deafness-2026-11-14): the deaf stamp is external and LOUD.
     state = read_runtime_status()
-    assert state["gateway_state"] == "running"
+    assert state["gateway_state"] == "degraded"
     assert set(runner._failed_platforms) == {Platform.TELEGRAM, Platform.DISCORD}
     for platform in ("telegram", "discord"):
         assert state["platforms"][platform]["state"] == "retrying"
         assert state["platforms"][platform]["error_code"] == "adapter_unavailable"
         assert state["platforms"][platform]["needs_attention"] is True
-    # A warning must be emitted explaining why no platforms connected.
+    # An ERROR must be emitted explaining why no platforms connected.
     assert any(
-        "No adapter could be created" in record.message
+        "no adapter could be created" in record.message
         for record in caplog.records
-    ), "Expected degraded-mode warning when all adapters are missing"
+        if record.levelname == "ERROR"
+    ), "Expected degraded-mode ERROR when all adapters are missing"
 
 
 class _NonRetryableFailureAdapter(BasePlatformAdapter):
@@ -638,3 +637,78 @@ async def test_token_lock_plus_retryable_peer_stays_alive(monkeypatch, tmp_path)
         assert state["platforms"]["discord"]["state"] == "retrying"
     finally:
         await runner.stop()
+
+
+# ---------------------------------------------------------------------------
+# rtx5090-gateway-deafness-2026-11-14 R1/R2: a registered platform whose adapter creation
+# failed only on MISSING DEPENDENCIES must not park silently — it is healable (the retry
+# re-runs the lazy installer, and an external venv repair lands between backoff attempts).
+
+
+class TestDepsFailureIsHealable:
+    def _runner(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        config = GatewayConfig(
+            platforms={Platform.MATRIX: PlatformConfig(enabled=True, token="***")},
+            sessions_dir=tmp_path / "sessions",
+        )
+        return GatewayRunner(config)
+
+    def test_registry_records_creation_failure_reason(self, monkeypatch):
+        from gateway.platform_registry import PlatformEntry, PlatformRegistry
+
+        reg = PlatformRegistry()
+        reg.register(PlatformEntry(name="dummydeps", label="D", adapter_factory=lambda cfg: object(),
+                                   check_fn=lambda: False))
+        assert reg.create_adapter("dummydeps", None) is None
+        assert reg.last_create_failure("dummydeps") == "deps"
+        reg.register(PlatformEntry(name="dummycfg", label="D", adapter_factory=lambda cfg: object(),
+                                   check_fn=lambda: True, validate_config=lambda cfg: False))
+        assert reg.create_adapter("dummycfg", None) is None
+        assert reg.last_create_failure("dummycfg") == "config"
+
+        def _boom(cfg):
+            raise RuntimeError("factory")
+
+        reg.register(PlatformEntry(name="dummyfac", label="D", adapter_factory=_boom,
+                                   check_fn=lambda: True))
+        assert reg.create_adapter("dummyfac", None) is None
+        assert reg.last_create_failure("dummyfac") == "factory"
+        reg.register(PlatformEntry(name="dummyok", label="D", adapter_factory=lambda cfg: object(),
+                                   check_fn=lambda: True))
+        assert reg.create_adapter("dummyok", None) is not None
+        assert reg.last_create_failure("dummyok") is None
+
+    def test_may_heal_only_for_deps_reason(self, tmp_path, monkeypatch):
+        import gateway.run as gr
+        from gateway.platform_registry import platform_registry
+
+        assert Platform.MATRIX not in gr._BUILTIN_ADAPTERS  # plugin platform
+        monkeypatch.setattr(gr, "_platform_has_bot_credential", lambda p, c: True)
+        monkeypatch.setattr(platform_registry, "is_registered", lambda name: True)
+        runner = self._runner(tmp_path, monkeypatch)
+        cfg = runner.config.platforms[Platform.MATRIX]
+        for reason, expected in (("deps", True), ("config", False), ("factory", False), (None, False)):
+            monkeypatch.setattr(platform_registry, "last_create_failure", lambda name, r=reason: r)
+            assert runner._adapter_may_heal(Platform.MATRIX, cfg) is expected
+
+    @pytest.mark.asyncio
+    async def test_all_deps_failures_are_queued_and_stamp_degraded(self, tmp_path, monkeypatch):
+        """The incident boot: the only platform is a registered plugin whose deps vanished with
+        a venv swap. The node must come up degraded (external stamp) and QUEUE the platform for
+        watcher retry instead of parking it deaf until the next manual restart."""
+        import gateway.run as gr
+        from gateway.platform_registry import platform_registry
+
+        runner = self._runner(tmp_path, monkeypatch)
+        monkeypatch.setattr(gr, "_BUILTIN_ADAPTERS", {})
+        monkeypatch.setattr(platform_registry, "is_registered", lambda name: True)
+        monkeypatch.setattr(platform_registry, "last_create_failure", lambda name: "deps")
+        monkeypatch.setattr(runner, "_create_adapter", lambda platform, cfg: None)
+        ok = await runner.start()
+        try:
+            assert ok is True  # stays up for local clients / scheduled
+            assert Platform.MATRIX in runner._failed_platforms  # retried with backoff
+            assert read_runtime_status()["gateway_state"] == "degraded"
+        finally:
+            await runner.stop()
