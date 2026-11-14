@@ -71,7 +71,16 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
                                                "branch_id": branch_id,
                                                "child": new_session_id})
 
+        # register for shutdown-drain awareness: a restart while a conveyor runs is
+        # irresponsible with a heavy child mid-turn (owner rule 14.11)
+        fork_record = {"branch_id": branch_id, "child_session_id": new_session_id,
+                       "started_at": datetime.now().timestamp()}
+        reg = getattr(self, "_planning_forks", None)
+        if reg is None:
+            reg = self._planning_forks = set()
+        reg.add(id(fork_record))
         result = await self._run_planning_fork_child(new_session_id, source, prompt)
+        reg.discard(id(fork_record))
 
         # chat visibility (same channel the interim ack promised)
         if result.get("response"):
@@ -165,6 +174,46 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
         except Exception as exc:
             logger.exception("planning fork child %s failed", session_id)
             return {"response": "", "error": f"{type(exc).__name__}: {exc}"}
+
+    async def sweep_orphaned_planning_forks(self) -> int:
+        """Boot-sweep: planning forks left 'active' by a previous process death.
+
+        The child transcript holds real work; summarize its tail deterministically
+        (no LLM) and deliver the work-note to the parent as an interrupted-restart
+        report. Idempotent: only rows still 'active' are touched; join marks them.
+        Returns the count of swept branches."""
+        import contextlib as _ctxlib
+
+        from gateway.branch_prefix import branch_display_name
+
+        try:
+            rows = [dict(r) for r in self._session_db._read_all(  # type: ignore[attr-defined]
+                "SELECT * FROM session_branches WHERE status = 'active'")]
+        except Exception:
+            return 0
+        swept = 0
+        for row in rows:
+            child_id = row.get("child_session_id", "")
+            # planning fork children carry our marker in model_config["_forked_from"]
+            with _ctxlib.suppress(Exception):
+                meta = await self._session_db.get_session(child_id)  # type: ignore[attr-defined]
+                if not (meta or {}).get("model_config", {}).get("_forked_from"):
+                    continue
+            parent_id = row.get("parent_session_id")
+            summary_tail = await self._summarize_branch(child_id)  # type: ignore[attr-defined]
+            note = f"[план оборван рестартом гейтвея — ветка {branch_display_name(row)}: {summary_tail}]"[:4800]
+            with _ctxlib.suppress(Exception):
+                await self._session_db.append_messages_batch(parent_id, [dict(role="user", content=note)])
+                await self._session_db.set_branch_status(row["branch_id"], "joined",
+                                                         join_strategy="note")
+                swept += 1
+        if swept:
+            self._journal_fork("", {"event": "planning.fork.boot_sweep", "swept": swept})
+        return swept
+
+    def planning_fork_count(self) -> int:
+        """Live headless planning conveyors; wired into _active_work_count for drains."""
+        return len(getattr(self, "_planning_forks", ()) or ())
 
     def _journal_fork(self, _session_id: str, event: dict) -> None:
         """Mirror fork lifecycle into the planning events ledger (observer parity)."""
