@@ -2147,6 +2147,7 @@ from gateway.delivery import DeliveryRouter
 from gateway.turn_lease import SessionTurnLeaseRegistry
 from gateway.session_state import SessionState, legacy_dict_property
 from gateway.authz_mixin import GatewayAuthorizationMixin
+from gateway.planning_fork import GatewayPlanningForkMixin
 from gateway.kanban_watchers import GatewayKanbanWatchersMixin
 from gateway.slash_commands import GatewaySlashCommandsMixin
 from gateway.run_voice import GatewayVoiceMixin

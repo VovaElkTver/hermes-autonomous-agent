@@ -205,8 +205,13 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
     _approval_owner = None
 
     def __init__(self, runner: GatewayRunner, ctx: TurnContext) -> None:
+        import asyncio as _asyncio
         self._runner = runner
         self._ctx = ctx
+        try:
+            self._loop = _asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         from gateway.session_authorities import active_authority
         authority = active_authority(runner)
         if authority is not None:
@@ -224,6 +229,15 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
             return authority.publish_execution(
                 session_id, generation, event_type, self._stamp_segment(generation, event_type, payload))
         return False
+
+    def _schedule_planning_fork(self, prompt: str) -> None:
+        """interim_mode=fork: marshal the headless-fork spawn onto the gateway loop."""
+        import asyncio
+
+        if not (self._loop and self._loop.is_running()):
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._runner.spawn_planning_fork(prompt, self._ctx.source), self._loop)
 
     def _stamp_segment(self, generation, event_type, payload):
         """The turn's wire identity on its reply frames (tui_gateway/stream_segments.py), so a viewer
@@ -1391,9 +1405,15 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
             # before the agent loop, with the resolved child-routing agent in hand. Planner failure
             # annotates ctx.message visibly; admission bugs log-and-continue either way.
             try:
-                from agent.planning_coordinator import maybe_prepare_plan
+                from agent.planning_coordinator import interim_mode, maybe_prepare_plan
 
-                maybe_prepare_plan(agent, ctx)
+                if interim_mode() == "fork":
+                    from agent.planning_coordinator import maybe_prepare_fork
+
+                    maybe_prepare_fork(agent, ctx,
+                                       spawn=self._schedule_planning_fork)
+                else:
+                    maybe_prepare_plan(agent, ctx)
             except Exception:
                 logger.exception("planning auto-start admission failed")
             compressions = getattr(getattr(agent, "context_compressor", None), "compression_count", None)

@@ -428,6 +428,63 @@ def _default_runs_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".hermes", WORK_DIRNAME)
 
 
+def interim_mode() -> str:
+    """'thread' (default) or 'fork' - how interim conveyors detach from the turn."""
+    try:
+        return str(_load_cfg().get("interim_mode") or "thread").strip().lower() or "thread"
+    except Exception:
+        return "thread"
+
+
+def maybe_prepare_fork(agent: Any, ctx: Any, spawn) -> None:
+    """Admission gate for interim_mode='fork': route like always, then hand the ORIGINAL
+    user message to the gateway fork-spawner callback. Cheap/sync; ctx gets the ack-note."""
+    cfg = _load_cfg()
+    if not cfg.get("multistage"):
+        return
+    journal = os.path.join(str(cfg.get("runs_dir") or _default_runs_dir()), "events.jsonl")
+    message = getattr(ctx, "message", "") or ""
+    if PLANNING_PURPOSE.get() == "planning":
+        return
+    # service-path skips mirror maybe_prepare_plan's Д5 guards
+    if getattr(ctx, "scheduled_heartbeat", False):
+        return
+    if getattr(ctx, "voice_turn", False):
+        return
+    if getattr(ctx, "persist_user_display_kind", None):
+        return
+    if os.environ.get("HERMES_PLANNING_AUTOSTART_OFF") == "1":
+        return
+    mode = str(cfg.get("mode") or "").strip().lower()
+    if mode == "auto":
+        from agent.planning_router import classify_route
+
+        state_runs = str(cfg["runs_dir"]) if cfg.get("runs_dir") else _default_runs_dir()
+        session_key = getattr(ctx, "session_key", "") or ""
+        done_note = consume_pending(state_runs, session_key)
+        if done_note:
+            ctx.message = done_note + "\n\n" + message
+            message = ctx.message
+        from agent.conversation_state import route_with_state
+
+        route, reason = route_with_state(message, state_runs, session_key)
+        if route != "plan":
+            _journal(journal, {"event": "planning.skipped_router", "reason": f"{reason}:{route}",
+                               "session_key": session_key})
+            return
+        _journal(journal, {"event": "planning.fork.requested", "reason": reason,
+                           "session_key": session_key})
+    elif mode != "always":
+        return
+    else:
+        _journal(journal, {"event": "planning.fork.requested", "reason": "mode_always",
+                           "session_key": getattr(ctx, "session_key", "") or ""})
+    spawn(message)
+    note = ("[план строится в фоне тяжёлым ядром (fork-ветка); ответь собеседнику сейчас"
+            " коротко и при необходимости уточняющим вопросом, без ожидания плана]")
+    ctx.message = f"{ctx.message}\n\n{note}"
+
+
 def consume_pending(runs_dir: str, session_key: str) -> str:
     """Pop ONE pending background-conveyor note for this session (oldest first).
 

@@ -172,3 +172,42 @@ def test_worker_thread_inherits_secret_scope(monkeypatch, tmpdir):
         assert seen.get("scope") == {"OPENAI_API_KEY": "x"}
     finally:
         ss.reset_secret_scope(token)
+
+
+def test_fork_mode_admits_and_spawns(monkeypatch, tmpdir):
+    """interim_mode=fork: work request -> gateway spawn callback with ORIGINAL message,
+    ack-note appended, no thread conveyor, journal carries planning.fork.requested."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    spawned = []
+    ctx = make_ctx(message="почини гонку в agent/planning_coordinator.py")
+    pc.maybe_prepare_fork(None, ctx, spawn=spawned.append)
+    assert spawned and spawned[0] == "почини гонку в agent/planning_coordinator.py"
+    assert "fork-ветка" in ctx.message
+    assert any(e["event"] == "planning.fork.requested" for e in _events(tmpdir))
+    assert planner.calls == []  # thread conveyor never engaged
+
+
+def test_fork_mode_trivial_replica_skips_spawn(monkeypatch, tmpdir):
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    spawned = []
+    ctx = make_ctx(message="который час?")
+    pc.maybe_prepare_fork(None, ctx, spawn=spawned.append)
+    assert spawned == []
+    skips = [e for e in _events(tmpdir) if e["event"] == "planning.skipped_router"]
+    assert len(skips) == 1
+    assert "fork-ветка" not in (ctx.message or "")
+
+
+def test_interim_mode_default_is_thread():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch_hp = __import__("pytest").MonkeyPatch()
+        monkeypatch_hp.setenv("HERMES_HOME", d)
+        try:
+            assert pc.interim_mode() == "thread"
+        finally:
+            monkeypatch_hp.undo()
