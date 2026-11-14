@@ -9,6 +9,7 @@ as a work-note (context join — no cron-style "not my message" disowning).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -190,23 +191,31 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
             rows = [dict(r) for r in self._session_db._read_all(  # type: ignore[attr-defined]
                 "SELECT * FROM session_branches WHERE status = 'active'")]
         except Exception:
+            logger.exception("planning fork boot-sweep: branch listing failed")
             return 0
         swept = 0
         for row in rows:
             child_id = row.get("child_session_id", "")
             # planning fork children carry our marker in model_config["_forked_from"]
             with _ctxlib.suppress(Exception):
-                meta = await self._session_db.get_session(child_id)  # type: ignore[attr-defined]
-                if not (meta or {}).get("model_config", {}).get("_forked_from"):
-                    continue
+                meta = self._session_db.get_session(child_id)  # type: ignore[attr-defined]
+                raw_cfg = (meta or {}).get("model_config")
+                cfg = json.loads(raw_cfg) if isinstance(raw_cfg, str) else (
+                    raw_cfg if isinstance(raw_cfg, dict) else {})
+                if not isinstance(cfg, dict) or not cfg.get("_forked_from"):
+                    continue  # not ours: manual /fork or /branch child
             parent_id = row.get("parent_session_id")
             summary_tail = await self._summarize_branch(child_id)  # type: ignore[attr-defined]
             note = f"[план оборван рестартом гейтвея — ветка {branch_display_name(row)}: {summary_tail}]"[:4800]
             with _ctxlib.suppress(Exception):
                 await self._session_db.append_messages_batch(parent_id, [dict(role="user", content=note)])
-                await self._session_db.set_branch_status(row["branch_id"], "joined",
-                                                         join_strategy="note")
-                swept += 1
+            swept += 1
+            with _ctxlib.suppress(Exception):
+                # SessionDB API is sync; AsyncSessionDB path may add its own awaitable later
+                closed = self._session_db.set_branch_status(row["branch_id"], "joined",
+                                                            join_strategy="note")
+                if asyncio.iscoroutine(closed):
+                    await closed
         if swept:
             self._journal_fork("", {"event": "planning.fork.boot_sweep", "swept": swept})
         return swept

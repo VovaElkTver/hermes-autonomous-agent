@@ -227,3 +227,29 @@ def test_fork_spawn_failure_is_observable(monkeypatch, tmpdir):
     assert "не стартовал" in ctx.message
     fails = [e for e in _events(tmpdir) if e["event"] == "planning.fork.spawn_failed"]
     assert fails and "AttributeError" in fails[0]["error"]
+
+
+def test_sweep_parses_string_model_config(monkeypatch, tmpdir):
+    """22:09 boot swept 0: model_config is a JSON STRING in the row dict; str.get()
+    raised inside the per-row suppress and every planning fork was skipped."""
+    import asyncio
+    from gateway.planning_fork import GatewayPlanningForkMixin
+
+    class DB:
+        def _read_all(self, sql, params=()):
+            return [{"branch_id": "bX", "child_session_id": "c1",
+                     "parent_session_id": "p1", "title": "plan-1"}]
+        def get_session(self, sid):
+            return {"model_config": '{"_forked_from": "parent-session"}'}
+        async def append_messages_batch(self, parent_id, notes):
+            self.notes = (parent_id, notes)
+        def set_branch_status(self, *a, **k): pass
+
+    class Runner(GatewayPlanningForkMixin):
+        def __init__(self):
+            self._session_db = DB()
+            async def _summ(cid): return "tail"
+            self._summarize_branch = _summ
+    runner = Runner()
+    swept = asyncio.run(runner.sweep_orphaned_planning_forks())
+    assert swept == 1
