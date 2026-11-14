@@ -661,12 +661,9 @@ DEVELOPER_ROLE_MODELS = ("gpt-5", "codex")
 # Hints for core surfaces only. A messaging platform's hint ships with its plugin
 # (``PlatformEntry.platform_hint``, read by agent/system_prompt._default_platform_hint).
 PLATFORM_HINTS = {
-    "cron": (
-        "You are running as a scheduled job. There is no user present — you cannot ask questions, "
-        "request clarification, or wait for follow-up. Execute the task fully and autonomously, making "
-        "reasonable decisions where needed. Your final response is automatically delivered to the job's "
-        "configured destination — put the primary content directly in your response."
-    ),
+    # No "cron" key: the donor scheduled runner was excised (10.11). Deferred
+    # continuation (task_queue / controller.followups) wakes a session on its
+    # carrier platform and inherits that platform's hint below.
     "cli": (
         # Maintainer-verified live: the CLI prints raw text.
         "You are in a plain terminal (CLI). Markdown does NOT render — asterisks, headers, and fences appear as "

@@ -1,9 +1,12 @@
-"""A scheduled agent's system prompt carries its delivery channel's hint.
+"""Excision lock: the donor scheduled-agent prompt surface must stay gone.
 
-Scheduled agents run as platform ``scheduled`` but the final response lands on the job's ``deliver``
-channel. Without the destination hint the model never learns that MEDIA: tags become native
-attachments there, and ``platform_hints.<channel>.append`` never reached scheduled jobs
-(community report: Slack-delivered scheduled jobs stopped sending attachments).
+Pre-excision behavior (community report: Slack-delivered scheduled jobs and
+their attachments): platform "cron" stacked the delivery channel's hint onto
+the scheduled hint via HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM. The 10.11 cron
+excision removed the scheduler — no launcher in the fork sets platform="cron"
+or publishes the auto-deliver vars. These tests pin the absence so a donor
+sync cannot silently resurrect the surface; deferred continuation
+(task_queue / controller.followups) wakes sessions on the carrier platform.
 """
 
 import types
@@ -15,8 +18,6 @@ from agent.system_prompt import platform_hint
 from gateway.platform_registry import platform_registry
 from gateway.session_context import _VAR_MAP
 from hermes_cli.plugins import discover_plugins
-
-EXTRA = "Always attach the report as a .pdf."
 
 
 def _agent(platform, overrides=None):
@@ -33,16 +34,12 @@ def deliver_to(monkeypatch):
     var.reset(token)
 
 
-def test_cron_agent_gets_delivery_channel_hint_with_its_override(deliver_to):
-    hint = platform_hint(_agent("cron", {"slack": {"append": EXTRA}}))
-    assert hint.startswith(PLATFORM_HINTS["cron"])
-    assert platform_registry.get("slack").platform_hint in hint
-    assert EXTRA in hint
-    # The scheduled hint's own override channel is untouched by the destination's.
-    assert platform_hint(_agent("cron", {"cron": {"replace": "X"}})).startswith("X\n\n")
+def test_no_cron_hint_and_no_delivery_stacking(deliver_to):
+    assert "cron" not in PLATFORM_HINTS
+    # Even with the legacy auto-deliver var published, a "cron" platform agent
+    # gets no built-in hint (registry override below still resolves normally).
+    assert platform_hint(_agent("cron")) == ""
 
 
-def test_delivery_target_only_applies_to_cron_agents(deliver_to):
+def test_carrier_platform_hints_untouched(deliver_to):
     assert platform_hint(_agent("telegram")) == platform_registry.get("telegram").platform_hint
-    _VAR_MAP["HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM"].set("")
-    assert platform_hint(_agent("cron")) == PLATFORM_HINTS["cron"]
