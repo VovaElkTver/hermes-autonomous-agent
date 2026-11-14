@@ -176,3 +176,40 @@ def test_async_planner_coroutine_is_driven(monkeypatch, tmpdir):
     ctx = make_ctx()
     pc.maybe_prepare_plan(None, ctx)
     assert ctx.message.startswith("[АКТИВНЫЙ ПЛАН w-0001 v1")
+
+
+def test_work_ids_unique_without_prior_record(monkeypatch, tmpdir):
+    """EAA Д7 regression: old line-counting returned identical ids when works.jsonl had no rows yet."""
+    patched(monkeypatch, tmpdir)
+    a = pc._next_work_id(str(tmpdir))
+    b = pc._next_work_id(str(tmpdir))
+    assert (a, b) == ("w-0001", "w-0002")
+
+
+def test_service_skip_is_journalled(monkeypatch, tmpdir):
+    """EAA Д5 regression: bypassing the pipeline must leave an observable trace."""
+    patched(monkeypatch, tmpdir)
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    ctx = make_ctx(scheduled_heartbeat=True)
+    pc.maybe_prepare_plan(None, ctx)
+    events = [json.loads(l) for l in open(f"{tmpdir}/events.jsonl", encoding="utf-8")]
+    skips = [e for e in events if e["event"] == "planning.skipped_service"]
+    assert len(skips) == 1 and skips[0]["reason"] == "heartbeat"
+    assert planner.calls == []
+
+
+def test_admission_failure_not_silent(monkeypatch, tmpdir):
+    """EAA Д4 regression: crash BEFORE plan() is journalled, turn proceeds without a plan."""
+    patched(monkeypatch, tmpdir)
+
+    def boom(agent, cfg):
+        raise RuntimeError("no credentials")
+
+    monkeypatch.setattr(pc, "_build_planner_for", boom)
+    ctx = make_ctx()
+    pc.maybe_prepare_plan(None, ctx)  # must not raise
+    assert ctx.message == "добавь восстановление состояния"
+    events = [json.loads(l) for l in open(f"{tmpdir}/events.jsonl", encoding="utf-8")]
+    assert any(e["event"] == "planning.admission_failed" and "no credentials" in e["error"]
+               for e in events)

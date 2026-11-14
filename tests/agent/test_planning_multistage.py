@@ -17,6 +17,8 @@ sys.path.insert(0, "/home/qwen/hermes-agent")
 from agent.planning_multistage import (
     FileArtifactStore,
     MultiStagePlanner,
+    PlanningBudgetExhausted,
+    PlannerConfig,
 )
 
 
@@ -280,3 +282,63 @@ def test_skip_record_is_appended(tmpdir, monkeypatch):
 def test_gateway_multistage_prompt_mentions_tool():
     prompt = build_plan_multistage_prompt("добавить восстановление")
     assert "plan_multistage" in prompt and "[/plan" in prompt
+
+
+def _store_and_planner(tmpdir, *, config=None, script):
+    import asyncio
+    idx = iter(script)
+
+    def runner(*, role, model_alias, system_prompt, user_prompt):
+        return next(idx)
+
+    store = FileArtifactStore(str(tmpdir))
+    planner = MultiStagePlanner(config=config or PlannerConfig(), run_stage=runner, store=store)
+    return planner, store
+
+
+def _contract_json():
+    return json.dumps({"goal": "g",
+                       "requirements": [{"id": "R1", "description": "d", "acceptance": ["a"]}],
+                       "constraints": [], "non_goals": [], "unknowns": []}, ensure_ascii=False)
+
+
+def test_park_returns_carry_artifact_dir(tmpdir):
+    """EAA Д2 regression: needs_input must expose the artifact dir (coordinator prints it)."""
+    import asyncio
+
+    script = [
+        _contract_json(),
+        json.dumps({"facts": [], "assumptions": [], "unresolved": [],
+                    "blocking_questions": ["q?"]}, ensure_ascii=False),
+    ]
+    planner, store = _store_and_planner(tmpdir, script=script)
+    result = asyncio.run(planner.plan(task="t"))
+    assert result["status"] == "needs_input"
+    assert result["artifact_dir"] == store.run_dir
+
+
+def test_turn_budget_exhaustion_is_a_distinct_error(tmpdir):
+    """EAA Д1 regression: per-stage timeouts exist; now the whole turn also has a hard cap."""
+    import asyncio
+
+    script = [
+        _contract_json(),
+        json.dumps({"facts": [{"claim": "c", "source": "f:1"}], "assumptions": [],
+                    "unresolved": [], "blocking_questions": []}, ensure_ascii=False),
+        json.dumps({"chosen": "c", "reasons": ["r"], "rejected": [], "revisit_if": [],
+                    "alternatives_considered": True}, ensure_ascii=False),
+        _contract_json(),  # plan stage input; should NEVER be dispatched
+    ]
+    cfg = PlannerConfig(max_stage_calls=3, format_retries=1)
+    planner, _store = _store_and_planner(tmpdir, config=cfg, script=script)
+    dispatched = []
+    original = planner.run_stage
+
+    def counting(**kw):
+        dispatched.append(kw["role"])
+        return original(**kw)
+
+    planner.run_stage = counting
+    with pytest.raises(PlanningBudgetExhausted):
+        asyncio.run(planner.plan(task="t"))
+    assert len(dispatched) == 3

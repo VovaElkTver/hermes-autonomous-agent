@@ -58,11 +58,29 @@ def _journal(path: str | None, payload: dict) -> None:
 
 
 def _next_work_id(runs_dir: str) -> str:
-    try:
-        n = sum(1 for _ in open(os.path.join(runs_dir, "works.jsonl"), encoding="utf-8"))
-        return f"w-{n + 1:04d}"
-    except OSError:
-        return "w-0001"
+    """Race-free monotonic allocation (EAA Д7): the counter lives in ``work_seq`` guarded by
+    an flock; ``works.jsonl`` is only read once to seed continuity with legacy numbering."""
+    import fcntl
+
+    os.makedirs(runs_dir, exist_ok=True)
+    seq_path = os.path.join(runs_dir, "work_seq")
+    with open(os.path.join(runs_dir, ".works.lock"), "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            try:
+                n = int(open(seq_path, encoding="utf-8").read().strip() or 0)
+            except OSError:
+                try:
+                    n = sum(1 for _ in open(os.path.join(runs_dir, "works.jsonl"),
+                                            encoding="utf-8"))
+                except OSError:
+                    n = 0
+            n += 1
+            with open(seq_path, "w", encoding="utf-8") as fh:
+                fh.write(str(n))
+            return f"w-{n:04d}"
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def _run_async(coro, timeout: float):
@@ -193,17 +211,32 @@ class PlanningCoordinator:
 def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
     """Call site adapter for TurnRunner._run_sync_scoped: mutate ctx.message IN PLACE when
     mode=always admits the request into planning. Never raises."""
+    # _load_cfg() never raises (swallows into {}); keep journal target resolvable BEFORE
+    # the guarded section so even pre-plan crashes journal to the right file (EAA Д4).
+    cfg = _load_cfg()
+    if not cfg.get("multistage") or str(cfg.get("mode", "off")).lower() != "always":
+        return
+    journal = os.path.join(cfg["runs_dir"], "events.jsonl") if cfg.get("runs_dir") else None
     try:
-        cfg = _load_cfg()
-        if not cfg.get("multistage") or str(cfg.get("mode", "off")).lower() != "always":
-            return
         message = (getattr(ctx, "message", "") or "").strip()
-        if (not message or message.startswith("/")
-                or getattr(ctx, "scheduled_heartbeat", False)
-                or getattr(ctx, "voice_turn", False)
-                or getattr(ctx, "persist_user_display_kind", None)):
-            return  # synthetic/service paths stay out; slash commands handled upstream
+        reason = ""
+        if not message:
+            reason = "empty_message"
+        elif message.startswith("/"):
+            reason = "slash_command"
+        elif getattr(ctx, "scheduled_heartbeat", False):
+            reason = "heartbeat"
+        elif getattr(ctx, "voice_turn", False):
+            reason = "voice_turn"
+        elif getattr(ctx, "persist_user_display_kind", None):
+            reason = "synthetic_display"
+        if reason:  # EAA Д5: every pipeline bypass is observable, never silent
+            _journal(journal, {"event": "planning.skipped_service", "reason": reason,
+                               "session_key": getattr(ctx, "session_key", "") or ""})
+            return
         if os.environ.get("HERMES_PLANNING_AUTOSTART_OFF") == "1":
+            _journal(journal, {"event": "planning.skipped_service", "reason": "operator_opt_out",
+                               "session_key": getattr(ctx, "session_key", "") or ""})
             return  # explicit operator opt-out for nested harnesses/tests
         planner = _build_planner_for(agent, cfg)
         coordinator = PlanningCoordinator(planner=planner,
@@ -219,7 +252,13 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
             note = outcome.note
         if note:
             ctx.message = note + "\n\n" + message
-    except Exception:
+    except Exception as exc:
+        try:
+            # EAA Д4: an admission crash BEFORE plan() must also be journalled, not only logged.
+            _journal(journal, {"event": "planning.admission_failed",
+                               "error": f"{type(exc).__name__}: {exc}"})
+        except Exception:
+            pass
         try:
             import logging
 

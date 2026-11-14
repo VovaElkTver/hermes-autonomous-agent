@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Callable, Protocol, TypeVar
@@ -36,6 +37,13 @@ _T = TypeVar("_T", bound="ArtifactModel")
 
 class PlanningError(RuntimeError):
     """Stage could not produce a valid artifact within its format budget."""
+
+
+class PlanningBudgetExhausted(RuntimeError):
+    """Turn-level planning budget exceeded (wall-clock or stage-call cap).
+
+    Deliberately NOT a PlanningError subclass: it must escape plan()'s revision
+    parking and surface as a distinct, visible planning.failed (EAA Д1)."""
 
 
 class ArtifactModel(BaseModel):
@@ -221,6 +229,10 @@ class PlannerConfig:
     max_revisions: int = 2
     format_retries: int = 1
     stage_timeout: float = 600.0
+    # Turn-level budget (EAA Д1): wall-clock seconds across the WHOLE pipeline and a hard
+    # cap on dispatched subagent calls. 0 disables the respective check.
+    budget_seconds: float = 900.0
+    max_stage_calls: int = 8
 
 
 _PLANNING_RUNS_DIRNAME = "planning-runs"
@@ -237,6 +249,8 @@ def build_planner(parent_agent: Any, planning_cfg: dict) -> MultiStagePlanner:
         max_revisions=int(planning_cfg.get("max_revisions", 2)),
         format_retries=int(planning_cfg.get("format_retries", 1)),
         stage_timeout=float(planning_cfg.get("stage_timeout", 600.0)),
+        budget_seconds=float(planning_cfg.get("budget_seconds", 900.0)),
+        max_stage_calls=int(planning_cfg.get("max_stage_calls", 8)),
     )
     base = str(planning_cfg.get("runs_dir") or os.path.join(os.path.expanduser("~"), ".hermes", _PLANNING_RUNS_DIRNAME))
     return MultiStagePlanner(
@@ -348,12 +362,28 @@ class MultiStagePlanner:
         self.run_stage = run_stage
         self.store = store
         self.timeout = asyncio_timeout
+        self._t0 = time.monotonic()
+        self._stage_calls = 0
+
+    def _charge_budget(self) -> None:
+        """Charge one subagent dispatch; raise when the turn budget is gone."""
+        self._stage_calls += 1
+        max_calls = int(getattr(self.config, "max_stage_calls", 0) or 0)
+        if max_calls and self._stage_calls > max_calls:
+            raise PlanningBudgetExhausted(
+                f"budget_exhausted: stage calls {self._stage_calls} > {max_calls}")
+        budget = float(getattr(self.config, "budget_seconds", 0) or 0)
+        spent = time.monotonic() - self._t0
+        if budget and spent > budget:
+            raise PlanningBudgetExhausted(
+                f"budget_exhausted: wall clock {spent:.0f}s > {budget:.0f}s")
 
     async def _generate(self, *, role: str, alias: str, system: str, payload: dict,
                         schema: type[_T], validate: Callable[[_T], None] | None = None) -> _T:
         feedback: list[dict] | None = None
         previous_output: str | None = None
         for attempt in range(self.config.format_retries + 1):
+            self._charge_budget()
             request = {
                 "inputs": payload,
                 "output_schema": schema.model_json_schema(),
@@ -394,6 +424,8 @@ class MultiStagePlanner:
     async def plan(self, *, task: str, context: str = "") -> dict:
         if not task or not task.strip():
             raise ValueError("task: требуется непустая строка")
+        self._t0 = time.monotonic()
+        self._stage_calls = 0
 
         contract = await self._generate(
             role="contract", alias=self.config.contract_alias, system=CONTRACT_PROMPT,
@@ -410,7 +442,8 @@ class MultiStagePlanner:
                                        input_refs=[contract_ref])
         if research.blocking_questions:
             return {"status": "needs_input", "questions": research.blocking_questions,
-                    "refs": {"contract": contract_ref, "research": research_ref}}
+                    "refs": {"contract": contract_ref, "research": research_ref},
+                    "artifact_dir": self.store.run_dir}  # EAA Д2: parked-with-artifacts contract
 
         strategy = await self._generate(
             role="planner", alias=self.config.planner_alias, system=STRATEGY_PROMPT,
@@ -443,7 +476,8 @@ class MultiStagePlanner:
             except PlanningError as exc:
                 # Format-consistency budget exhausted on PLAN: park with full diagnostics.
                 return {"status": "needs_revision", "stage": "plan", "version": version,
-                        "error": str(exc), "artifact_refs": previous_refs}
+                        "error": str(exc), "artifact_refs": previous_refs,
+                        "artifact_dir": self.store.run_dir}  # EAA Д2
             plan_ref = self.store.save(kind="plan_candidate",
                                        content={"version": version, "plan": plan.model_dump(mode="json")},
                                        input_refs=[contract_ref, research_ref, strategy_ref, *previous_refs])
@@ -471,7 +505,8 @@ class MultiStagePlanner:
         return {"status": "needs_revision", "stage": "review",
                 "plan": previous_plan.model_dump(mode="json") if previous_plan else None,
                 "review": previous_review.model_dump(mode="json") if previous_review else None,
-                "artifact_refs": previous_refs}
+                "artifact_refs": previous_refs,
+                "artifact_dir": self.store.run_dir}  # EAA Д2
 
 
 class FileArtifactStore:
@@ -483,13 +518,14 @@ class FileArtifactStore:
         seq = 1
         while True:
             run_dir = os.path.join(base, f"run-{seq:04d}")
-            if not os.path.exists(run_dir):
-                os.makedirs(run_dir, exist_ok=True)
-                self.run_dir = run_dir
-                self.index_path = os.path.join(run_dir, "index.jsonl")
-                open(self.index_path, "w", encoding="utf-8").close()
+            try:
+                os.mkdir(run_dir)  # exclusive create: no TOCTOU dup between concurrent turns (EAA Д7)
                 break
-            seq += 1
+            except FileExistsError:
+                seq += 1
+        self.run_dir = run_dir
+        self.index_path = os.path.join(run_dir, "index.jsonl")
+        open(self.index_path, "w", encoding="utf-8").close()
 
     def save(self, *, kind: str, content: dict, input_refs: list[str]) -> str:
         import os
