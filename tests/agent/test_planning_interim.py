@@ -211,3 +211,19 @@ def test_interim_mode_default_is_thread():
             assert pc.interim_mode() == "thread"
         finally:
             monkeypatch_hp.undo()
+
+
+def test_fork_spawn_failure_is_observable(monkeypatch, tmpdir):
+    """Lesson of the 4 lost forks: a spawn crash must journal and mark the turn, not vanish."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+
+    def _boom(_prompt):
+        raise AttributeError("mixin not mixed")
+
+    ctx = make_ctx(message="составь план наблюдаемости")
+    pc.maybe_prepare_fork(None, ctx, spawn=_boom)
+    assert "не стартовал" in ctx.message
+    fails = [e for e in _events(tmpdir) if e["event"] == "planning.fork.spawn_failed"]
+    assert fails and "AttributeError" in fails[0]["error"]

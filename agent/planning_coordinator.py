@@ -484,7 +484,14 @@ def maybe_prepare_fork(agent: Any, ctx: Any, spawn) -> None:
     else:
         _journal(journal, {"event": "planning.fork.requested", "reason": "mode_always",
                            "session_key": getattr(ctx, "session_key", "") or ""})
-    spawn(message)
+    try:
+        spawn(message)
+    except Exception as exc:  # observability over silent loss (lesson of the 4 lost forks)
+        _journal(journal, {"event": "planning.fork.spawn_failed",
+                           "error": f"{type(exc).__name__}: {exc}"[:200]})
+        ctx.message = f"{ctx.message}\n\n[фон-план не стартовал ({type(exc).__name__}); " \
+                      "работай по своему усмотрению]"
+        return
     note = ("[план строится в фоне тяжёлым ядром (fork-ветка); ответь собеседнику сейчас"
             " коротко и при необходимости уточняющим вопросом, без ожидания плана]")
     ctx.message = f"{ctx.message}\n\n{note}"
