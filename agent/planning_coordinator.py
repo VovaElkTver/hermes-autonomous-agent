@@ -244,15 +244,24 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
         if mode == "auto":
             from agent.planning_router import classify_route
 
-            route, reason, confidence = classify_route(message)
+            runs_dir_cfg = str(cfg["runs_dir"]) if cfg.get("runs_dir") else None
+            state_runs = runs_dir_cfg or _default_runs_dir()
+            session_key = getattr(ctx, "session_key", "") or ""
+            from agent.conversation_state import route_with_state
+
+            route, reason = route_with_state(message, state_runs, session_key)
             if route == "direct":
                 _journal(journal, {"event": "planning.skipped_router", "reason": reason,
-                                   "confidence": confidence,
-                                   "session_key": getattr(ctx, "session_key", "") or ""})
+                                   "session_key": session_key})
+                return
+            if route == "continue":
+                # in-flight task: cheap continuation rides the EXISTING plan - no new conveyor
+                _journal(journal, {"event": "planning.skipped_router",
+                                   "reason": f"{reason}:continue_existing_plan",
+                                   "session_key": session_key})
                 return
             _journal(journal, {"event": "planning.router_admitted", "reason": reason,
-                               "confidence": confidence,
-                               "session_key": getattr(ctx, "session_key", "") or ""})
+                               "session_key": session_key})
         planner = _build_planner_for(agent, cfg)
         coordinator = PlanningCoordinator(planner=planner,
                                           runs_dir=str(cfg["runs_dir"]) if cfg.get("runs_dir") else None)
@@ -306,3 +315,7 @@ def _build_planner_for(agent: Any, cfg: dict):
     from agent.planning_multistage import build_planner
 
     return build_planner(agent, cfg)
+
+
+def _default_runs_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), ".hermes", WORK_DIRNAME)

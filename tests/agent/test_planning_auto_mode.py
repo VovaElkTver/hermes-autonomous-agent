@@ -48,3 +48,21 @@ def test_unknown_mode_is_legacy(monkeypatch, tmpdir):
     assert ctx.message == "добавь восстановление состояния"
     assert not os.path.exists(f"{tmpdir}/events.jsonl")
     assert planner.calls == []
+
+
+def test_auto_inflight_followup_continues_existing_plan(monkeypatch, tmpdir):
+    """Owner requirement: 'продолжай' during an active task rides the existing plan."""
+    patched(monkeypatch, tmpdir, {"mode": "auto"})
+    from agent.conversation_state import save_state
+
+    save_state(str(tmpdir), "sess-1", {"phase": "задача принята", "goal": "fix",
+                                       "active_plan_ref": "plan_candidate-004", "depth": 2})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    ctx = make_ctx(message="ок")
+    pc.maybe_prepare_plan(None, ctx)
+    assert ctx.message == "ок"  # untouched
+    events = [json.loads(l) for l in open(f"{tmpdir}/events.jsonl", encoding="utf-8")]
+    skips = [e for e in events if e["event"] == "planning.skipped_router"]
+    assert skips and "continue_existing_plan" in skips[0]["reason"]
+    assert planner.calls == []
