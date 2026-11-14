@@ -200,7 +200,8 @@ class PlanningCoordinator:
         """Fire-and-forget proactive delivery outside the gateway process/loop."""
         try:
             cmd = [shutil.which("hermes") or "hermes", "send", "-t", target, "-q"]
-            r = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=120)
+            r = subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=120,
+                               check=False)
             return r.returncode == 0
         except Exception:
             return False
