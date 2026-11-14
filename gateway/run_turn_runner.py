@@ -775,12 +775,16 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
                 if outcome == "ambiguous":
                     # Timeout ≠ failure: the card may have posted with a late ack. The prompt
                     # registration stays alive so a tap still resolves; re-sending made duplicate
-                    # cards + orphaned "/approve: nothing pending".
+                    # cards + orphaned "/approve: nothing pending". П9: a watcher settles the
+                    # other half — a late failure gets one text fallback, a late success arms the
+                    # timeout notice (run_turn_runner_approval_watch.py).
                     logger.warning(
                         "Button-based approval send timed out — treating "
                         "as possibly-delivered (no re-send; the prompt "
                         "stays armed for a late tap)"
                     )
+                    from gateway.run_turn_runner_approval_watch import watch_ambiguous_approval
+                    watch_ambiguous_approval(self, fut, approval_data=approval_data, cmd=cmd, desc=desc, flags=flags)
                     return
                 if outcome == "declined":
                     # P5(b): the connector AUTHORIZED this destination and
