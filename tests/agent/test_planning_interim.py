@@ -253,3 +253,42 @@ def test_sweep_parses_string_model_config(monkeypatch, tmpdir):
     runner = Runner()
     swept = asyncio.run(runner.sweep_orphaned_planning_forks())
     assert swept == 1
+
+
+def test_sweep_works_on_async_session_db(monkeypatch, tmpdir):
+    """Live runner wraps SessionDB in AsyncSessionDB; its ``__getattr__`` offloads
+    every call to ``asyncio.to_thread`` and yields a coroutine. Before the fix the
+    22:18 boot swept 0 (``branch listing failed`` + un-awaited ``get_session``
+    coroutine silently skipped every row). Sweep must route all DB calls through
+    the offload and work on the async wrapper."""
+    import asyncio
+    from hermes_state import AsyncSessionDB
+    from gateway.planning_fork import GatewayPlanningForkMixin
+
+    notes = []
+    closed = []
+
+    class SyncDB:
+        def _read_all(self, sql, params=()):
+            return [{"branch_id": "bY", "child_session_id": "c2",
+                     "parent_session_id": "p2", "title": "plan-2"}]
+        def get_session(self, sid):
+            return {"model_config": '{"_forked_from": "parent-session"}'}
+        def append_messages_batch(self, parent_id, messages, **kw):
+            notes.append((parent_id, messages))
+            return len(messages)
+        def set_branch_status(self, *a, **k):
+            closed.append((a, k))
+            return True
+
+    class Runner(GatewayPlanningForkMixin):
+        def __init__(self):
+            self._session_db = AsyncSessionDB(SyncDB())
+            async def _summ(cid):
+                return "tail"
+            self._summarize_branch = _summ
+    runner = Runner()
+    swept = asyncio.run(runner.sweep_orphaned_planning_forks())
+    assert swept == 1
+    assert notes and notes[0][0] == "p2"
+    assert closed and closed[0][0][0] == "bY"

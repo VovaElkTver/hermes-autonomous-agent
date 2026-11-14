@@ -176,20 +176,35 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
             logger.exception("planning fork child %s failed", session_id)
             return {"response": "", "error": f"{type(exc).__name__}: {exc}"}
 
+    async def _db_call(self, method: str, *args, **kwargs):
+        """Invoke ``method`` on ``self._session_db`` in either world.
+
+        A sync ``SessionDB`` returns its value directly; the live ``AsyncSessionDB``
+        wrapper offloads every callable through ``asyncio.to_thread`` and yields a
+        coroutine. Normalize both into one awaited value so no call site leaks an
+        un-awaited coroutine (which silently degrades to skipped rows)."""
+        res = getattr(self._session_db, method)(*args, **kwargs)
+        if asyncio.iscoroutine(res):
+            res = await res
+        return res
+
     async def sweep_orphaned_planning_forks(self) -> int:
         """Boot-sweep: planning forks left 'active' by a previous process death.
 
         The child transcript holds real work; summarize its tail deterministically
         (no LLM) and deliver the work-note to the parent as an interrupted-restart
         report. Idempotent: only rows still 'active' are touched; join marks them.
-        Returns the count of swept branches."""
+        Returns the count of swept branches. Every DB call goes through ``_db_call``
+        so the sweep works identically on a sync ``SessionDB`` (tests) and the live
+        ``AsyncSessionDB`` wrapper (gateway boot)."""
         import contextlib as _ctxlib
 
         from gateway.branch_prefix import branch_display_name
 
         try:
-            rows = [dict(r) for r in self._session_db._read_all(  # type: ignore[attr-defined]
-                "SELECT * FROM session_branches WHERE status = 'active'")]
+            rows_raw = await self._db_call(
+                "_read_all", "SELECT * FROM session_branches WHERE status = 'active'")
+            rows = [dict(r) for r in (rows_raw or [])]
         except Exception:
             logger.exception("planning fork boot-sweep: branch listing failed")
             return 0
@@ -198,7 +213,7 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
             child_id = row.get("child_session_id", "")
             # planning fork children carry our marker in model_config["_forked_from"]
             with _ctxlib.suppress(Exception):
-                meta = self._session_db.get_session(child_id)  # type: ignore[attr-defined]
+                meta = await self._db_call("get_session", child_id)
                 raw_cfg = (meta or {}).get("model_config")
                 cfg = json.loads(raw_cfg) if isinstance(raw_cfg, str) else (
                     raw_cfg if isinstance(raw_cfg, dict) else {})
@@ -208,14 +223,12 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
             summary_tail = await self._summarize_branch(child_id)  # type: ignore[attr-defined]
             note = f"[план оборван рестартом гейтвея — ветка {branch_display_name(row)}: {summary_tail}]"[:4800]
             with _ctxlib.suppress(Exception):
-                await self._session_db.append_messages_batch(parent_id, [dict(role="user", content=note)])
+                await self._db_call("append_messages_batch", parent_id,
+                                     [dict(role="user", content=note)])
             swept += 1
             with _ctxlib.suppress(Exception):
-                # SessionDB API is sync; AsyncSessionDB path may add its own awaitable later
-                closed = self._session_db.set_branch_status(row["branch_id"], "joined",
-                                                            join_strategy="note")
-                if asyncio.iscoroutine(closed):
-                    await closed
+                await self._db_call("set_branch_status", row["branch_id"], "joined",
+                                    join_strategy="note")
         if swept:
             self._journal_fork("", {"event": "planning.fork.boot_sweep", "swept": swept})
         return swept
