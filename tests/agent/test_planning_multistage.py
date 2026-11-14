@@ -441,3 +441,13 @@ def test_no_pin_inherits_parent_routing(tmpdir):
     runner = pm.HermesSubagentRunner(parent_agent=None, aliases={}, timeout=10)
     with tmpdir.as_cwd():
         assert runner._planning_credentials("researcher") is None
+
+
+def test_salvage_json_strips_fences_and_prose(tmpdir):
+    """Qwen wraps JSON in fences or prose; json_invalid at line1col1 wastes a whole stage."""
+    from agent.planning_multistage import _salvage_json
+    fenced = "```json\n{\"a\": 1}\n```"
+    assert _salvage_json(fenced) == '{"a": 1}'
+    prose = "Вот результат:\n{\"a\": {\"b\": 2}}\nЧто-то ещё."
+    assert _salvage_json(prose) == '{"a": {"b": 2}}'
+    assert _salvage_json('{"ok": true}') == '{"ok": true}'

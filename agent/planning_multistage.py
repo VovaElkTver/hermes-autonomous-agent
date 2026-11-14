@@ -366,6 +366,31 @@ class HermesSubagentRunner:
         return summary
 
 
+def _salvage_json(raw: str) -> str:
+    """Best-effort repair of near-JSON model output (Qwen fences / prose prefix).
+
+    Tries, in order: code-fence strip; first balanced {...} block. Returns the
+    original when nothing helps - schema validation will produce the real error."""
+    t = raw.strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        t = t.removeprefix("json")
+        t = t.strip()
+    if t.startswith("{"):
+        return t
+    start = t.find("{")
+    if start >= 0:
+        depth = 0
+        for i in range(start, len(t)):
+            if t[i] == "{":
+                depth += 1
+            elif t[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return t[start:i + 1]
+    return raw
+
+
 def format_validation_error(exc: ValidationError) -> list[dict]:
     return [
         {
@@ -458,7 +483,7 @@ class MultiStagePlanner:
                 # Adapter-contract violation is not the model's format error.
                 raise TypeError(f"run_stage({role}) должен возвращать str")
             try:
-                result = schema.model_validate_json(raw)
+                result = schema.model_validate_json(_salvage_json(raw))
             except ValidationError as exc:
                 previous_output = raw
                 feedback = format_validation_error(exc)
