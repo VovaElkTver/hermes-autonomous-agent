@@ -412,3 +412,32 @@ def test_stage_timeout_error_names_the_stage(tmpdir):
         import asyncio
         asyncio.run(planner.plan(task="t"))
     assert "stage contract:" in str(ei.value) and "exceeded" in str(ei.value)
+
+
+def test_stage_provider_pin_flows_to_credentials(tmpdir, monkeypatch):
+    """Test-drive: planning.<role>_provider pins that stage onto another endpoint (8001)."""
+    import agent.planning_multistage as pm
+
+    captured = {}
+
+    def fake_delegate(**kw):
+        captured["credentials_cfg"] = kw["credentials_cfg"]
+        return json.dumps({"results": [{"summary": '{"goal":"g","requirements":[{"id":"R1",'
+                                        '"description":"d","acceptance":["a"]}],"constraints":[],'
+                                        '"non_goals":[],"unknowns":[]}'}], "error": None})
+
+    monkeypatch.setitem(__import__("sys").modules, "tools.delegate_tool",
+                        type("M", (), {"delegate_task": staticmethod(fake_delegate)})())
+    monkeypatch.setattr(pm, "_load_planning_cfg_safe", lambda: {"researcher_provider": "local-elk"})
+    runner = pm.HermesSubagentRunner(parent_agent=None, aliases={}, timeout=10)
+    out = runner(role="researcher", model_alias="", system_prompt="s", user_prompt="u")
+    assert captured["credentials_cfg"] == {"provider": "local-elk"}
+    assert "requirements" in out
+
+
+def test_no_pin_inherits_parent_routing(tmpdir):
+    import agent.planning_multistage as pm
+
+    runner = pm.HermesSubagentRunner(parent_agent=None, aliases={}, timeout=10)
+    with tmpdir.as_cwd():
+        assert runner._planning_credentials("researcher") is None

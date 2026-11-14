@@ -238,6 +238,17 @@ class PlannerConfig:
 _PLANNING_RUNS_DIRNAME = "planning-runs"
 
 
+def _load_planning_cfg_safe() -> dict:
+    """Read the ``planning`` config section without raising (best-effort by design)."""
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        cfg = load_config_readonly().get("planning")
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
 def build_planner(parent_agent: Any, planning_cfg: dict) -> MultiStagePlanner:
     """Assemble a ready planner from the ``planning`` config section (v0.5): aliases, budgets,
     artifact store under <home>/.hermes/planning-runs."""
@@ -309,6 +320,18 @@ class HermesSubagentRunner:
         # Only "model" is pinned: provider/base_url/api_key inherit from the parent agent.
         return {"model": resolved_model}
 
+    def _planning_credentials(self, role: str) -> dict | None:
+        """credentials_cfg for one stage, honouring an optional planning.<role>_provider pin.
+
+        Set ``planning.researcher_provider: local-elk`` (etc.) to route a stage onto another
+        endpoint (e.g. the fast LAN box) without touching global delegation routing. Empty
+        value = parent's routing as-is."""
+        cfg = _load_planning_cfg_safe()
+        provider = str(cfg.get(f"{role}_provider") or "").strip()
+        if not provider:
+            return None
+        return {"provider": provider}
+
     def __call__(self, *, role: str, model_alias: str, system_prompt: str, user_prompt: str) -> str:
         import json as _json
 
@@ -316,11 +339,15 @@ class HermesSubagentRunner:
 
         goal = f"Planning stage '{role}': return exactly one JSON object per output_schema, no prose around it."
         context = f"{system_prompt}\n\n=== REQUEST ===\n{user_prompt}"
+        creds = self._credentials_for(model_alias)
+        pinned = self._planning_credentials(role)
+        if pinned:
+            creds = {**(creds or {}), **pinned}
         raw = delegate_task(
             goal=goal,
             context=context,
             parent_agent=self.parent_agent,
-            credentials_cfg=self._credentials_for(model_alias),
+            credentials_cfg=creds,
         )
         parsed = _json.loads(raw)
         if not isinstance(parsed, dict):
