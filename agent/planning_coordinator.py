@@ -190,9 +190,13 @@ class PlanningCoordinator:
         except Exception:
             return  # file ledger is best-effort; push must not crash the conveyor thread
         if notify_target and PlanningCoordinator._push_via_cli(notify_target, note):
+            # Keep a short receipt so the NEXT turn joins this message into the session
+            # context (owner lesson vs scheduled pushes: 'это не моё сообщение'). Full
+            # removal happens at context-consumption, never at visual delivery.
             try:
-                os.remove(path)
-            except OSError:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(f"[фон {work_id}: результат доставлен выше в этот чат]")
+            except Exception:
                 pass
 
     @staticmethod
@@ -219,12 +223,23 @@ class PlanningCoordinator:
         by the NEXT turn of this session (consume_pending)."""
         work_id = _next_work_id(self.runs_dir)
         defer_dir = os.path.join(self.runs_dir, "pending", session_key or "default")
-        worker = threading.Thread(
-            target=self.prepare,
-            kwargs={"request_text": request_text, "session_key": session_key,
-                    "work_id": work_id, "defer_note_dir": defer_dir,
-                    "defer_notify_target": notify_target},
-            name=f"planning-{work_id}", daemon=True)
+        # Threads get a fresh contextvars context: without this capture the worker
+        # cannot resolve profile-scoped credentials (UnscopedSecretError -> 'local-elk'
+        # unresolvable, w-0035/w-0036). Capture on the CALLING thread, install in worker.
+        from agent import secret_scope as _secret_scope
+        captured_scope = _secret_scope._SECRET_SCOPE.get()
+
+        def _worker():
+            token = _secret_scope._SECRET_SCOPE.set(captured_scope) if captured_scope else None
+            try:
+                self.prepare(request_text=request_text, session_key=session_key,
+                             work_id=work_id, defer_note_dir=defer_dir,
+                             defer_notify_target=notify_target)
+            finally:
+                if token is not None:
+                    _secret_scope.reset_secret_scope(token)
+
+        worker = threading.Thread(target=_worker, name=f"planning-{work_id}", daemon=True)
         worker.start()
         self._event("planning.started_async", work_id=work_id, session_key=session_key,
                     request=request_text[:200])

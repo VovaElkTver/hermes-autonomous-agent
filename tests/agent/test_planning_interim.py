@@ -119,3 +119,56 @@ def test_notify_target_skips_local(monkeypatch, tmpdir):
     ctx = make_ctx(message="составь план")  # no .source attribute at all
     pc.maybe_prepare_plan(None, ctx)
     assert seen["t"] is None
+
+
+def test_push_success_leaves_receipt_for_context_join(monkeypatch, tmpdir):
+    """Cron-lesson guard: after a successful push the next turn still gets a receipt
+    into ctx, so the assistant owns the pushed message instead of disowning it."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    art = tmpdir.mkdir("artr")
+    open(str(art.join("plan_candidate-001.json")), "w").write(json.dumps(
+        {"version": 1, "plan": {"tasks": [{"id": "T1", "goal": "g", "verification": ["v"]}]}}))
+    install_planner(monkeypatch, Cfg({**APPROVED, "artifact_dir": str(art)}))
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: True))
+    from types import SimpleNamespace
+    ctx = make_ctx(message="составь план присоединения")
+    ctx.source = SimpleNamespace(platform="matrix", chat_id="!ROOM:mx.elk.mobi")
+    pc.maybe_prepare_plan(None, ctx)
+    deadline = time.time() + 5
+    penddir = f"{tmpdir}/pending/sess-1"
+    def _receipted():
+        names = _pending(penddir)
+        return bool(names) and open(f"{penddir}/{names[0]}", encoding="utf-8").read().startswith("[фон")
+    while time.time() < deadline and not _receipted():
+        time.sleep(0.05)  # wait past the visual-push -> receipt-rewrite window
+
+    # next trivial remark consumes the receipt => context join happens exactly once
+    ctx2 = make_ctx(message="ок")
+    pc.maybe_prepare_plan(None, ctx2)
+    assert "доставлен выше" in ctx2.message
+    assert _pending(penddir) == []
+
+
+def test_worker_thread_inherits_secret_scope(monkeypatch, tmpdir):
+    """w-0035 regression: background conveyor must resolve profile-scoped credentials."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    from agent import secret_scope as ss
+    seen = {}
+    orig = pc.PlanningCoordinator.prepare
+    def spy(self, **kw):
+        from agent.secret_scope import current_secret_scope
+        seen["scope"] = current_secret_scope()
+        return orig(self, **kw)
+    monkeypatch.setattr(pc.PlanningCoordinator, "prepare", spy)
+    token = ss.set_secret_scope({"OPENAI_API_KEY": "x"})
+    try:
+        ctx = make_ctx(message="составь план со скоупом")
+        pc.maybe_prepare_plan(None, ctx)
+        deadline = time.time() + 5
+        while time.time() < deadline and "scope" not in seen:
+            time.sleep(0.05)
+        assert seen.get("scope") == {"OPENAI_API_KEY": "x"}
+    finally:
+        ss.reset_secret_scope(token)
