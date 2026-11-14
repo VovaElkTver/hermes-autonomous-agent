@@ -214,7 +214,10 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
     # _load_cfg() never raises (swallows into {}); keep journal target resolvable BEFORE
     # the guarded section so even pre-plan crashes journal to the right file (EAA Д4).
     cfg = _load_cfg()
-    if not cfg.get("multistage") or str(cfg.get("mode", "off")).lower() != "always":
+    if not cfg.get("multistage"):
+        return
+    mode = str(cfg.get("mode", "off")).strip().lower()
+    if mode not in ("always", "auto"):  # off / unknown -> byte-for-byte legacy
         return
     journal = os.path.join(cfg["runs_dir"], "events.jsonl") if cfg.get("runs_dir") else None
     try:
@@ -238,6 +241,18 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
             _journal(journal, {"event": "planning.skipped_service", "reason": "operator_opt_out",
                                "session_key": getattr(ctx, "session_key", "") or ""})
             return  # explicit operator opt-out for nested harnesses/tests
+        if mode == "auto":
+            from agent.planning_router import classify_route
+
+            route, reason, confidence = classify_route(message)
+            if route == "direct":
+                _journal(journal, {"event": "planning.skipped_router", "reason": reason,
+                                   "confidence": confidence,
+                                   "session_key": getattr(ctx, "session_key", "") or ""})
+                return
+            _journal(journal, {"event": "planning.router_admitted", "reason": reason,
+                               "confidence": confidence,
+                               "session_key": getattr(ctx, "session_key", "") or ""})
         planner = _build_planner_for(agent, cfg)
         coordinator = PlanningCoordinator(planner=planner,
                                           runs_dir=str(cfg["runs_dir"]) if cfg.get("runs_dir") else None)
