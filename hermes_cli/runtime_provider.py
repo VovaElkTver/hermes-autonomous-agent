@@ -422,6 +422,20 @@ def _anthropic_token_or_raise(*, model: str | None = None) -> str:
     return token
 
 
+def _leak_gate_secret(name: str) -> str:
+    """Read an env credential for LEAK GATING only: an unbound context (multiplex on, no profile
+    scope and no launch body — background resolution passes, reconcile, title generation) reads as
+    "" instead of aborting the provider ladder. These reads answer "is this key issued for this
+    host" (GHSA-76xc-57q6-vm5m); a missing answer must not propagate — the caller simply has no
+    env-sourced credential on this rung. rtx5090 П8 14.11: the raise used to silently roll a
+    session's /model pin onto the default route on every unscoped resolve."""
+    from agent.secret_scope import UnscopedSecretError
+    try:
+        return get_secret_str(name, "").strip()
+    except UnscopedSecretError:
+        return ""
+
+
 def _host_derived_api_key(base_url: str) -> str:
     """``<VENDOR>_API_KEY`` from the env, vendor = registrable hostname label (``api.deepseek.com``
     → ``deepseek``). Lookalike hosts pick the ATTACKER's label (api.deepseek.com.attacker.test →
@@ -436,7 +450,7 @@ def _host_derived_api_key(base_url: str) -> str:
     sanitized = "".join(ch if ch.isalnum() else "_" for ch in labels[-2]).upper() if len(labels) >= 2 else ""
     if not sanitized or not sanitized[0].isalpha() or sanitized in ("OPENAI", "OPENROUTER", "OLLAMA"):
         return ""
-    return (get_secret_str(f"{sanitized}_API_KEY", "") or "").strip()
+    return _leak_gate_secret(f"{sanitized}_API_KEY")
 
 
 def _host_gated_env_key_candidates(base_url: str, *, ollama: bool) -> list:
@@ -447,11 +461,11 @@ def _host_gated_env_key_candidates(base_url: str, *, ollama: bool) -> list:
     is_openai = base_url_host_matches(base_url, "openai.com") or base_url_host_matches(base_url, "openai.azure.com")
     # OPENAI_BASE_URL names the proxy/gateway the OPENAI_API_KEY was issued for (the ``openai`` alias
     # expands onto it); an exact match is the user's own pairing, not a leak to an unrelated host.
-    env_openai_base = get_secret_str("OPENAI_BASE_URL", "").strip().rstrip("/")
+    env_openai_base = _leak_gate_secret("OPENAI_BASE_URL").rstrip("/")
     is_openai = is_openai or (bool(env_openai_base) and (base_url or "").strip().rstrip("/") == env_openai_base)
-    candidates = [get_secret_str("OLLAMA_API_KEY", "").strip() if base_url_host_matches(base_url, "ollama.com") else ""] if ollama else []
-    return candidates + [get_secret_str("OPENAI_API_KEY", "").strip() if is_openai else "",
-                         get_secret_str("OPENROUTER_API_KEY", "").strip() if base_url_host_matches(base_url, "openrouter.ai") else "",
+    candidates = [_leak_gate_secret("OLLAMA_API_KEY") if base_url_host_matches(base_url, "ollama.com") else ""] if ollama else []
+    return candidates + [_leak_gate_secret("OPENAI_API_KEY") if is_openai else "",
+                         _leak_gate_secret("OPENROUTER_API_KEY") if base_url_host_matches(base_url, "openrouter.ai") else "",
                          _host_derived_api_key(base_url)]
 
 

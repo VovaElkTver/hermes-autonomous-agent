@@ -171,7 +171,15 @@ class GatewayAgentCacheMixin:
             # since the switch) keep the credential-less override — _resolve_session_agent_runtime
             # retries the resolution for that provider on each turn (default route + notice meanwhile).
             try:
-                runtime = _resolve_runtime_agent_kwargs_for_provider(provider, target_model=persisted.get("model") or None)
+                from tui_gateway.launch_profile_policy import launch_body
+                # rtx5090 14.11 П8: rehydrate fires at boot and from background passes where no
+                # per-turn scope is ever installed; env-only credentials (systemd Environment=,
+                # docker -e — not .env) must resolve under the launch body there, or the provider
+                # ladder raises UnscopedSecretError on the leak gate and the session's /model pin
+                # silently rides the default route for every later turn. A bound turn scope wins:
+                # ``launch_body`` is consulted only when nothing else is bound.
+                with launch_body():
+                    runtime = _resolve_runtime_agent_kwargs_for_provider(provider, target_model=persisted.get("model") or None)
                 for k in ("api_key", "api_mode", "credential_pool", "requested_provider", "max_tokens"):
                     override[k] = runtime.get(k)
                 override["request_overrides"] = dict(runtime.get("request_overrides") or {})
