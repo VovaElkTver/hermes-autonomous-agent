@@ -29,12 +29,12 @@ def _run(tmp_path: Path, cgroup: str, extra_env=None, args=()):
         env.update(extra_env)
     return subprocess.run(
         ["bash", str(SCRIPT), *args], capture_output=True, text=True,
-        env=env, timeout=120,
+        env=env, timeout=120, check=False,
     )
 
 
 def test_script_is_valid_bash():
-    r = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True)
+    r = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
 
 
