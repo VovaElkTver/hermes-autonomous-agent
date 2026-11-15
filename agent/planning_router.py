@@ -6,15 +6,28 @@ No LLM call here — latency budget for this stage is zero; the LLM advisory voi
 for the residual grey zone is P1b and will only ever NARROW ``plan``, never flip
 a deterministic verdict.
 
-Bias policy (lesson 14.11: heuristic triggers go lazy -> systematic under-trigger):
-the grey zone DEFAULTS TO PLAN. Only chat noise, status questions and pure
-consultation slip past. False planning costs <= budget_seconds; a missed plan
-costs the whole point of the feature.
+Bias policy (Вл 15.11: дубли ⎇-нот на каждое сообщение): the grey zone no longer
+defaults to plan. Planning requires a WORK SIGNAL (imperative verb, file path,
+multi-step marker, length) — a bare imperative shorter than a sentence is a
+one-shot command the live session executes itself, and signal-free remarks are
+discussion. False planning cost: a second full answer in the room on every turn
+(observed rtx5090 15.11: grey_zone_default x5 per session); missed plan still
+costs the conveyor, so long/imperative-with-path text keeps planning.
 """
 
 from __future__ import annotations
 
 import re
+
+# Client-side quote prefix the gateway prepends to a reply ("[Replying to your
+# previous message: "..."]"). It is CONTEXT, not a work signal — the router
+# classifies the stripped remainder (Вл 15.11: «да» + quoted block forked as
+# long_request).
+_QUOTE_PREFIX_RE = re.compile(
+    r"^\s*\[Replying to your previous message:\s*\"[\s\S]*?\"\]\s*",
+    re.IGNORECASE,
+)
+
 
 # --- deterministic signals -------------------------------------------------
 # Filesystem-ish reference: "tests/foo.py", "~/.hermes/config.yaml", "/home/..."
@@ -65,6 +78,7 @@ def _is_file_handover(low: str) -> bool:
 def classify_route(text: str) -> tuple[str, str, float]:
     """Return ``(route, reason, confidence)`` where route is ``direct`` | ``plan``."""
     t = (text or "").strip()
+    t = _QUOTE_PREFIX_RE.sub("", t, count=1).strip()  # quote is context, not signal
     low = t.lower()
     if not t:
         return "direct", "empty_message", 1.0
@@ -94,5 +108,12 @@ def classify_route(text: str) -> tuple[str, str, float]:
     if len(t) <= 12 and not imperative and not paths:
         return "direct", "very_short", 0.7
 
-    # --- grey zone: bias to plan -------------------------------------------
-    return "plan", "grey_zone_default", 0.5
+    # --- grey zone: WORK SIGNAL required to plan (Вл 15.11) ------------------
+    # A lone imperative with no path/marker and no sentence around it is a
+    # one-shot command ("смерж", "почин lint") — the live session executes it
+    # directly; a conveyor on top only produces a duplicate answer in the room.
+    if imperative and len(t) >= 160:
+        return "plan", "imperative_long", 0.6
+    if imperative:
+        return "direct", "one_shot_imperative", 0.6
+    return "direct", "grey_zone_no_work_signal", 0.6

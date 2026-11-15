@@ -74,13 +74,14 @@ def test_corrupt_or_missing_file_is_idle(tmpdir):
 
 
 def test_hot_session_grey_zone_does_not_spawn_conveyor(monkeypatch, tmpdir):
-    """Owner catch 14.11: 'работать пока комфортно' at depth>=2 spawned a fork.
-    Grey-zone wording in a hot session must decay, not start a fresh conveyor."""
+    """Owner catch 14.11 (и узкий grey zone Вл 15.11): 'работать пока комфортно'
+    never starts a fresh conveyor — signal-free grey text is direct at the
+    classifier itself and decays the session conservatively."""
     from agent.conversation_state import save_state, route_with_state
     save_state(str(tmpdir), "s", {"phase": "рабочая", "goal": "g",
                                   "active_plan_ref": "", "depth": 2})
     route, reason = route_with_state("работать пока комфортно. можно понаблюдать.", str(tmpdir), "s")
-    assert route == "direct" and "hot_grey_decay" in reason
+    assert route == "direct" and "decay" in reason, (route, reason)
     st = __import__("json").load(open(f"{tmpdir}/state/s.json", encoding="utf-8"))
     assert st["depth"] == 1
 

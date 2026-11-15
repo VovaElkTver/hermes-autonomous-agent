@@ -25,7 +25,7 @@ _DEPTH_FULL = 2
 _VALID_DEPTHS = (0, 1, 2, 3, 4, 5)
 # Router reasons that clearly signal work -> can raise depth (fresh-signal rule).
 _RAISE_REASONS = {"multi_path", "imperative_with_path", "multistep_marker",
-                  "explicit_plan_request", "long_request"}
+                  "explicit_plan_request", "long_request", "imperative_long"}
 # A quiet tail of chat must not keep the session "hot" forever.
 _STALE_SECONDS = 3600.0
 

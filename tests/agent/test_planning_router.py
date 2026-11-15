@@ -1,14 +1,16 @@
 """Delivery-3 P1a tests: planning.mode=auto routes trivial turns around the pipeline.
 
-Router verdicts are code-only (no LLM): grey zone defaults to PLAN (anti-lazy bias,
-Вл 14.11). Matrix: off/unknown modes behave as legacy; auto skips chatter with an
-observable journal event; auto admits work requests into the conveyor.
+Router verdicts are code-only (no LLM). Bias policy Вл 15.11 (дубли ⎇-нот): the
+grey zone requires a WORK SIGNAL — planning is admitted for explicit plan
+requests, multi-path, imperative-with-path, multistep markers and long text; a
+bare short imperative is a one-shot command and signal-free chat is discussion.
+Quote prefixes are context and are stripped before classification.
 """
 
-import json
+import pathlib
 import sys
 
-sys.path.insert(0, "/home/qwen/hermes-agent")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from agent.planning_router import classify_route
 
@@ -36,6 +38,31 @@ def test_explicit_plan_request_always_wins():
     assert route == "plan" and conf == 1.0
 
 
-def test_grey_zone_defaults_to_plan():
-    route, reason, _ = classify_route("разберись с этим побольше")
-    assert route == "plan" and reason == "grey_zone_default"
+def test_grey_zone_requires_work_signal():
+    # Signal-free remark: discussion, not a conveyor (was grey_zone_default->plan).
+    route, reason, _ = classify_route("разберись с этим побольше как-нибудь")
+    assert route == "direct" and reason == "grey_zone_no_work_signal", (route, reason)
+    route, reason, _ = classify_route("интересная идея про слой состояний в целом")
+    assert route == "direct" and reason == "grey_zone_no_work_signal", (route, reason)
+
+
+def test_bare_imperative_is_one_shot_not_a_plan():
+    # "мерж"/"смерж всё" — single command; live session executes it directly.
+    route, reason, _ = classify_route("смерж")
+    assert route == "direct" and reason == "one_shot_imperative", (route, reason)
+    route, reason, _ = classify_route("мерж")
+    assert route == "direct" and reason == "one_shot_imperative", (route, reason)
+
+
+def test_quote_prefix_is_context_not_signal():
+    quoted = ('[Replying to your previous message: "⎇ main: ✅ Background task complete\n'
+              'Prompt: "проанализируй несколько последних сообщений, каждое из них с'
+              '"\n\n**Вердикт: подтверждается — реального join не происходит.**\n' +
+              "x" * 300 + '"]\n\nда')
+    route, reason, _ = classify_route(quoted)
+    assert route == "direct" and reason == "chatter_ack", (route, reason)
+
+
+def test_long_imperative_sentence_still_plans():
+    route, reason, _ = classify_route("проверь " + "состояние всех компонентов форка " * 5)
+    assert route == "plan" and reason == "imperative_long", (route, reason)

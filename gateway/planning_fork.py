@@ -40,7 +40,7 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
         background with the heavy planning model, deliver the result to the chat and
         append a durable work-note into the parent transcript. Returns branch_id."""
         from agent.i18n import t
-        from gateway.branch_prefix import branch_display_name
+        from gateway.branch_prefix import branch_display_name, format_branch_prefix
 
         parent_entry = await self.async_session_store.get_or_create_session(source)
         parent_session_id = parent_entry.session_id
@@ -91,9 +91,16 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
                 metadata = {"thread_id": source.thread_id} if source.thread_id else {}
             if adapter:
                 header = t("gateway.background.complete_header", preview=prompt[:60])
+                # Вл 15.11: the child's data must arrive signed by the CHILD branch,
+                # not silently decorated "⎇ main:" by the generic outbound wrapper
+                # (it resolves the parent-of-chat). Prepending our own label makes
+                # _ALREADY_PREFIXED skip that mislabel.
+                note_row = {"branch_id": branch_id, "title": title}
+                child_label = format_branch_prefix(
+                    branch_display_name(note_row))
                 with contextlib.suppress(Exception):
                     await adapter.send(chat_id=source.chat_id,
-                                       content=header + result["response"],
+                                       content=child_label + header + result["response"],
                                        metadata=metadata)
         # durable context join into the PARENT transcript (work-note semantics, no LLM)
         note = result.get("response") or result.get("error") or "(пустой ответ ядра)"
