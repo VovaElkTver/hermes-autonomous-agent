@@ -10,6 +10,7 @@ import contextlib
 import contextvars
 import importlib.metadata
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -129,6 +130,37 @@ def _get_enabled_plugins() -> Optional[set]:
         return set(enabled) if isinstance(enabled, list) else None
     except Exception:
         return None
+
+
+def controller_flag_on() -> bool:
+    """Mirror of gateway.run_inbound._ctl_flag_on (local copy: the discovery
+    layer is imported by bare CLI paths where the gateway package must not load).
+    True when controller.enabled is set top-level, per-entry, or via env."""
+    try:
+        if os.environ.get("HERMES_CONTROLLER_ENABLED") == "1":
+            return True
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        if cfg_get(cfg or {}, "controller", "enabled", default=False):
+            return True
+        return bool(cfg.get("plugins", {}).get("entries", {})
+                    .get("controller", {}).get("enabled"))
+    except Exception:
+        return False
+
+
+def controller_disabled_note(names: set[str], disabled: set[str]) -> Optional[str]:
+    """П1 (controller-claims-v1): ``controller.enabled=true`` combined with the
+    plugin sitting in plugins.disabled is a silent trap — the hook surface never
+    registers, so managed autonomy is off while every visible flag looks right.
+    Return the loud WARNING text for that pairing, else None."""
+    if "controller" not in names or "controller" not in disabled:
+        return None
+    if not controller_flag_on():
+        return None
+    return ("Plugin '%s': controller.enabled=true, but the plugin is disabled via "
+            "plugins.disabled — managed autonomy (barrier/budget hooks, pump, "
+            "ticker) will NOT run; remove it from plugins.disabled to activate")
 
 
 def is_skipped_plugin_dir(name: str) -> bool:
@@ -297,6 +329,11 @@ def gate_manifest(
                 "Plugin '%s' is listed in both plugins.enabled and plugins.disabled; the disable "
                 "wins and it will not load — remove it from one of the two lists",
             )
+        note = controller_disabled_note(names, disabled)
+        if note:
+            # П1 fail-loud: silent DEBUG skip here was the trap — the operator saw
+            # "managed autonomy enabled" nowhere while every flag looked right.
+            return _placeholder("disabled via config", logging.WARNING, note)
         return _placeholder("disabled via config", logging.DEBUG, "Skipping disabled plugin '%s'")
     # Exclusive plugins (memory providers) have their own activation path; record only.
     if manifest.kind == "exclusive":

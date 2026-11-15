@@ -90,3 +90,34 @@ def test_healthy_tick_clears_the_error_ledger(conn):
     t._guard("pump", conn, lambda c: None)
     assert conn.execute("SELECT COUNT(*) c FROM ctl_alert_state"
                         " WHERE alert_key='tick-error:pump'").fetchone()["c"] == 0
+
+
+# ---- П5: persisting human-gates digest re-nags per window, not per pump tick ----
+
+def _gates_snapshot_line(conn, snap, prev):
+    from controller import alerts
+    return alerts.gate_change_lines(conn, snap, prev)
+
+
+def test_human_gates_same_snapshot_suppressed_within_window(conn):
+    """The incident: an unchanged gate set re-emitted the same line every
+    5-minute pump tick (56→01→06). The persisting digest must ride the
+    hourly backoff ladder instead."""
+    snap = {"t1": "needs_human: fix the gate"}
+    first = _gates_snapshot_line(conn, snap, None)
+    assert len(first) == 1 and "Гейты к человеку" in first[0]
+    # identical snapshot one tick later -> suppressed (1 h window)
+    assert _gates_snapshot_line(conn, snap, snap) == []
+    conn.execute("UPDATE ctl_alert_state SET last_ts=?"
+                 " WHERE alert_key='human-gates'", (time.time() - 3601,))
+    conn.commit()
+    again = _gates_snapshot_line(conn, snap, snap)
+    assert len(again) == 1  # ladder re-fire after the hour
+
+
+def test_human_gates_digest_change_fires_immediately(conn):
+    snap = {"t1": "needs_human: fix the gate"}
+    _gates_snapshot_line(conn, snap, None)
+    grown = dict(snap, t2="contract MATERIAL not agreed (state=ready)")
+    lines = _gates_snapshot_line(conn, grown, snap)
+    assert len(lines) == 1 and "t2" in lines[0]

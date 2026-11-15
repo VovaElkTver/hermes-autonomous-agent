@@ -892,6 +892,14 @@ _default: Ticker | None = None
 _default_lock = threading.Lock()
 _atexit_registered = False
 
+RECLAIM_WATCHDOG_S = 60.0   # self-heal cadence (claims-v1 П3б): a dead/stale
+                            # owner-row holder is taken over within a minute,
+                            # not "until the next gateway restart"
+_RECLAIM_STOP = threading.Event()
+# Every watch thread ever spawned by THIS module generation (an importlib.reload
+# resets the list; older generations' watches are joined by their own teardowns).
+_reclaim_threads: list[threading.Thread] = []
+
 
 def _load_controller_cfg() -> dict:
     try:
@@ -902,52 +910,146 @@ def _load_controller_cfg() -> dict:
     return cfg.get("controller", {}) or {}
 
 
+def _claim_and_start() -> Ticker | None:
+    """Shared take-over path (called with ``_default_lock`` held, no live
+    ``_default``): flock + DB owner-row claim + thread spawn. Returns None
+    when a live process owns the loop or state.db is unreadable."""
+    global _default, _atexit_registered
+    ctl = _load_controller_cfg()
+    t = Ticker(
+        alert_target=str(ctl.get("alert_target") or ""),
+        worker_model=ctl.get("worker_model"),
+        worker_provider=ctl.get("worker_provider"),
+        gates_path=str(_gates_file_path()),
+    )
+    if _acquire_ownership() is None:
+        logger.info("controller ticker: another live gateway owns the loop; "
+                    "not starting a second one")
+        return None
+    conn = _open_scratch_conn()
+    if conn is None:
+        logger.warning("controller ticker: state.db unreadable; not starting")
+        _release_ownership()
+        return None
+    try:
+        payload = _claim_owner(conn, t.boot_token, 2 * t.intervals["pump"])
+    finally:
+        conn.close()
+    if payload is None:
+        logger.info("controller ticker: the owner row is alive; "
+                    "not starting a second loop")
+        _release_ownership()
+        return None
+    t._owner_payload = payload
+    _default = t
+    if not _atexit_registered:
+        atexit.register(stop_default)
+        _atexit_registered = True
+    t.start()
+    return t
+
+
 def start_default() -> Ticker | None:
     """Start the gateway-internal ticker (called from the plugin's register()).
     Returns the running Ticker, or None when this process must not run it.
     Two gates: the process flock (kernel singleton) AND the DB owner row —
     the latter survives module reload/fork/Windows, where flock does not
     (audit 28.10 §4); start proceeds only when the owner is dead or its ts
-    is older than 2x the pump interval, via one CAS take-over."""
-    global _default, _atexit_registered
+    is older than 2x the pump interval, via one CAS take-over.
+
+    Either outcome (owned or not) arms the reclaim watchdog: from now on a
+    dead/stale holder loses the row to this process within RECLAIM_WATCHDOG_S,
+    without waiting for a gateway restart (controller-claims-v1 П3б)."""
+    global _default
     with _default_lock:
         if _default is not None and _default.alive():
             return _default
-        ctl = _load_controller_cfg()
-        t = Ticker(
-            alert_target=str(ctl.get("alert_target") or ""),
-            worker_model=ctl.get("worker_model"),
-            worker_provider=ctl.get("worker_provider"),
-            gates_path=str(_gates_file_path()),
-        )
-        if _acquire_ownership() is None:
-            logger.info("controller ticker: another live gateway owns the loop; "
-                        "not starting a second one")
-            return None
-        conn = _open_scratch_conn()
-        if conn is None:
-            logger.warning("controller ticker: state.db unreadable; not starting")
-            _release_ownership()
-            return None
-        try:
-            payload = _claim_owner(conn, t.boot_token, 2 * t.intervals["pump"])
-        finally:
-            conn.close()
-        if payload is None:
-            logger.info("controller ticker: the owner row is alive; "
-                        "not starting a second loop")
-            _release_ownership()
-            return None
-        t._owner_payload = payload
-        _default = t
-        if not _atexit_registered:
-            atexit.register(stop_default)
-            _atexit_registered = True
-        t.start()
-        return t
+        _default = None  # dead husk: drop it so reclaim owns the state machine
+        t = _claim_and_start()
+    _ensure_reclaim_watchdog()
+    return t
 
 
 def stop_default(timeout_s: float = 10.0) -> None:
     with _default_lock:
         if _default is not None:
             _default.stop(timeout_s)
+
+
+# -- reclaim watch (П3б): runtime ownership self-heal ----------------------------
+
+def _ensure_reclaim_watchdog() -> None:
+    """One daemon per process, started lazily on the first start_default call
+    (successful or not): it survives ticker-thread death inside this process,
+    which is exactly the incident shape — the loop went quiet while the
+    gateway stayed up."""
+    with _default_lock:
+        if any(t.is_alive() for t in _reclaim_threads):
+            return
+        _RECLAIM_STOP.clear()
+        th = threading.Thread(
+            target=_reclaim_run, name="controller-ticker-reclaim", daemon=True)
+        _reclaim_threads.append(th)
+        th.start()
+
+
+def _stop_reclaim_watchdog() -> None:
+    """Test/teardown hook; production keeps the watch for the process lifetime.
+    Joins tracked watches so a stopped generation cannot leak into the next
+    test as a half-dead 60-s waiter."""
+    _RECLAIM_STOP.set()
+    for t in _reclaim_threads:
+        t.join(2.0)
+    _reclaim_threads.clear()
+
+
+def _reclaim_once() -> bool:
+    """One self-heal attempt under the module lock: no live local ticker AND a
+    claimable ownership state (flock free + owner row dead/stale) => spawn.
+    True when THIS call spawned the new ticker."""
+    global _default
+    took = False
+    with _default_lock:
+        cur = _default
+        if cur is not None:
+            if cur.alive():
+                return False
+            cur.stop(1.0)
+            _default = None
+        if _claim_and_start() is not None:
+            took = True
+    if took:
+        logger.warning("controller ticker: reclaimed ticker ownership "
+                       "(previous holder died or its row went stale)")
+        _announce_reclaim()
+    return took
+
+
+def _announce_reclaim() -> None:
+    """Durable journal event + deduped chat line; failure here never propagates."""
+    try:
+        econn = _open_scratch_conn()
+        if econn is None:
+            return
+        try:
+            model.emit(econn, kind="ticker-reclaimed",
+                       origin="controller.ticker",
+                       payload={"pid": os.getpid()})
+            line = alerts.maybe_alert(econn, f"ticker-reclaim:{os.getpid()}",
+                                      "ticker-reclaim", pid=os.getpid())
+            if line:
+                target = str(_load_controller_cfg().get("alert_target") or "")
+                alerts.deliver(line, target)
+        finally:
+            with contextlib.suppress(Exception):
+                econn.close()
+    except Exception:
+        logger.debug("controller ticker: reclaim announce failed", exc_info=True)
+
+
+def _reclaim_run() -> None:
+    while not _RECLAIM_STOP.wait(RECLAIM_WATCHDOG_S):
+        try:
+            _reclaim_once()
+        except Exception:  # the watch MUST survive any single attempt
+            logger.exception("controller ticker: reclaim watch iteration failed")
