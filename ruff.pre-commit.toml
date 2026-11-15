@@ -6,6 +6,10 @@ indent-width = 4
 # version-gated fix must stay valid where annotations are evaluated eagerly (< 3.14).
 target-version = "py311"
 
+# Enforce the exclusion globs even for paths passed explicitly on the
+# command line (the lefthook python lane forwards staged files verbatim).
+force-exclude = true
+
 [format]
 # Like Black, use double quotes for strings.
 quote-style = "double"
@@ -21,6 +25,9 @@ line-ending = "auto"
 
 [lint]
 exclude = [
+    # Shell scripts: lefthook's python lane can stage them alongside *.py and
+    # ruff cannot parse bash (orphan-restart lesson 15.11, gw_cycle_planning.sh).
+    "*.sh",
     ".bzr",
     ".git",
     ".pyenv",
