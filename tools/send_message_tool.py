@@ -241,8 +241,6 @@ def _handle_send(args):
         chat_id, err = _home_chat_id(config, platform, platform_name)
         if err:
             return tool_error(err)
-    if duplicate_skip := _maybe_skip_cron_duplicate_send(platform_name, chat_id, thread_id):
-        return json.dumps(duplicate_skip)
     # Slack: resolve user targets to DM channel IDs before sending. _parse_target_ref emits internal
     # ``user:U...`` / ``user_name:@handle`` targets; a bare U... id can also arrive from session metadata or
     # the home-channel config. All are opened via conversations.open (fixes #19236).
@@ -459,21 +457,6 @@ def _describe_media_for_mirror(media_files):
     kind = next((k for exts, k in ((_IMAGE_EXTS, "image"), (_VIDEO_EXTS, "video"), (_AUDIO_EXTS, "audio"))
                  if ext in exts), "document")
     return f"[Sent {kind} attachment]"
-
-
-def _maybe_skip_cron_duplicate_send(platform_name: str, chat_id: str, thread_id: str | None):
-    """Skip redundant scheduled send_message calls when the scheduler will auto-deliver there."""
-    from gateway.session_context import get_session_env
-    auto_platform = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", "").strip().lower()
-    auto_chat_id = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_CHAT_ID", "").strip()
-    if not (auto_platform and auto_chat_id and auto_platform == platform_name and auto_chat_id == str(chat_id)
-            and (get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_THREAD_ID", "").strip() or None) == thread_id):
-        return None
-    target_label = f"{platform_name}:{chat_id}" + (f":{thread_id}" if thread_id is not None else "")
-    return {"success": True, "skipped": True, "reason": "scheduled_auto_delivery_duplicate_target", "target": target_label,
-        "note": (f"Skipped send_message to {target_label}. This scheduled job will already auto-deliver "
-                 "its final response to that same target. Put the intended user-facing content in "
-                 "your final response instead, or use a different target if you want an additional message.")}
 
 
 def _bounded_send_error(detail, max_chars=900):

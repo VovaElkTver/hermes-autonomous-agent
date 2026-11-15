@@ -1,0 +1,97 @@
+{
+  "description": "Operate the durable task queue: place tasks, fire events to wake them. No timers exist — deferred continuation is always an event. State machine ready→running→wait_human/wait_event→done. Actions: create_batch (ordered list of {title, body}; first item is delivered at once), status, skip (complete current head, start next), emit (fire a named event that waiting tasks subscribed to via wait_event), cancel, fanout (N competing branch proposals + a final JOIN digest row; near-duplicate annotate (attach a branch's verdict for the join), add_question / drop_question (open-question register: a task with open questions cannot be ack-closed), set_check (bind a machine validity command: at every delivery the kernel runs it and a non-zero exit converts the wake-up into a rework order instead of a reportable result).",
+  "input_schema": {
+    "properties": {
+      "action": {
+        "enum": [
+          "create_batch",
+          "status",
+          "skip",
+          "emit",
+          "cancel",
+          "fanout",
+          "annotate",
+          "add_question",
+          "drop_question",
+          "set_check"
+        ],
+        "type": "string"
+      },
+      "branches": {
+        "description": "fanout: >=2 competing proposals (deduped lexically).",
+        "items": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "chat_id": {
+        "description": "Messaging chat bound to the queue.",
+        "type": "string"
+      },
+      "criteria": {
+        "description": "fanout: decision criteria surfaced in the join digest.",
+        "type": "string"
+      },
+      "deliver_target": {
+        "description": "hermes send -t target; default 'matrix:<chat_id>'.",
+        "type": "string"
+      },
+      "event_id": {
+        "type": "string"
+      },
+      "goal": {
+        "description": "fanout: the research goal the branches compete on.",
+        "type": "string"
+      },
+      "items": {
+        "items": {
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "question": {
+        "description": "add_question: open assumption; drop_question: exact text or 1-based number.",
+        "type": "string"
+      },
+      "task_id": {
+        "type": "string"
+      },
+      "text": {
+        "description": "annotate: the branch verdict / conclusion.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  },
+  "name": "task_queue",
+  "parameters": {
+    "properties": {},
+    "required": [],
+    "type": "object"
+  }
+}

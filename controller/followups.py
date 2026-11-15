@@ -103,6 +103,13 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         raise ValueError(f"invalid followup kind {kind!r}")
     if recipient not in RECIPIENTS:
         raise ValueError(f"invalid recipient {recipient!r}")
+    # Deferred text executes unattended: the cron-era tripwire guards this carrier
+    # too (scan at INSERT only — ticker re-arms review rows by UPDATE, so a row
+    # accepted before this rule never faces a retroactive block).
+    from tools.scheduled_prompt_scan import scan_scheduled_text
+    err = scan_scheduled_text(text)
+    if err:
+        raise ValueError(err)
     now = now if now is not None else time.time()
     ensure_schema(conn)
     fid = _new_id(conn, "fup")

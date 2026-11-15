@@ -797,25 +797,18 @@ def _dispatch_nonstreaming_api_request(agent, api_kwargs: dict, *, make_client):
 def should_use_direct_api_call(agent) -> bool:
     """Whether an OpenAI-wire request should skip the interrupt worker.
 
-    Gateway scheduled turns (#62151) and delegated children (#60203) run inside nested
-    thread pools that wedge before the socket opens when the request is pushed onto
-    yet another daemon worker. Running inline drops the deepest layer; interrupts
-    still work because the inline path registers ``agent._active_request_abort``,
-    which ``interrupt()`` invokes cross-thread (#72227). Scheduled also inlines Codex
-    Responses (#69734): both Codex paths (non-stream, and streaming via
-    ``_stream_codex_passthrough`` -> ``_interruptible_api_call``) reach
-    ``direct_api_call``, whose client comes from ``make_client`` so the inline stale
-    watchdog can abort it; the stale budget keeps the openai-codex floor/hard cap.
-    Trade-off: the worker-only Codex TTFB/progress/idle watchdogs don't run inline, so
-    a Codex call that never sends a first byte waits the full wall-clock stale budget
-    (600-1200s on large contexts) instead of the ~120s TTFB cutoff. Delegated children
-    and Native/Bedrock/MoA keep their workers: cancellation and client ownership differ.
+    Delegated children (#60203) run inside nested thread pools that wedge before
+    the socket opens when the request is pushed onto yet another daemon worker.
+    Running inline drops the deepest layer; interrupts still work because the
+    inline path registers ``agent._active_request_abort``, which ``interrupt()``
+    invokes cross-thread (#72227). (The donor's scheduled-cron gate for #62151/
+    #69734 was excised with the scheduler: nothing in this fork sets
+    platform="cron" — deferred continuation is task_queue/followups, which run
+    on their carrier's normal thread pool.)
     """
     api_mode = getattr(agent, "api_mode", None)
     if getattr(agent, "provider", None) == "moa":
         return False
-    if getattr(agent, "platform", None) == "cron":
-        return api_mode in {"chat_completions", "codex_responses"}
     if api_mode != "chat_completions":
         return False
     # Delegated child — via the execution ContextVar set by _run_single_child,

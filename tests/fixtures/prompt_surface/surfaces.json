@@ -3,9 +3,9 @@
     "prompt_tokens": {
       "context": 134,
       "stable": 1829,
-      "volatile": 1268
+      "volatile": 1354
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -21,6 +21,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -36,9 +37,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1225,
-      "volatile": 1268
+      "volatile": 1354
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -54,6 +55,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -69,9 +71,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1646,
-      "volatile": 1266
+      "volatile": 1353
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -87,6 +89,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -102,9 +105,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 2420,
-      "volatile": 1264
+      "volatile": 1350
     },
-    "tool_tokens": 11398,
+    "tool_tokens": 11935,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -120,6 +123,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -135,9 +139,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1225,
-      "volatile": 1268
+      "volatile": 1354
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -153,6 +157,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -167,43 +172,19 @@
   "cron.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1211,
-      "volatile": 1268
+      "stable": 265,
+      "volatile": 192
     },
-    "tool_tokens": 11242,
-    "tools": [
-      "browser_cdp",
-      "browser_dialog",
-      "browser_exec",
-      "clarify",
-      "delegate_task",
-      "execute_code",
-      "manage_connections",
-      "memory",
-      "patch",
-      "read_file",
-      "search_files",
-      "skill_manage",
-      "skill_view",
-      "skills_list",
-      "terminal",
-      "text_to_speech",
-      "tool_call",
-      "tool_describe",
-      "tool_search",
-      "vision_analyze",
-      "web_extract",
-      "web_search",
-      "write_file"
-    ]
+    "tool_tokens": 0,
+    "tools": []
   },
   "desktop.claude": {
     "prompt_tokens": {
       "context": 0,
       "stable": 1473,
-      "volatile": 1269
+      "volatile": 1355
     },
-    "tool_tokens": 11898,
+    "tool_tokens": 12435,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -220,6 +201,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -235,9 +217,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1244,
-      "volatile": 1269
+      "volatile": 1355
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -253,6 +235,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",
@@ -268,9 +251,9 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1330,
-      "volatile": 1269
+      "volatile": 1355
     },
-    "tool_tokens": 11242,
+    "tool_tokens": 11780,
     "tools": [
       "browser_cdp",
       "browser_dialog",
@@ -286,6 +269,7 @@
       "skill_manage",
       "skill_view",
       "skills_list",
+      "task_queue",
       "terminal",
       "text_to_speech",
       "tool_call",

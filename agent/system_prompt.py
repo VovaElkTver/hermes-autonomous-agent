@@ -442,36 +442,19 @@ def _default_platform_hint(platform_key: str, tool_names: Any = ()) -> str:
     return hint
 
 
-def _cron_delivery_hint(agent: Any) -> str:
-    """The destination channel's hint (default + its ``platform_hints`` override) for a scheduled agent.
-
-    A scheduled agent runs as platform ``scheduled`` but its final response lands on the job's ``deliver``
-    channel, so without this the model never learns that MEDIA: tags become Slack/Telegram
-    attachments or that tables do not render there — and a user's ``platform_hints.slack.append``
-    never reached scheduled jobs at all. The scheduler publishes the primary auto-deliver target
-    into the session ContextVar before the agent runs (same seam ``send_message`` routes by).
-    """
-    from gateway.session_context import get_session_env
-    deliver_key = get_session_env("HERMES_SCHEDULED_AUTO_DELIVER_PLATFORM", "").lower().strip()
-    if not deliver_key or deliver_key == "cron":
-        return ""
-    hint = _resolve_platform_hint(
-        agent, deliver_key, _default_platform_hint(deliver_key, getattr(agent, "valid_tool_names", ())))
-    return f"Delivery destination ({deliver_key}): {hint}" if hint else ""
-
-
 def platform_hint(agent: Any) -> str:
     """Built-in/plugin platform hint + Telegram rich-messages opt-in + config
-    override + desktop TUI clarifier; scheduled agents also carry their delivery channel's hint."""
+    override + desktop TUI clarifier.
+
+    (The donor scheduled-agent branch — platform "cron" plus the delivery
+    channel's stacked hint — was excised 10.11 with the scheduler; no launcher
+    in this fork sets platform="cron", and deferred continuation inherits its
+    carrier platform's hint.)"""
     platform_key = (agent.platform or "").lower().strip()
     _effective_hint = _resolve_platform_hint(
         agent, platform_key, _default_platform_hint(platform_key, getattr(agent, "valid_tool_names", ())))
     if platform_key == "tui" and _effective_hint:
         _effective_hint = _tui_embedded_pane_clarifier(_effective_hint)
-    if platform_key == "cron":
-        _delivery = _cron_delivery_hint(agent)
-        if _delivery:
-            _effective_hint = f"{_effective_hint}\n\n{_delivery}".strip()
     return _effective_hint
 
 

@@ -16,12 +16,13 @@ from tasks_kernel import (
 QUEUE_SCHEMA = {
     "name": "task_queue",
     "description": (
-        "Operate the durable task queue (state machine ready→running→"
-        "wait_human/wait_event→done). Actions: create_batch (ordered list of "
-        "{title, body}; first item is delivered at once), status, skip "
-        "(complete current head, start next), emit (fire a named event that "
-        "waiting tasks subscribed to via wait_event), cancel, fanout (N "
-        "competing branch proposals + a final JOIN digest row; near-duplicate "
+        "Operate the durable task queue: place tasks, fire events to wake them. "
+        "No timers exist — deferred continuation is always an event. State "
+        "machine ready→running→wait_human/wait_event→done. Actions: create_batch "
+        "(ordered list of {title, body}; first item is delivered at once), "
+        "status, skip (complete current head, start next), emit (fire a named "
+        "event that waiting tasks subscribed to via wait_event), cancel, fanout "
+        "(N competing branch proposals + a final JOIN digest row; near-duplicate "
         "annotate (attach a branch's verdict for the "
         "join), add_question / drop_question (open-question register: a task "
         "with open questions cannot be ack-closed), set_check (bind a "
@@ -84,6 +85,13 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
                      for it in (args.get("items") or []) if isinstance(it, dict)]
             if not chat_id or not items:
                 return {"ok": False, "error": "create_batch needs chat_id and items"}
+            # Deferred prompts run unattended later — the donor's cron runtime
+            # tripwire lives on here (tools/scheduled_prompt_scan), at store time.
+            from tools.scheduled_prompt_scan import scan_scheduled_text
+            for n, it in enumerate(items, 1):
+                err = scan_scheduled_text(it["title"] + "\n" + it["body"])
+                if err:
+                    return {"ok": False, "error": f"item {n}: {err}"}
             target = args.get("deliver_target") or f"matrix:{chat_id}"
             ids = create_batch(chat_id, items, deliver_target=target)
             from tasks_kernel import start

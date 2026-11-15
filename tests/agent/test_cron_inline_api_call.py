@@ -1,17 +1,13 @@
-"""Regression guard for #62151 — gateway scheduled must not wedge on the 2nd+ call.
+"""Guard for #62151's surviving mechanism: the INLINE api path used by delegated
+children (interrupt aborts the active client from another thread).
 
-Gateway-fired scheduled jobs hung forever on the 2nd+ API call because both the
-non-streaming (``interruptible_api_call``) and the default streaming
-(``interruptible_streaming_api_call``) paths run the request on a spawned
-daemon worker thread. Inside the gateway's nested scheduled thread pools that extra
-worker wedged before the socket opened; the same job succeeded via ``hermes
-scheduled tick`` (foreground, no nested pools). Scheduled has no interactive interrupt
-surface, so both paths now run inline on the conversation thread for the
-``scheduled`` platform.
+The gateway scheduled jobs that originally motivated #62151 were excised from
+this fork on 10.11 (see test_scheduled_cron_platform_no_longer_special_cased);
+the inline machinery itself stays — delegated children (#60203) still need it.
 
-These tests pin: (1) the inline gate is scheduled-only, (2) the inline call runs on
-the *calling* thread — no worker is spawned — for both entry points, and (3)
-the shared dispatch closes the per-request client.
+These tests pin: (1) the inline gate is no longer platform="cron", (2) the
+inline call runs on the *calling* thread — no worker is spawned, and (3) the
+shared dispatch closes the per-request client.
 """
 
 import threading
@@ -28,7 +24,7 @@ from agent.chat_completion_helpers import (
 )
 
 
-def _make_agent(*, platform="cron"):
+def _make_agent(*, platform: str | None = "cron"):
     agent = MagicMock()
     agent.platform = platform
     agent.api_mode = "chat_completions"
@@ -40,21 +36,18 @@ def _make_agent(*, platform="cron"):
     return agent
 
 
-def test_should_use_direct_api_call_only_for_cron_openai_wire():
-    assert should_use_direct_api_call(_make_agent(platform="cron")) is True
-    assert should_use_direct_api_call(_make_agent(platform="cli")) is False
-    assert should_use_direct_api_call(_make_agent(platform="telegram")) is False
-    assert should_use_direct_api_call(_make_agent(platform=None)) is False
+def test_scheduled_cron_platform_no_longer_special_cased():
+    """Excision lock (10.11): the #62151/#69734 cron gate died with the scheduler.
 
+    No launcher sets platform="cron" anymore; delegated children keep inlining
+    (pinned by the delegated-child suites). If a donor sync re-adds the gate,
+    this test flags the resurrected surface, not a regression in delivery.
+    """
+    for platform in ("cron", "cli", "telegram", None):
+        assert should_use_direct_api_call(_make_agent(platform=platform)) is False
     codex = _make_agent(platform="cron")
     codex.api_mode = "codex_responses"
-    assert should_use_direct_api_call(codex) is True  # #69734
-
-    for api_mode in ("anthropic_messages", "bedrock_converse"):
-        agent = _make_agent(platform="cron")
-        agent.api_mode = api_mode
-        assert should_use_direct_api_call(agent) is False
-
+    assert should_use_direct_api_call(codex) is False
     moa = _make_agent(platform="cron")
     moa.provider = "moa"
     assert should_use_direct_api_call(moa) is False
