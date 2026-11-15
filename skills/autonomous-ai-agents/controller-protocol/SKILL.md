@@ -69,4 +69,6 @@ raw SQL on ctl_* tables. Call each tool only when its condition holds:
   controller (operator /restart => interactive; crash => autonomous, epoch
   bumped). Check `[controller]` recovery notes in the session context.
 
-Operator docs: `docs/controller.md` in the fork.
+Operator docs: `docs/controller.md` in the fork; self-contained operating
+reference for agents: `docs/agents/operating.md` (delivered with the
+checkout on every install/update).
