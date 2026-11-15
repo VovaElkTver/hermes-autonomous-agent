@@ -210,6 +210,101 @@ def pending_count(session_key: str | None = None) -> int:
         return 0
 
 
+def _chat_target(session_key: str) -> tuple[str, str] | None:
+    """Parse (platform, chat_id) out of a gateway session key
+    (``agent:<profile>:<platform>:<scope>:<chat...>``). The chat id itself
+    carries colons (``!room:server``), so rebuild it from the first token that
+    looks like a room/user id. None when the key has no chat routing."""
+    parts = session_key.split(":")
+    if len(parts) < 5:
+        return None
+    platform = parts[2]
+    for i, tok in enumerate(parts[3:], start=3):
+        if tok.startswith(("!", "#", "@")):
+            chat = [tok]
+            nxt = parts[i + 1] if i + 1 < len(parts) else ""
+            if nxt and "." in nxt and not nxt.startswith("@"):
+                chat.append(nxt)  # room/user ids carry their own server part
+            return platform, ":".join(chat)
+    rest = ":".join(parts[4:])  # numeric chat ids (telegram) have no sigil
+    return (platform, rest) if rest and rest.replace(".", "").isdigit() else None
+
+
+def sweep_restart_orphans(boot_ts: float) -> list[dict]:
+    """Return approvals left armed/expired by a gateway restart, grouped per
+    chat with a ready-to-send notice (П4, contour gateway-deafness 15.11: a
+    restart silently killed the armed waiters — the owner never learned the
+    command did not run).
+
+    Rows created *after* *boot_ts* belong to the current process and stay
+    untouched. Rows are NOT flipped here: the caller flips only what it
+    delivered (``mark_restart_lost``), so a failed delivery retries next
+    boot. Never raises — a broken ledger sweep must not affect boot."""
+    if not _enabled():
+        return []
+    try:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT approval_id, session_key, command FROM pending_approvals"
+                " WHERE state IN ('pending', 'expired') AND created_at < ?"
+                " AND (resolution IS NULL OR resolution = '')",
+                (boot_ts,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("approval ledger: restart-orphan sweep failed", exc_info=True)
+        return []
+    grouped: dict[str, list[dict]] = {}
+    for approval_id, session_key, command in rows:
+        grouped.setdefault(session_key, []).append(
+            {"approval_id": approval_id, "command": command}
+        )
+    notices: list[dict] = []
+    for session_key, items in grouped.items():
+        target = _chat_target(session_key)
+        if not target:
+            logger.info(
+                "approval sweep: %d restart-orphan(s) on unroutable session %s",
+                len(items), session_key,
+            )
+            continue
+        commands = ", ".join(i["command"][:60] for i in items[:5])
+        notices.append({
+            "platform": target[0],
+            "chat_id": target[1],
+            "approval_ids": [i["approval_id"] for i in items],
+            "text": (
+                f"[approvals] Gateway restarted with {len(items)} awaiting decision(s)"
+                f" — they were NOT executed: {commands}."
+                f" Ids: {', '.join(i['approval_id'] for i in items)}"
+            ),
+        })
+    return notices
+
+
+def mark_restart_lost(approval_ids: list[str]) -> None:
+    """Flip delivered orphan rows to ``lost_notice`` (dedup: a row is noticed
+    exactly once, ever)."""
+    if not approval_ids:
+        return
+    try:
+        conn = _connect()
+        try:
+            with conn:
+                conn.executemany(
+                    "UPDATE pending_approvals SET state='lost_notice',"
+                    " resolution='restart-lost', resolved_at=?"
+                    " WHERE approval_id=? AND state IN ('pending', 'expired')",
+                    [(time.time(), aid) for aid in approval_ids],
+                )
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("approval ledger: mark_restart_lost failed", exc_info=True)
+
+
 def resolve_pending(
     session_key: str,
     choice: str,

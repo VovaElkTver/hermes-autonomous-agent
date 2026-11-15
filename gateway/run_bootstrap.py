@@ -907,6 +907,31 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
                     await runner.sweep_orphaned_planning_forks()
 
             asyncio.get_running_loop().create_task(_sweep_planning_forks())
+
+            async def _sweep_lost_approvals() -> None:
+                # П4 (gateway-deafness contour): approvals armed before a restart lost
+                # their waiters silently. Give the owner a visible trace before the
+                # lazy TTL GC flips 'pending' to 'expired' (30-min window by default).
+                boot_ts = time.time()
+                with contextlib.suppress(Exception):
+                    await asyncio.sleep(5)  # let adapters finish their first sync
+                    from controller.alerts import deliver
+                    from tools import approval_ledger
+
+                    notices = await asyncio.to_thread(
+                        approval_ledger.sweep_restart_orphans, boot_ts)
+                    for notice in notices:
+                        ok = await asyncio.to_thread(
+                            deliver, notice["text"],
+                            f"{notice['platform']}:{notice['chat_id']}")
+                        if ok:
+                            approval_ledger.mark_restart_lost(notice["approval_ids"])
+                        else:
+                            logger.warning(
+                                "approval sweep: notice undeliverable to %s (retry next boot)",
+                                notice["chat_id"])
+
+            asyncio.get_running_loop().create_task(_sweep_lost_approvals())
             if idle_exit:
                 from gateway.run_idle_exit import arm_unmanaged_idle_exit
                 arm_unmanaged_idle_exit(runner)
