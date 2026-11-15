@@ -238,6 +238,12 @@ class PlatformRegistry:
         # importing the adapter so ``gateway.platform_activation`` can tell a configured platform
         # from an unconfigured one. A hint only: a stale entry costs one extra import, never a miss.
         self._activation_env: dict[str, frozenset[str]] = {}
+        # Last ``create_adapter`` verdict per platform name: "deps" | "config" | "factory" | "ok".
+        # Distinguishes a healable absence (dependencies can arrive without any config change: the
+        # retry re-runs the lazy installer, and an external venv rebuild lands between attempts —
+        # the rtx5000 deafness incident parked on exactly this) from a config-bound one.
+        # Consumer: gateway ``_adapter_may_heal`` park-vs-retry classification.
+        self._last_create_failure: dict[str, str] = {}
 
     @staticmethod
     def current_scope_key() -> str:
@@ -512,16 +518,27 @@ class PlatformRegistry:
 
     def create_adapter(self, name: str, config: Any) -> Optional[Any]:
         """Create an adapter instance for *name*; None when no entry exists, deps are missing
-        and cannot be installed, ``validate_config`` fails, or the factory raises."""
+        and cannot be installed, ``validate_config`` fails, or the factory raises.
+
+        The None/None-adjacent verdict is recorded per name (:meth:`last_create_failure`) so the
+        gateway can retry a dependency failure (heals without a config change) while a config
+        failure stays parked instead of re-warning forever at the backoff cap (#5196).
+        """
         entry = self.get(name)
         if entry is None:
             return None
+
         def _probe(fn: Callable[[], Any], failure_msg: str) -> bool:
             try:
                 return bool(fn())
             except Exception as e:
                 logger.warning(failure_msg, entry.label, e)
                 return False
+
+        def _record(reason: str) -> None:
+            with self._lock:
+                self._last_create_failure[name] = reason
+
         deps_ok = _probe(entry.check_fn, "Platform '%s' check_fn raised: %s")
         if not deps_ok and entry.ensure_deps_fn is not None:
             # The ONE place the active installer runs: the platform is enabled+configured
@@ -531,20 +548,33 @@ class PlatformRegistry:
         if not deps_ok:
             hint = f" ({entry.install_hint})" if entry.install_hint else ""
             logger.warning("Platform '%s' requirements not met%s", entry.label, hint)
+            _record("deps")
             return None
         if entry.validate_config is not None:
             try:
                 if not entry.validate_config(config):
                     logger.warning("Platform '%s' config validation failed", entry.label)
+                    _record("config")
                     return None
             except Exception as e:
                 logger.warning("Platform '%s' config validation error: %s", entry.label, e)
+                _record("config")
                 return None
         try:
-            return entry.adapter_factory(config)
+            adapter = entry.adapter_factory(config)
         except Exception as e:
             logger.error("Failed to create adapter for platform '%s': %s", entry.label, e, exc_info=True)
+            _record("factory")
             return None
+        _record("ok")
+        return adapter
+
+    def last_create_failure(self, name: str) -> Optional[str]:
+        """Why the most recent :meth:`create_adapter` for *name* returned None: ``"deps"``,
+        ``"config"`` or ``"factory"``; None when it succeeded or was never attempted."""
+        with self._lock:
+            reason = self._last_create_failure.get(name)
+        return None if reason == "ok" else reason
 
 
 # Module-level singleton

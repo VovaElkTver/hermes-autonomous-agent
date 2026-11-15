@@ -793,17 +793,21 @@ class GatewayAdapterLifecycleMixin(GatewaySecondaryReconnectMixin):
     def _adapter_may_heal(self, platform, platform_config) -> bool:
         """Whether a platform whose ``_create_adapter`` returned None can heal without a config change.
 
-        Only an unregistered plugin can (a plugin load can fail transiently). A builtin whose probe fails
-        (missing deps/creds), a registered plugin returning None, or an empty bot credential needs a config
-        change: retrying it re-warns forever at the backoff cap (#5196 fleet nodes). Shared by startup and
-        the reconnect watcher so both classify the same platform the same way."""
+        Three healable shapes: an unregistered plugin (a plugin load can fail transiently), and a
+        registered platform whose creation failed on MISSING DEPENDENCIES — the retry re-runs the
+        registry's lazy installer and an external repair (venv rebuild, ``hermes pm install``) can
+        land between backoff attempts (rtx5090 gateway-deafness 14.11: a deps-only failure parked
+        here sat deaf for 41 minutes while the venv was actually fixed under it). A builtin whose
+        probe fails on creds, a config/factory failure, or an empty bot credential still needs a
+        config change: retrying those re-warns forever at the backoff cap (#5196 fleet nodes).
+        Shared by startup and the reconnect watcher so both classify the same platform the same way."""
         from gateway.platform_registry import platform_registry
         from gateway.run import _BUILTIN_ADAPTERS, _platform_has_bot_credential
-        return (
-            platform not in _BUILTIN_ADAPTERS
-            and not platform_registry.is_registered(platform.value)
-            and _platform_has_bot_credential(platform, platform_config)
-        )
+        if platform in _BUILTIN_ADAPTERS or not _platform_has_bot_credential(platform, platform_config):
+            return False
+        if not platform_registry.is_registered(platform.value):
+            return True
+        return platform_registry.last_create_failure(platform.value) == "deps"
 
     async def _reconnect_failed_platform(self, platform, now: float) -> None:
         """One watcher pass for a queued platform: gate, attempt, and record the outcome."""
