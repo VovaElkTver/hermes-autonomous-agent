@@ -1,6 +1,8 @@
 """Process startup phases; diagnostics remain in the gateway facade."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -899,6 +901,12 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             # READY only once adapters and housekeeping run; missing systemd state just disables watchdog.
             publish_gateway_runtime_ready(runner)
             runner._start_systemd_watchdog()
+
+            async def _sweep_planning_forks() -> None:
+                with contextlib.suppress(Exception):
+                    await runner.sweep_orphaned_planning_forks()
+
+            asyncio.get_running_loop().create_task(_sweep_planning_forks())
             if idle_exit:
                 from gateway.run_idle_exit import arm_unmanaged_idle_exit
                 arm_unmanaged_idle_exit(runner)

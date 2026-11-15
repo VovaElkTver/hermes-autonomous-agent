@@ -207,10 +207,12 @@ def _pump_threads():
 def singleton(db_connect):
     """controller.ticker with the process singleton torn down after the test."""
     from controller import ticker
+    ticker._stop_reclaim_watchdog()  # a stale watch must not act between tests
     yield ticker
     ticker.stop_default()
     ticker._default = None
     ticker._release_ownership()
+    ticker._stop_reclaim_watchdog()
 
 
 def test_start_default_double_call_one_thread(singleton):
@@ -489,3 +491,57 @@ def test_watchdog_connect_failure_is_loud_not_silent(db_connect, monkeypatch, ca
     assert any("watchdog thread cannot connect" in r.getMessage()
                for r in caplog.records), "silent watchdog death"
     t.stop()
+
+
+# ---- П3б: runtime ownership self-heal (reclaim watch) ---------------------------
+
+def test_reclaim_takes_over_from_dead_holder(singleton, db_connect):
+    """A CLI/second process claimed the flock+owner-row and died: the running
+    process must retake ownership at runtime — not wait for a gateway restart
+    (the 21:10 fire → ~40 min silence incident)."""
+    from controller import ticker
+    child = subprocess.Popen(["true"])
+    child.wait()
+    ts = time.time()
+    conn = db_connect()
+    conn.execute("INSERT INTO ctl_ticker_heartbeat(ts, kind, payload) VALUES (?,?,?)",
+                 (ts, "owner", ticker._owner_payload_str(child.pid, "dead-cli", ts)))
+    conn.commit()
+    conn.close()
+
+    assert singleton._reclaim_once() is True
+    t = singleton._default
+    assert t is not None and t.alive(), "no ticker spawned by the reclaim"
+    row = _rows(db_connect, "SELECT payload FROM ctl_ticker_heartbeat"
+                             " WHERE kind='owner'")[0]
+    assert json.loads(row["payload"])["pid"] == os.getpid()
+    assert len(_pump_threads()) == 1
+
+
+def test_reclaim_respects_live_holder(singleton, db_connect):
+    """A live holder with a fresh owner row keeps the loop; the watch is a no-op."""
+    from controller import ticker
+    ts = time.time()
+    conn = db_connect()
+    conn.execute("INSERT INTO ctl_ticker_heartbeat(ts, kind, payload) VALUES (?,?,?)",
+                 (ts, "owner", ticker._owner_payload_str(os.getpid(), "live", ts)))
+    conn.commit()
+    conn.close()
+
+    assert singleton._reclaim_once() is False
+    assert singleton._default is None
+
+
+def test_reclaim_watchdog_armed_by_start_default(singleton):
+    """Either start_default outcome (owned or not) leaves exactly one watch
+    thread behind — the self-heal outlives ticker-thread death. Counting is
+    over MODULE-TRACKED watches: cross-generation enumerate() would count
+    orphans leaked by importlib.reload in neighboring tests."""
+    singleton.start_default()
+    watches = [x for x in singleton._reclaim_threads if x.is_alive()]
+    assert len(watches) >= 1 and watches[-1].is_alive()
+    # idempotent arming: no pile-up of watches
+    singleton._ensure_reclaim_watchdog()
+    singleton._ensure_reclaim_watchdog()
+    watches = [x for x in singleton._reclaim_threads if x.is_alive()]
+    assert len(watches) <= 1

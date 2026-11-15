@@ -954,6 +954,25 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayInboundTranscriptionM
         from agent.plan_prompt import build_plan_prompt
 
         task = event.get_command_args().strip()
+        # planning.multistage (v0.5): /plan and /plan run <task> both enter the pipeline;
+        # empty task keeps the legacy conversation-plan mode (nothing to plan yet).
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            _planning_cfg = load_config_readonly().get("planning") or {}
+            multistage = bool(isinstance(_planning_cfg, dict) and _planning_cfg.get("multistage"))
+        except Exception:
+            multistage = False
+        if multistage:
+            if task.startswith("run "):
+                task = task[4:].strip()
+            if task:
+                from agent.plan_prompt import build_plan_multistage_prompt
+
+                _ack = t("gateway.plan.ack_task", task=task[:80] + ("…" if len(task) > 80 else ""))
+                return await self._hm_rewrite_turn_to_prompt(
+                    event, source, "plan", _ack, lambda: build_plan_multistage_prompt(task))
+
         _ack = (t("gateway.plan.ack_task", task=task[:80] + ("…" if len(task) > 80 else ""))
                 if task else t("gateway.plan.ack_conversation"))
         return await self._hm_rewrite_turn_to_prompt(event, source, "plan", _ack, lambda: build_plan_prompt(task))

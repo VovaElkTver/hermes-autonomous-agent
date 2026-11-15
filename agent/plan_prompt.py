@@ -57,6 +57,25 @@ Interaction style:
 """
 
 
+def build_plan_multistage_prompt(task: str = "") -> str:
+    """Prompt for the multistage pipeline path of /plan (planning.multistage v0.5).
+    The agent stays in its own runtime: it calls the plan_multistage tool, which
+    orchestrates the five passes via subagents."""
+    task_block = (
+        f"Task to plan:\n{task}\n" if task.strip() else
+        "No explicit task was given — infer the task from the current conversation context.\n"
+    )
+    return (
+        "[/plan — multistage pipeline]\n\n"
+        + task_block +
+        "\nRun the `plan_multistage` tool now with exactly this task text.\n"
+        "After it returns, report: (1) status (approved / needs_input / needs_revision),\n"
+        "(2) the artifact directory, (3) the approved plan's tasks with their verification steps.\n"
+        "If the result is needs_input, ask the user those blocking questions.\n"
+        "Do not start implementing the plan in this turn."
+    )
+
+
 def build_plan_prompt(task: str = "") -> str:
     """Build the plan-mode prompt; empty *task* asks the agent to infer it from conversation context.
 

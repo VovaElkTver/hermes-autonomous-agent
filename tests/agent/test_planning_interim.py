@@ -1,0 +1,294 @@
+"""Interim delivery (v0.9): background conveyor + light-model chat, owner spec 14.11.
+
+'чтоб диалог поддерживала лёгкая модель, а темы типа планирования отправлялись
+на более тяжёлую; как голосовые ассистенты - быстро ответить/уточнить, ядро в фоне'. 
+Measured 14.11: both endpoints ~7ms/tok raw -> split is loop-overhead, not tok/s;
+therefore the fix is non-blocking admission, not a second model."""
+import json
+import sys
+import time
+
+sys.path.insert(0, "/home/qwen/hermes-agent")
+
+import agent.planning_coordinator as pc
+
+from tests.agent.test_planning_coordinator import APPROVED, Cfg, install_planner, make_ctx, patched
+
+
+def test_interim_returns_fast_and_conveyor_lands_pending(monkeypatch, tmpdir):
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True})
+    art = tmpdir.mkdir("art3")
+    open(str(art.join("plan_candidate-001.json")), "w").write(json.dumps(
+        {"version": 1, "plan": {"tasks": [{"id": "T1", "goal": "g", "verification": ["v"]}]}}))
+
+    class SlowPlanner(Cfg):
+        def plan(self, *, task):
+            time.sleep(1.2)  # heavier than the assertion budget below
+            return super().plan(task=task)
+
+    planner = SlowPlanner({**APPROVED, "artifact_dir": str(art)})
+    install_planner(monkeypatch, planner)
+    ctx = make_ctx(message="проанализируй проект и составь план рефакторинга")
+    t0 = time.time()
+    pc.maybe_prepare_plan(None, ctx)
+    assert time.time() - t0 < 0.9  # turn is NOT blocked by the conveyor
+    assert "строится в фоне" in ctx.message  # interim instruction to the light model
+    assert any(e["event"] == "planning.started_async" for e in _events(tmpdir))
+    # worker thread finishes and lands exactly-one pending note
+    deadline = time.time() + 5
+    penddir = f"{tmpdir}/pending/sess-1"
+    while time.time() < deadline and not _pending(penddir):
+        time.sleep(0.1)
+    names = _pending(penddir)
+    assert len(names) == 1
+    note = open(f"{penddir}/{names[0]}", encoding="utf-8").read()
+    assert "АКТИВНЫЙ ПЛАН w-" in note  # render_work_package_note outcome
+
+
+def test_next_turn_consumes_pending_note(monkeypatch, tmpdir):
+    """The finished background plan surfaces on the NEXT remark, then is gone."""
+    pc.PlanningCoordinator._defer_note(f"{tmpdir}/pending/sess-1", "w-0007", "[АКТИВНЫЙ ПЛАН w-0007 v1 — готов]")
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    ctx = make_ctx(message="ок")  # trivial remark: direct route, but consumption still happens
+    pc.maybe_prepare_plan(None, ctx)
+    assert ctx.message.startswith("[АКТИВНЫЙ ПЛАН w-0007 v1 — готов]")
+    assert _pending(f"{tmpdir}/pending/sess-1") == []  # exactly-once delivery
+
+
+def _events(tmpdir):
+    return [json.loads(l) for l in open(f"{tmpdir}/events.jsonl", encoding="utf-8")]
+
+
+def _pending(penddir):
+    try:
+        return sorted(n for n in __import__("os").listdir(penddir) if n.endswith(".md"))
+    except OSError:
+        return []
+
+
+def test_interim_push_delivers_proactively(monkeypatch, tmpdir):
+    """interim_push: conveyor finish pushes via hermes send AND removes pending note."""
+    from types import SimpleNamespace
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    art = tmpdir.mkdir("artp")
+    open(str(art.join("plan_candidate-001.json")), "w").write(json.dumps(
+        {"version": 1, "plan": {"tasks": [{"id": "T1", "goal": "g", "verification": ["v"]}]}}))
+    install_planner(monkeypatch, Cfg({**APPROVED, "artifact_dir": str(art)}))
+    sent = []
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: sent.append((target, text)) or True))
+    ctx = make_ctx(message="составь план миграции")
+    ctx.source = SimpleNamespace(platform="matrix", chat_id="!ROOM:mx.elk.mobi")
+    pc.maybe_prepare_plan(None, ctx)
+    assert not _pending(f"{tmpdir}/pending/sess-1"), "pushed => no next-turn duplicate"
+    deadline = time.time() + 5
+    while time.time() < deadline and not sent:
+        time.sleep(0.05)
+    assert sent and sent[0][0] == "matrix:!ROOM:mx.elk.mobi"
+    assert "АКТИВНЫЙ ПЛАН" in sent[0][1]
+
+
+def test_interim_push_failure_keeps_pending_note(monkeypatch, tmpdir):
+    """hermes send fails (rc!=0 / exception) -> pending fallback survives."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: False))
+    ctx = make_ctx(message="составь план доставки")
+    pc.maybe_prepare_plan(None, ctx)
+    deadline = time.time() + 5
+    penddir = f"{tmpdir}/pending/sess-1"
+    while time.time() < deadline and not _pending(penddir):
+        time.sleep(0.05)
+    assert len(_pending(penddir)) == 1  # next-turn consumption still delivers
+
+
+def test_notify_target_skips_local(monkeypatch, tmpdir):
+    """No platform/chat context -> notify stays None, file-only delivery."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    seen = {}
+    orig = pc.PlanningCoordinator.prepare_async
+    def spy(self, *, request_text, session_key="", notify_target=None):
+        seen["t"] = notify_target
+        return orig(self, request_text=request_text, session_key=session_key,
+                    notify_target=notify_target)
+    monkeypatch.setattr(pc.PlanningCoordinator, "prepare_async", spy)
+    ctx = make_ctx(message="составь план")  # no .source attribute at all
+    pc.maybe_prepare_plan(None, ctx)
+    assert seen["t"] is None
+
+
+def test_push_success_leaves_receipt_for_context_join(monkeypatch, tmpdir):
+    """Cron-lesson guard: after a successful push the next turn still gets a receipt
+    into ctx, so the assistant owns the pushed message instead of disowning it."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_push": True})
+    art = tmpdir.mkdir("artr")
+    open(str(art.join("plan_candidate-001.json")), "w").write(json.dumps(
+        {"version": 1, "plan": {"tasks": [{"id": "T1", "goal": "g", "verification": ["v"]}]}}))
+    install_planner(monkeypatch, Cfg({**APPROVED, "artifact_dir": str(art)}))
+    monkeypatch.setattr(pc.PlanningCoordinator, "_push_via_cli",
+                        staticmethod(lambda target, text: True))
+    from types import SimpleNamespace
+    ctx = make_ctx(message="составь план присоединения")
+    ctx.source = SimpleNamespace(platform="matrix", chat_id="!ROOM:mx.elk.mobi")
+    pc.maybe_prepare_plan(None, ctx)
+    deadline = time.time() + 5
+    penddir = f"{tmpdir}/pending/sess-1"
+    def _receipted():
+        names = _pending(penddir)
+        return bool(names) and open(f"{penddir}/{names[0]}", encoding="utf-8").read().startswith("[фон")
+    while time.time() < deadline and not _receipted():
+        time.sleep(0.05)  # wait past the visual-push -> receipt-rewrite window
+
+    # next trivial remark consumes the receipt => context join happens exactly once
+    ctx2 = make_ctx(message="ок")
+    pc.maybe_prepare_plan(None, ctx2)
+    assert "АКТИВНЫЙ ПЛАН" in ctx2.message  # receipt quotes the outcome, not a placeholder
+    assert _pending(penddir) == []
+
+
+def test_worker_thread_inherits_secret_scope(monkeypatch, tmpdir):
+    """w-0035 regression: background conveyor must resolve profile-scoped credentials."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True})
+    install_planner(monkeypatch, Cfg(APPROVED))
+    from agent import secret_scope as ss
+    seen = {}
+    orig = pc.PlanningCoordinator.prepare
+    def spy(self, **kw):
+        from agent.secret_scope import current_secret_scope
+        seen["scope"] = current_secret_scope()
+        return orig(self, **kw)
+    monkeypatch.setattr(pc.PlanningCoordinator, "prepare", spy)
+    token = ss.set_secret_scope({"OPENAI_API_KEY": "x"})
+    try:
+        ctx = make_ctx(message="составь план со скоупом")
+        pc.maybe_prepare_plan(None, ctx)
+        deadline = time.time() + 5
+        while time.time() < deadline and "scope" not in seen:
+            time.sleep(0.05)
+        assert seen.get("scope") == {"OPENAI_API_KEY": "x"}
+    finally:
+        ss.reset_secret_scope(token)
+
+
+def test_fork_mode_admits_and_spawns(monkeypatch, tmpdir):
+    """interim_mode=fork: work request -> gateway spawn callback with ORIGINAL message,
+    ack-note appended, no thread conveyor, journal carries planning.fork.requested."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    spawned = []
+    ctx = make_ctx(message="почини гонку в agent/planning_coordinator.py")
+    pc.maybe_prepare_fork(None, ctx, spawn=spawned.append)
+    assert spawned and spawned[0] == "почини гонку в agent/planning_coordinator.py"
+    assert "fork-ветка" in ctx.message
+    assert any(e["event"] == "planning.fork.requested" for e in _events(tmpdir))
+    assert planner.calls == []  # thread conveyor never engaged
+
+
+def test_fork_mode_trivial_replica_skips_spawn(monkeypatch, tmpdir):
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+    spawned = []
+    ctx = make_ctx(message="который час?")
+    pc.maybe_prepare_fork(None, ctx, spawn=spawned.append)
+    assert spawned == []
+    skips = [e for e in _events(tmpdir) if e["event"] == "planning.skipped_router"]
+    assert len(skips) == 1
+    assert "fork-ветка" not in (ctx.message or "")
+
+
+def test_interim_mode_default_is_thread():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch_hp = __import__("pytest").MonkeyPatch()
+        monkeypatch_hp.setenv("HERMES_HOME", d)
+        try:
+            assert pc.interim_mode() == "thread"
+        finally:
+            monkeypatch_hp.undo()
+
+
+def test_fork_spawn_failure_is_observable(monkeypatch, tmpdir):
+    """Lesson of the 4 lost forks: a spawn crash must journal and mark the turn, not vanish."""
+    patched(monkeypatch, tmpdir, {"mode": "auto", "interim": True, "interim_mode": "fork"})
+    planner = Cfg(APPROVED)
+    install_planner(monkeypatch, planner)
+
+    def _boom(_prompt):
+        raise AttributeError("mixin not mixed")
+
+    ctx = make_ctx(message="составь план наблюдаемости")
+    pc.maybe_prepare_fork(None, ctx, spawn=_boom)
+    assert "не стартовал" in ctx.message
+    fails = [e for e in _events(tmpdir) if e["event"] == "planning.fork.spawn_failed"]
+    assert fails and "AttributeError" in fails[0]["error"]
+
+
+def test_sweep_parses_string_model_config(monkeypatch, tmpdir):
+    """22:09 boot swept 0: model_config is a JSON STRING in the row dict; str.get()
+    raised inside the per-row suppress and every planning fork was skipped."""
+    import asyncio
+    from gateway.planning_fork import GatewayPlanningForkMixin
+
+    class DB:
+        def _read_all(self, sql, params=()):
+            return [{"branch_id": "bX", "child_session_id": "c1",
+                     "parent_session_id": "p1", "title": "plan-1"}]
+        def get_session(self, sid):
+            return {"model_config": '{"_forked_from": "parent-session"}'}
+        async def append_messages_batch(self, parent_id, notes):
+            self.notes = (parent_id, notes)
+        def set_branch_status(self, *a, **k): pass
+
+    class Runner(GatewayPlanningForkMixin):
+        def __init__(self):
+            self._session_db = DB()
+            async def _summ(cid): return "tail"
+            self._summarize_branch = _summ
+    runner = Runner()
+    swept = asyncio.run(runner.sweep_orphaned_planning_forks())
+    assert swept == 1
+
+
+def test_sweep_works_on_async_session_db(monkeypatch, tmpdir):
+    """Live runner wraps SessionDB in AsyncSessionDB; its ``__getattr__`` offloads
+    every call to ``asyncio.to_thread`` and yields a coroutine. Before the fix the
+    22:18 boot swept 0 (``branch listing failed`` + un-awaited ``get_session``
+    coroutine silently skipped every row). Sweep must route all DB calls through
+    the offload and work on the async wrapper."""
+    import asyncio
+    from hermes_state import AsyncSessionDB
+    from gateway.planning_fork import GatewayPlanningForkMixin
+
+    notes = []
+    closed = []
+
+    class SyncDB:
+        def _read_all(self, sql, params=()):
+            return [{"branch_id": "bY", "child_session_id": "c2",
+                     "parent_session_id": "p2", "title": "plan-2"}]
+        def get_session(self, sid):
+            return {"model_config": '{"_forked_from": "parent-session"}'}
+        def append_messages_batch(self, parent_id, messages, **kw):
+            notes.append((parent_id, messages))
+            return len(messages)
+        def set_branch_status(self, *a, **k):
+            closed.append((a, k))
+            return True
+
+    class Runner(GatewayPlanningForkMixin):
+        def __init__(self):
+            self._session_db = AsyncSessionDB(SyncDB())
+            async def _summ(cid):
+                return "tail"
+            self._summarize_branch = _summ
+    runner = Runner()
+    swept = asyncio.run(runner.sweep_orphaned_planning_forks())
+    assert swept == 1
+    assert notes and notes[0][0] == "p2"
+    assert closed and closed[0][0][0] == "bY"

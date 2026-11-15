@@ -198,7 +198,13 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             + managed_turn_count(self)
             + self._active_api_run_count()
             + self._active_deferred_agent_worker_count()
+            + self._planning_fork_live_count()
         )
+
+    def _planning_fork_live_count(self) -> int:
+        """Headless planning conveyors (gateway/planning_fork.py); 0 when absent."""
+        helper = getattr(self, "planning_fork_count", None)
+        return max(0, int(helper())) if callable(helper) else 0
 
     def _api_server_hook(self, name: str, *args: Any) -> int:
         """Call the primary API-server adapter's ``name`` hook, clamped >= 0 (0 when the hook is absent).

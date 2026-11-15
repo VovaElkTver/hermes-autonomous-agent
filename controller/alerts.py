@@ -1,10 +1,10 @@
 """controller.alerts — deterministic template alerts, deduped in state.db.
 
 No LLM composes status text in the autonomy loop: every human-facing line is a
-fixed template keyed by a state transition in state.db. ``maybe_alert`` fires a
-template only when its digest differs from the last one stored in
-``ctl_alert_state`` — a stable state stays silent, and every state CHANGE
-produces exactly one human-facing line. Digests are cleared (not just
+fixed template keyed by a state transition in state.db. ``maybe_alert`` always
+fires on a digest CHANGE; an unchanged digest repeats only per its backoff
+window (``backoff_s``, machine-park and friends pass 0 to keep escalating).
+Digests are cleared (not just
 compared) so a recurring condition re-alerts after it clears.
 
 Delivery is a pluggable ``deliver_fn``: in the gateway the ticker passes a
@@ -38,6 +38,10 @@ ALERT_TEMPLATES = {
                           "(припаркован {parked_min} мин)",
     # Ticker mechanics: a tick crashed.
     "tick-error": "TICKER: ошибка тика {kind}: {error}",
+    # Ownership self-heal (controller-claims-v1 П3б): the reclaim watch took
+    # the loop back after the recorded holder died / its row went stale.
+    "ticker-reclaim": "TICKER: владение циклом вернул pid {pid} "
+                      "(прошлый держатель мёртв или строка протухла)",
     # Pump lock takeover decisions (first sighting / self-hold), pre-kill signal.
     "pump-lock-stale": "PUMP LOCK: {phase} — holder pid {pid} молчит {age_s} с",
 }
@@ -50,11 +54,18 @@ def _digest(text: str) -> str:
 _MAX_REALERT_S = 86400.0  # a persisting condition screams at most daily
 
 
+_HUMAN_GATES_REALERT_S = 3600.0  # a persisting gate re-nags hourly (5-min spam
+                                 # was the 14.11 complaint), ladder ×2 capped daily
+
+
 def maybe_alert(conn, key: str, template_key: str, backoff_s: float = 0.0,
                 **fields) -> str | None:
-    """Render the template and return the line iff its digest changed since the
-    last stored alert for ``key`` (state.db dedupe); else None. The digest is
-    stored either way, so a cleared-then-recurred condition re-alerts.
+    """Render the template and return the line unless deduped in ``ctl_alert_state``.
+    A CHANGED digest always fires; an UNCHANGED digest fires only after its
+    backoff window elapsed, and only when ``backoff_s > 0`` — with
+    ``backoff_s == 0`` every call re-fires (callers whose text must escalate,
+    like machine-park, rely on that). The digest is stored either way, so a
+    cleared-then-recurred condition re-alerts.
 
     ``backoff_s`` adds the growing re-alert interval (audit 28.10 §3б): a
     SAME-digest condition that keeps repeating re-fires at
@@ -135,6 +146,7 @@ def gate_change_lines(conn, snapshot: dict, prev_snapshot: dict | None) -> list[
     if snapshot:
         lines.append(maybe_alert(
             conn, "human-gates", "human-gates",
+            backoff_s=_HUMAN_GATES_REALERT_S,
             n=len(snapshot),
             gates=json.dumps(snapshot, ensure_ascii=False, sort_keys=True)[:1200]) or "")
     else:
