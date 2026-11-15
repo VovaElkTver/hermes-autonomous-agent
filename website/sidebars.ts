@@ -190,8 +190,16 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-guardrails-protocol',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-install-fork-agent',
-                    'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-opencode',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-supervisor-protocol',
+                  ],
+                },
+                {
+                  type: 'category',
+                  label: 'communication',
+                  key: 'skills-bundled-communication',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/communication/communication-answer-scope',
                   ],
                 },
                 {

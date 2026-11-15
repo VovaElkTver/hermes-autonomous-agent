@@ -34,6 +34,12 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | [`install-fork-agent`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-install-fork-agent.md) | Install or update the VovaElkTver Hermes fork on a host. | `autonomous-ai-agents/install-fork-agent` |
 | [`supervisor-protocol`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-supervisor-protocol.md) | Use when a tool result or steer is tagged [supervisor]. | `autonomous-ai-agents/supervisor-protocol` |
 
+## communication
+
+| Skill | Description | Path |
+|-------|-------------|------|
+| [`answer-scope`](../user-guide/skills/bundled/communication/communication-answer-scope.md) | Match answer scope to the question; one track, one answer. | `communication/answer-scope` |
+
 ## creative
 
 | Skill | Description | Path |
