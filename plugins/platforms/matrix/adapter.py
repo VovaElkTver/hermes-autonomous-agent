@@ -1442,6 +1442,13 @@ class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatform
         identity = await self._resolve_room_identity(chat_id)
         return {"name": identity.display_name, "type": "dm" if identity.chat_type == "dm" else "group"}
 
+    def receive_evidence_age(self) -> float | None:
+        """Seconds since the last long-poll response (empty ones included — idle chats do
+        not starve the pulse). None until the first sync completes: no evidence is not
+        death (L1 deafness sensor, rtx5090-gateway-deafness contour)."""
+        ts = getattr(self, "_last_sync_ts", 0.0)
+        return max(0.0, time.time() - ts) if ts else None
+
     def get_diagnostics(self) -> dict[str, Any]:
         now = time.time()
         token_present = bool(self._access_token)

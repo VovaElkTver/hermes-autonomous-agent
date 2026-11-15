@@ -174,6 +174,36 @@ def step_drop_live_plugin_catalog() -> dict:
     return {"ok": True}
 
 
+def step_sync_gateway_watchdog() -> dict:
+    """Deliver the fork-canonical gateway watchdog to the live home (deafness contour R4, L2).
+
+    The watchdog muscle script lives in the fork's ``scripts/`` (versioned canon);
+    the node's systemd user timer executes the copy under ``$HERMES_HOME/scripts/``.
+    Without this step the node copy is a frozen muscle and the L1 sensor has
+    nowhere to evolve from. Fail-open, like every home step: a missing source
+    (upstream-only checkout, sealed payload) or an unreadable install root skips
+    the sync instead of blocking boot maintenance. Copy only when the content
+    differs — idempotent, no mtime churn on every boot.
+    """
+    import shutil
+
+    from hermes_constants import get_hermes_home
+
+    try:
+        from pm.paths import install_root
+        source = install_root() / "scripts" / "gateway-watchdog.py"
+    except Exception:
+        return {"ok": True, "skipped": "install-root-unresolvable"}
+    if not source.is_file():
+        return {"ok": True, "skipped": "no-source"}
+    dest = get_hermes_home() / "scripts" / "gateway-watchdog.py"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_file() and dest.read_bytes() == source.read_bytes():
+        return {"ok": True, "skipped": "current"}
+    shutil.copy2(source, dest)
+    return {"ok": True, "synced": str(dest)}
+
+
 def step_adopt_blessed_checkout(project_root: Path | None = None) -> dict:
     """One-time adoption of shipped stampless installs (birth certificate).
 
@@ -312,6 +342,7 @@ HOME_STEPS: tuple = (
     ("state_db_guard", step_state_db_guard),
     ("drop_live_plugin_catalog", step_drop_live_plugin_catalog),
     ("expose_cli", expose_cli),
+    ("sync_gateway_watchdog", step_sync_gateway_watchdog),
 )
 
 # Startup skill syncing belongs to each entry point. Boot bootstrap must
