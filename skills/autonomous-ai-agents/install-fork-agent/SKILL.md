@@ -100,10 +100,11 @@ Installer decision tree (both variants):
   as the checkout. A checkout elsewhere is "existing directory with foreign layout" — stop.
 - Refusal on foreign origin is a feature (protects other installs); the fix belongs to the
   operator's decision, not the agent's.
-- Post-rename wrinkle (verified live): a checkout whose `origin` is the new
-  `hermes-autonomous-agent` URL is refused by the default installer, which expects the
-  literal `.../hermes-agent` URL. For such hosts run with
-  `HERMES_FORK_URL=https://github.com/VovaElkTver/hermes-autonomous-agent` prepended.
+- The two installers normalize the pre-rename origin URL
+  (`VovaElkTver/hermes-agent` → `.../hermes-autonomous-agent`), so both old
+  and new checkouts are accepted; a refusal means the origin is something
+  else entirely. Run with `HERMES_FORK_URL=<expected URL>` or repoint the
+  origin — an operator decision, never silent.
 
 ## Verification
 
@@ -111,3 +112,12 @@ Installer decision tree (both variants):
 - `git -C <dest> remote get-url origin` returns exactly the expected `FORK_URL`.
 - `git -C <dest> log --oneline -1` matches `origin/$BRANCH` head (ff-update landed).
 - `hermes gateway status` (where installed) reports the service running.
+
+## Reference docs
+
+The node-ops protocol in full (install decision tree, `hermes update`
+forensics, restart/rollback/wedged-boot, fleet rules) lives in the
+checkout: `<HERMES_HOME>/hermes-agent/docs/agents/node-ops.md`
+(discipline: `docs/agents/operating.md`). Delivered with the checkout on
+every install and update, alongside this skill; the human-facing mirror is
+`docs/humans.md`.
