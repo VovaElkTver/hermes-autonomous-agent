@@ -137,6 +137,7 @@ def _matrix_voice_metadata_for_file(path: Path) -> dict[str, Any]:
 from plugins.platforms.matrix.media_filenames import _is_bare_media_filename
 from plugins.platforms.matrix.reply_verdict import verdict as reply_verdict
 from plugins.platforms.matrix.transport_observation import TransportObservationMixin
+from plugins.platforms.matrix.sync_token_store import SyncTokenStoreMixin, _GRACE_MARGIN_SECONDS
 from plugins.platforms.matrix.bang_commands import (
     normalize_matrix_bang_command as _normalize_matrix_bang_command,  # re-export: tests import it here
 )
@@ -395,7 +396,7 @@ def _resolve_max_message_length(config) -> int:
 # Store directory for E2EE keys and sync state. Mirrors the pairing-store fix (a6397c379). See #89168.
 from hermes_constants import get_hermes_dir as _get_hermes_dir
 
-_STARTUP_GRACE_SECONDS = 5  # ignore messages older than this many seconds before startup
+_STARTUP_GRACE_SECONDS = int(_GRACE_MARGIN_SECONDS)  # canonical value lives in sync_token_store.py
 
 _OUTBOUND_MENTION_RE = re.compile(r"(?<![\w/])(@[0-9A-Za-z._=/-]+:[0-9A-Za-z.-]+(?::\d+)?)")
 
@@ -654,7 +655,7 @@ def ensure_matrix_deps() -> bool:
     return True
 
 
-class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
+class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatformAdapter):
     """Gateway adapter for Matrix (any homeserver)."""
     serial_receive_loop = True  # _sync_loop reads the next sync only after this sync's handlers return
     supports_code_blocks = True  # Matrix renders fenced code blocks (HTML/markdown)
@@ -757,6 +758,7 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = self._extra_truthy(config, "process_notices", "MATRIX_PROCESS_NOTICES", "false")
         self._init_transport_observation(config)  # §16.9 observer layer, off by default (transport_observation.py)
+        self._init_sync_token_state()  # R3 cross-restart sync-token persistence (sync_token_store.py)
         self._reactions_enabled: bool = str(_extra_or_secret(config.extra, "reactions", "MATRIX_REACTIONS", "true")).lower() not in {"false", "0", "no"}
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Let the final message land before redacting reactions ("missing event" in some
@@ -1247,9 +1249,35 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
                             "Matrix: cross-signing bootstrap failed (non-fatal — Element will show "
                             "'not verified by its owner'): %s", exc)
 
-    async def _connect_initial_sync(self, client: Any) -> None:
-        """Full initial sync: seed joined rooms, DM cache, and dispatch queued to-device events."""
+    async def _connect_initial_sync(self, client: Any, *, since: str = "") -> None:
+        """Full initial sync: seed joined rooms, DM cache, and dispatch queued to-device events.
+
+        With ``since`` (R3 resume) the same call is incremental: it returns exactly the
+        events the bot missed while down. If the homeserver no longer knows that token
+        (its sync streams expired on restart) we clear the persisted token and fall through
+        to the plain full sync — today's behaviour, never a park."""
         try:
+            if since:
+                try:
+                    sync_data = await client.sync(since=since, timeout=10000)
+                except Exception as exc:
+                    if not self._is_unknown_sync_token(exc):
+                        raise
+                    logger.warning(
+                        "Matrix: persisted sync token rejected (homeserver expired its sync "
+                        "streams) — falling back to full initial sync")
+                    self._sync_resumed = False
+                    self._clear_persisted_batch()
+                    with suppress(Exception):
+                        await client.sync_store.put_next_batch("")
+                    sync_data = None
+                if sync_data is not None:
+                    if isinstance(sync_data, dict):
+                        await self._seed_joined_rooms_after_resume(client)
+                        await self._absorb_sync(client, sync_data, initial=True)
+                    else:
+                        logger.warning("Matrix: resumed sync returned unexpected type %s", type(sync_data).__name__)
+                    return
             sync_data = await client.sync(timeout=10000, full_state=True)
             if isinstance(sync_data, dict):
                 self._joined_rooms.clear()
@@ -1296,7 +1324,10 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         self._startup_ts = time.time()
         self._reset_clock_skew_detector()  # a reconnect after an NTP fix starts clean
         self._closing = False
-        await self._connect_initial_sync(client)
+        # R3: resume the first sync from the persisted token so the outage-window backlog
+        # arrives incrementally instead of being filtered as initial-sync backfill.
+        resume_batch = await self._prepare_sync_resume(sync_store)
+        await self._connect_initial_sync(client, since=resume_batch)
         if self._encryption and getattr(client, "crypto", None):
             try:
                 await client.crypto.share_keys()
@@ -1853,7 +1884,22 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
                     return
                 # Detect permanent auth/permission failures. Transient 5xx outages must retry.
                 if _is_permanent_matrix_auth_error(exc):
+                    # R3 carve-out: an unknown token right after a persisted resume may be
+                    # the STALE SINCE token (homeserver restarted its sync streams), not a
+                    # dead access token. Drop the token and full-sync once before believing
+                    # the account itself died — otherwise a restart race would park the
+                    # adapter forever, exactly the deafness this branch is supposed to catch.
+                    batch_dead = (getattr(exc, "errcode", "") or "").strip().lower() == "m_unknown_token"
+                    if batch_dead and self._sync_resumed:
+                        logger.warning("Matrix: resumed sync token rejected mid-loop — re-syncing full state")
+                        self._sync_resumed = False
+                        self._clear_persisted_batch()
+                        with suppress(Exception):
+                            await client.sync_store.put_next_batch("")
+                        next_batch = ""
+                        continue
                     logger.error("Matrix: permanent auth error, stopping sync: %s", describe_proxy_error(exc, matrix_redaction_proxy(self._proxy_url, self._homeserver)) or exc)
+                    self._clear_persisted_batch()  # next boot must not resume a dead stream
                     return
                 logger.warning("Matrix: sync error: %s — retrying in 5s", describe_proxy_error(exc, matrix_redaction_proxy(self._proxy_url, self._homeserver)) or exc)
                 await asyncio.sleep(5)
@@ -1881,6 +1927,10 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
             logger.warning("Matrix: %s: %s", "initial sync event dispatch error" if initial else "sync event dispatch error", exc)
         self._schedule_pending_invite_joins(sync_data)
         await self._maybe_reconcile_transport()
+        # R3 at-least-once: persist AFTER dispatch, so a crash mid-handlers replays the
+        # batch on next boot (at-least-once: possibly a duplicate answer, never a loss).
+        if nb:
+            self._persist_batch(str(nb))
         return nb
 
     def _warn_encrypted_drops(self, rooms_join: dict[str, Any], client: Any) -> None:
@@ -2024,9 +2074,11 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         event_id = str(getattr(event, "event_id", ""))
         if self._is_duplicate_event(event_id):
             return
-        # Startup grace: ignore old messages replayed by the initial sync.
+        # Startup grace: ignore old messages replayed by the initial sync. On an R3 resume
+        # the floor moves back to the persisted token's moment (sync_token_store.py), so
+        # the outage-window backlog survives the filter.
         event_ts = _matrix_event_timestamp_seconds(event)
-        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
+        if event_ts and self._event_older_than_grace(event_ts):
             self._note_late_grace_drop(event_ts)
             return
         content = getattr(event, "content", None)
