@@ -26,3 +26,16 @@
 - B: точечная докачка деревьев/blob'ов с origin через GitHub API по списку missing из fsck;
 - C: консервация как есть (gc.auto=0), репо работает, риск сохранить до планового окна обслуживания.
 
+## Апдейт 14.11 (перепроверка страховки, Вл «работай самостоятельно»)
+Перепроверена страховка (read-only + 1 FF/new-ref push; общий checkout на elk/planning-multistage не тронут):
+- 61 локальная ветка (не `_backup`) → ВСЕ имеют remote-копию: 49 через `_backup/<имя>`,
+  14 под своим именем на origin (elk/planning-multistage, gateway-deafness, pin-survives-reload,
+  dream-command, refine-*, skill-gate-plugin, ticker-resume, win-hard-reboot, de-cron-*, forkb-total-block,
+  cron-name-sweep). Истинных разрывов (нет ни `_backup`, ни own-name) = **0**.
+- Стэши: `stash@{1}` (deploy-note, a45699c1) = `_backup/stash-deploy-note` (был). `stash@{0}`
+  («On elk/de-cron-zoneB: pre-merge de-cron residue», 2287ee3d) был local-only → создан и запушен
+  `_backup/stash-de-cron-residue` (2287ee3d, подтверждено ls-remote). Теперь оба стэша застрахованы.
+- Вывод: локально ценного без remote-копии нет ⇒ любой из вариантов A/B/C безопасен для исполнения;
+  консервация (C) остаётся дефолтом до окна Вл. fsck-шум = unreachable pack-объекты + stale cache-tree
+  в index'ах worktree (hermes-ticker и др.) — не затрагивает commit/push/log.
+
