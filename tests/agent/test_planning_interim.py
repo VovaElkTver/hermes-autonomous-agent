@@ -202,6 +202,22 @@ def test_fork_mode_trivial_replica_skips_spawn(monkeypatch, tmpdir):
     assert "fork-ветка" not in (ctx.message or "")
 
 
+def test_fork_completion_signed_with_child_title(tmpdir):
+    """Вл 15.11: a planning-fork artifact is signed by the CHILD console — the
+    friendly title (``plan-XXXX``), never the parent's 'main' and never a bare
+    hex id (Вл 30.10: hex names are a mockery). Empty title falls back to the id."""
+    from gateway.planning_fork import _branch_console_label
+    from gateway.branch_prefix import BRANCH_GLYPH
+
+    assert _branch_console_label("b1234567", "plan-012345") == f"{BRANCH_GLYPH} plan-012345: "
+    assert _branch_console_label("b1234567", "") == f"{BRANCH_GLYPH} b1234567: "
+    # a real DB row (title in meta_json) yields the same friendly name
+    import json
+    from gateway.branch_prefix import branch_display_name
+    row = {"branch_id": "b1234567", "meta_json": json.dumps({"title": "plan-012345"})}
+    assert branch_display_name(row) == "plan-012345"
+
+
 def test_interim_mode_default_is_thread():
     import tempfile
     with tempfile.TemporaryDirectory() as d:

@@ -32,6 +32,20 @@ def _planning_fork_cfg(user_config: dict) -> dict:
     }
 
 
+def _branch_console_label(branch_id: str, title: str) -> str:
+    """The ``⎇ <name>:`` prefix a planning-fork artifact carries.
+
+    The name is the branch's friendly title (``plan-XXXX``), never a bare hex id
+    (Вл 30.10: hex console names are a mockery). ``branch_display_name`` reads the
+    title from ``meta_json``; passing it there yields the friendly name and falls
+    back to the hex id only when the title is empty.
+    """
+    from gateway.branch_prefix import branch_display_name, format_branch_prefix
+
+    row = {"branch_id": branch_id, "meta_json": json.dumps({"title": title})}
+    return format_branch_prefix(branch_display_name(row))
+
+
 class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing host)
     """Mixed into GatewayRunner; needs the same session plumbing as the fork mixin."""
 
@@ -40,7 +54,6 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
         background with the heavy planning model, deliver the result to the chat and
         append a durable work-note into the parent transcript. Returns branch_id."""
         from agent.i18n import t
-        from gateway.branch_prefix import branch_display_name, format_branch_prefix
 
         parent_entry = await self.async_session_store.get_or_create_session(source)
         parent_session_id = parent_entry.session_id
@@ -91,21 +104,19 @@ class GatewayPlanningForkMixin:  # composed into GatewayRunner (session plumbing
                 metadata = {"thread_id": source.thread_id} if source.thread_id else {}
             if adapter:
                 header = t("gateway.background.complete_header", preview=prompt[:60])
-                # Вл 15.11: the child's data must arrive signed by the CHILD branch,
-                # not silently decorated "⎇ main:" by the generic outbound wrapper
-                # (it resolves the parent-of-chat). Prepending our own label makes
-                # _ALREADY_PREFIXED skip that mislabel.
-                note_row = {"branch_id": branch_id, "title": title}
-                child_label = format_branch_prefix(
-                    branch_display_name(note_row))
+                # Вл 15.11: the child's data must arrive signed by the CHILD branch
+                # (friendly title — never "main", never a hex id), so a join is a
+                # distinct, attributable contribution instead of a re-sent main line.
+                # Prepending our own label makes the generic wrapper's _ALREADY_PREFIXED
+                # guard skip its parent-of-chat "⎇ main:" mislabel.
+                child_label = _branch_console_label(branch_id, title)
                 with contextlib.suppress(Exception):
                     await adapter.send(chat_id=source.chat_id,
                                        content=child_label + header + result["response"],
                                        metadata=metadata)
         # durable context join into the PARENT transcript (work-note semantics, no LLM)
         note = result.get("response") or result.get("error") or "(пустой ответ ядра)"
-        row = {"branch_id": branch_id, "title": title}
-        name = branch_display_name(row)
+        name = title or branch_id  # friendly console name; hex id only as a fallback
         with contextlib.suppress(Exception):
             await self._session_db.append_messages_batch(parent_session_id, [
                 dict(role="user",
