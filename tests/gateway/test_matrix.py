@@ -1457,6 +1457,16 @@ class TestMatrixDiagnostics:
         assert diagnostics["e2ee"]["recovery_key_configured"] is True
         assert diagnostics["media"]["max_media_bytes"] == 123
 
+    def test_receive_evidence_age(self):
+        # L1 deafness sensor: the pulse is every long-poll answer (empty ones
+        # included — idle chats do not starve it); None until the first sync
+        # completes, because no evidence is not death.
+        adapter = _make_adapter()
+        assert adapter.receive_evidence_age() is None
+        adapter._last_sync_ts = time.time() - 7
+        age = adapter.receive_evidence_age()
+        assert age is not None and 6.5 <= age <= 30.0
+
 
     @pytest.mark.asyncio
     async def test_matrix_recovery_key_bootstrap_skips_existing_output_file(

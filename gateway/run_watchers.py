@@ -241,10 +241,44 @@ class GatewaySessionWatchersMixin:
         hb = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")) / "gateway-heartbeat"
         while self._running:
             try:
-                hb.write_text(f"{os.getpid()} {time.time():.0f}")
+                hb.write_text(f"{os.getpid()} {time.time():.0f} {self._receive_pulse_json()}")
             except Exception:
                 logger.debug("heartbeat write failed", exc_info=True)
             await _interruptible_sleep(self, int(max(1, interval)))
+
+    def _receive_pulse_map(self) -> dict:
+        """L1 deafness sensor (rtx5090-gateway-deafness contour): platform -> seconds since
+        that platform's last receive evidence. Only adapters that publish
+        ``receive_evidence_age()`` are measured; others report ``"unknown"`` and a missing
+        heartbeat is fail-visible — the watchdog must never read absence as death.
+        Platforms whose adapter never got created report ``"no_adapter"`` (deaf by R1 class).
+        Keys are platform NAMES (Enum ``.value``) so the map stays JSON-serializable —
+        ``Platform`` is a plain Enum, and an un-serialized enum key would silently drop
+        the whole map at the json boundary."""
+        def _key(name: Any) -> str:
+            value = getattr(name, "value", None)
+            return str(value if value is not None else name)
+
+        pulses: dict = {}
+        for name, adapter in dict(getattr(self, "adapters", None) or {}).items():
+            key = _key(name)
+            fn = getattr(adapter, "receive_evidence_age", None)
+            try:
+                pulses[key] = fn() if callable(fn) else "unknown"
+            except Exception:
+                pulses[key] = "unknown"
+        failed = getattr(self, "_failed_platforms", None) or {}
+        names = failed.keys() if isinstance(failed, dict) else failed
+        for name in names:
+            pulses.setdefault(_key(name), "no_adapter")
+        return pulses
+
+    def _receive_pulse_json(self) -> str:
+        import json
+        try:
+            return json.dumps(self._receive_pulse_map(), sort_keys=True, separators=(",", ":"))
+        except Exception:
+            return "{}"
 
     async def _session_stall_watcher(self, interval: float = 30.0):
         """Pending-inbound + stale-activity stall watchdog. Progress comes only from
