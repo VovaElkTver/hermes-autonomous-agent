@@ -1018,6 +1018,7 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   text TEXT NOT NULL,
   due_at REAL,
   period_s INTEGER,
+  rrule TEXT,
   state TEXT NOT NULL DEFAULT 'pending'
        CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
   recipient TEXT NOT NULL DEFAULT 'agent'
