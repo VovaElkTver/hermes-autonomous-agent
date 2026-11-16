@@ -249,8 +249,12 @@ def resolve_gateway_approval_card(session_key: str, choice: str, request_id: Opt
             if not may_answer(target.authority, actor_id, admin_ids, extra):
                 return 0
         # A card tap is a legacy surface (implicit consent, no reason string) —
-        # it never enforces the B2 structured-answer contract.
-        return resolve_gateway_approval(session_key, choice, request_id=request_id, structured=False)
+        # it never enforces the B2 structured-answer contract. The keyword is
+        # only present on the wire while the flag is on: with the flag off the
+        # call keeps its legacy shape (platform test mocks assert it exactly).
+        if _b2_active():
+            return resolve_gateway_approval(session_key, choice, request_id=request_id, structured=False)
+        return resolve_gateway_approval(session_key, choice, request_id=request_id)
 
 
 def withdraw_gateway_approval(session_key: str, request_id: str, cause: str) -> bool:
