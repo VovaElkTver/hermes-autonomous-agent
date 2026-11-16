@@ -1168,8 +1168,18 @@ def _run_approval_guards(command: str, env_type: str, config: dict[str, Any], *,
             f"Command denied: {desc}. "
             "Use the approval prompt to allow it, or rephrase the command."
         )
-        raise _Rejected(_error_json(approval.get("message", fallback_msg), status="blocked",
-                                    **({"user_summary": approval["user_summary"]} if approval.get("user_summary") else {})))
+        _extra: dict[str, Any] = {}
+        if approval.get("user_summary"):
+            _extra["user_summary"] = approval["user_summary"]
+        if approval.get("approval_code"):
+            # B2d: the stable denial code rides the result structurally, not in
+            # the prose — meta.error.{code,reason} (the code is only present
+            # when approvals.once_and_ttl is on, so legacy envelopes stay
+            # byte-identical).
+            from tools import approval_contract
+            _extra["meta"] = approval_contract.error_meta(
+                approval["approval_code"], approval.get("approval_reason", ""))
+        raise _Rejected(_error_json(approval.get("message", fallback_msg), status="blocked", **_extra))
     desc = approval.get("description", "flagged as dangerous")
     if approval.get("user_approved"):
         return _ApprovalVerdict(
