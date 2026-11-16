@@ -41,6 +41,9 @@ from controller import model as _model
 
 CHANNELS = frozenset({"sync", "event_fetch", "relations", "local_echo"})
 
+#: event_type marker for tool-call identity rows (B3, TZ-2026-11-16-dsh-B).
+TOOL_CALL_EVENT_TYPE = "tool_call"
+
 CHARACTERISTICS = (
     "identity_consistency",
     "server_retrievability",
@@ -156,6 +159,47 @@ def record_observation(
         mirror_reply_for_event(conn, event_obs_id=ev_id, room_id=room_id,
                                parent_event_id=parent_event, commit=True)
     return {"observation_id": obs_id, "event_obs_id": ev_id, "status": status}
+
+
+def record_tool_call_observation(conn: sqlite3.Connection, *, spec, decision,
+                                 repeat: bool = False) -> dict:
+    """B3 (TZ-2026-11-16-dsh-B): one tool-call identity row in event_observations.
+
+    Stage 2 of the two-step column migration: the ``call_id`` / ``args_hash`` /
+    ``decision`` / ``lowered_by`` columns are declared in SCHEMA_SQL (stage 1,
+    reconciled additively on live stores); this flag-gated writer fills them.
+    The caller (tools/registry.dispatch) is the only writer and swallows every
+    error — an observation failure must never break a tool call.
+
+    A call observation is a tool event, not a transport event: it carries no
+    ``transport_observations`` row, so the reconciler (which JOINs on
+    ``transport_observations``) never picks it up, and the six transport
+    characteristics stay outside their vocabulary (``n/a``) except identity
+    consistency, which is settled by construction (a fresh uuid4 call_id).
+    The transcript's tool record joins back on ``call_id``
+    (``meta.call_contract.call_id`` in the result JSON).
+    """
+    lowered_by = getattr(decision, "layer", "")
+    decision_kind = type(decision).__name__.lower()
+    now = time.time()
+    event_obs_id = _new_id("tcobs")
+    conn.execute(
+        "INSERT INTO event_observations"
+        " (event_obs_id, observation_id, room_id, event_id, event_type, sender,"
+        "  content_hash, relation, normalized_ref, identity_consistency,"
+        "  server_retrievability, decryption_status, redaction_status,"
+        "  timeline_placement, normalization_consistency, created_at,"
+        "  call_id, args_hash, decision, lowered_by)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (event_obs_id, spec.call_id, spec.session_key, spec.call_id,
+         TOOL_CALL_EVENT_TYPE, "", spec.args_hash,
+         json.dumps({"repeat": bool(repeat)}, ensure_ascii=False), "",
+         "ok", "n/a", "n/a", "n/a", "n/a", "n/a", now,
+         spec.call_id, spec.args_hash, decision_kind, lowered_by),
+    )
+    conn.commit()
+    return {"event_obs_id": event_obs_id, "call_id": spec.call_id,
+            "decision": decision_kind, "lowered_by": lowered_by}
 
 
 def _select_pending(conn: sqlite3.Connection, account: str | None, limit: int) -> list[sqlite3.Row]:
