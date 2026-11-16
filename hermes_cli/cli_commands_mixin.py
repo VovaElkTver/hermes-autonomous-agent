@@ -1178,7 +1178,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         _set_active(result.slug)
         print(_t("hatch.hatched", name=result.display_name))
 
-    # ---- delegating handlers: /suggestions, /blueprint, /curator, /kanban, /skills, /memory --
+    # ---- delegating handlers: /suggestions, /blueprint, /curator, /skills, /memory --
     # /suggestions went with the scheduled package; the handler slot is gone with it.
 
     def _handle_curator_command(self, cmd: str):
@@ -1193,19 +1193,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         except Exception as exc:
             print(_t("curator.failed", error=exc))
 
-    def _handle_kanban_command(self, cmd: str):
-        """Handle /kanban — strip the leading ``/kanban`` and hand the rest to ``kanban.run_slash``."""
-        from hermes_cli.kanban import run_slash
-        rest = cmd.strip().lstrip("/")
-        if rest.startswith("kanban"):
-            rest = rest[len("kanban"):].lstrip()
-        try:
-            output = run_slash(rest)
-        except Exception as exc:  # pragma: no cover - defensive
-            output = _t("kanban.failed", error=exc)
-        if output:
-            print(output)
-
+    # /kanban went with the Kanban excision (15.11); no handler slot remains.
     def _handle_skills_command(self, cmd: str):
         """Handle /skills slash command — delegates to hermes_cli.skills_hub."""
         from cli import ChatConsole

@@ -79,21 +79,6 @@ def _pre_verify_nudge(agent, final_response, attempt: int) -> Optional[str]:
     return None
 
 
-def _kanban_stop_nudge(agent, messages) -> Optional[str]:
-    """Workers must end with a terminal board tool (kanban_complete / kanban_block /
-    kanban_request_review / kanban_request_changes); a narrated stop is recorded
-    as protocol_violation, so nudge once or twice first."""
-    try:
-        from agent.kanban_stop import build_kanban_stop_nudge
-
-        return build_kanban_stop_nudge(
-            messages=messages, attempts=getattr(agent, "_kanban_stop_nudges", 0)
-        )
-    except Exception:
-        logger.debug("kanban stop-loop check failed", exc_info=True)
-        return None
-
-
 _MAX_LSP_TURN_END_NOTES = 3
 
 
@@ -201,23 +186,6 @@ def apply_stop_gates(
         logger.debug("pre_verify nudge issued (attempt %d)", agent._pre_verify_nudges)
         return verdict
 
-    _kanban_nudge = _kanban_stop_nudge(agent, messages)
-    if _kanban_nudge:
-        agent._kanban_stop_nudges = getattr(agent, "_kanban_stop_nudges", 0) + 1
-        final_msg["finish_reason"] = "kanban_terminal_required"
-        final_msg["_kanban_stop_synthetic"] = True
-        append_message(messages, final_msg)
-        verdict = _continue(_kanban_nudge, "_kanban_stop_synthetic")
-        logger.info(
-            "kanban stop-loop nudge issued (attempt %d) task=%s",
-            agent._kanban_stop_nudges,
-            os.environ.get("HERMES_KANBAN_TASK", ""),
-        )
-        agent._emit_diagnostic_status(
-            "⚠️ Kanban worker tried to exit without a terminal board call "
-            "(kanban_complete/kanban_request_review/kanban_block) — nudging to finish"
-        )
-        return verdict
     # INVESTIGATION-HOOK: H4 stop gate (docs/design/investigation-mechanism.md §3 H4) —
     # one nudge per turn while captured results are still unassessed: the agent
     # decides what they mean, the core only refuses silent forgetting. If the

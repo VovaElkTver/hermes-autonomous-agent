@@ -119,22 +119,9 @@ _ENV_DETECT_CACHE: dict[str, bool] = {}
 
 
 def _detect_kanban() -> bool:
-    # Mirror tools/kanban_tools.py: a dispatcher-spawned worker (env vars, but
-    # only when this execution OWNS the task — delegate children / in-process
-    # scheduled see the worker's vars) or a profile opted into the kanban toolset.
-    if os.getenv("HERMES_KANBAN_TASK") or os.getenv("HERMES_KANBAN_BOARD"):
-        try:
-            from agent.delegation_context import is_dispatcher_owned_worker_context
-            owned = is_dispatcher_owned_worker_context()
-        except Exception:
-            owned = True
-        if owned:
-            return True
-    try:
-        from tools.kanban_tools import _profile_has_kanban_toolset
-        return bool(_profile_has_kanban_toolset())
-    except Exception:
-        return False
+    # Kanban excision 15.11: no dispatcher, no kanban toolset — the environment tag
+    # never matches, so skills gated on `environments: kanban` stay hidden.
+    return False
 
 
 def _detect_docker() -> bool:
@@ -152,11 +139,8 @@ _ENV_DETECTORS: dict[str, Callable[[], bool]] = {
 
 
 def _detect_environment(env: str) -> bool:
-    """True when the named runtime environment is active (unknown => True).
-    Cached per process EXCEPT ``kanban``: that verdict is context-dependent
-    (delegate children / in-process scheduled see the worker's vars), so a
-    process-wide cache would leak the first asker's answer to the others."""
-    if env != "kanban" and env in _ENV_DETECT_CACHE:
+    """True when the named runtime environment is active (unknown => True). Cached per process."""
+    if env in _ENV_DETECT_CACHE:
         return _ENV_DETECT_CACHE[env]
     detector = _ENV_DETECTORS.get(env)
     result = detector() if detector else True

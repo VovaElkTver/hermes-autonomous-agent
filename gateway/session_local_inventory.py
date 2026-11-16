@@ -104,17 +104,13 @@ def _unknown_toolsets(enabled, config):
 
 
 def _cli_skills():
-    """``hermes_cli.banner.get_available_skills`` as main's classic CLI computed it: ``cmd_chat`` pins
-    ``HERMES_KANBAN_BOARD`` before HermesCLI starts, so ``environments: [kanban]`` skills are offered.
-    The owner never sets that env; the kanban relevance is scoped to this scan (a ContextVar) and the
-    catalog cache entry it would poison is restored, so other surfaces keep their own view."""
+    """``hermes_cli.banner.get_available_skills`` as main's classic CLI computed it. The kanban
+    toolset scoping is gone with the excision; the plain catalog scan remains."""
     from tools import skills_tool
-    from tools.kanban_toolset_context import scoped_kanban_toolset_selection
     key = ("filtered", False)
     saved = skills_tool._SKILLS_CACHE.pop(key, None)
     try:
-        with scoped_kanban_toolset_selection(["kanban"]):
-            found = skills_tool.find_all_skills()
+        found = skills_tool.find_all_skills()
     finally:
         skills_tool._SKILLS_CACHE.pop(key, None)
         if saved is not None:
