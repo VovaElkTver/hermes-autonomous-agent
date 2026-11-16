@@ -18,11 +18,8 @@ from agent.turn_author import TURN_AUTHOR_ENV
 
 def _one_shot_cli(monkeypatch):
     """A real HermesCLI whose ``chat`` runs the real agent-thread body against a recording agent."""
-    monkeypatch.delenv("HERMES_KANBAN_TASK", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_GOAL_MODE", raising=False)
     monkeypatch.setattr(cli, "_should_seed_interactive", lambda *a, **k: False)
     monkeypatch.setattr(cli, "_collect_query_images", lambda q, i: (q, []))
-    monkeypatch.setattr(cli, "_collect_kanban_task_images", lambda imgs: [])
     monkeypatch.setattr(cli, "_finalize_single_query", lambda c: None)
 
     calls = []
