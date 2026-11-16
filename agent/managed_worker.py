@@ -339,8 +339,6 @@ def execute(frame, channel):
     if adopted['owner_epoch'] != scope['epoch']:
         raise RuntimeError('stale_epoch')
     store = RuntimeSessionStore(rpc, scope, outbox_dir(frame['home'], scope['execution_id']), adopted)
-    from gateway.session_kanban import bind_worker_context
-    bind_worker_context(frame)
     # Background processes a previous admission of this session started outlive that worker
     # (F24); adopt them so process_manage in this turn can poll and kill them.
     from tools.process_registry import process_registry
@@ -387,7 +385,7 @@ def execute(frame, channel):
                 request_hard_interrupt(agent)
             channel.send('ready', pid=os.getpid())
             history = store.get_messages_as_conversation(scope['session_id'])
-            from gateway.session_kanban import run_worker_turns
+            from gateway.session_worker_turns import run_worker_turns
             if 'attachments_v1' in frame:
                 from gateway.session_ingress_media import restore_attachments
                 from agent.image_routing import build_native_content_parts
@@ -429,15 +427,8 @@ def execute(frame, channel):
 
 
 def _construct_agent(frame, factory, policy, **kwargs):
-    """Agent construction resolves the provider credentials; a Kanban attempt that fails here
-    still books the one-shot exit mapping (quota wall 75, re-login 78) before the crash."""
-    try:
-        from gateway.session_worker_construct import worker_route
-        return factory(**{**kwargs, **worker_route(policy, kwargs)})
-    except Exception as exc:
-        from gateway.session_kanban import record_start_failure
-        record_start_failure(frame, exc)
-        raise
+    from gateway.session_worker_construct import worker_route
+    return factory(**{**kwargs, **worker_route(policy, kwargs)})
 
 
 def hello():

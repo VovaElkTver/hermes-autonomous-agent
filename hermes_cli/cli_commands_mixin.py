@@ -819,13 +819,6 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         if resolved is None:
             return
         target_id, session_meta = resolved
-        # A Kanban worker transcript must not become this chat's write-capable continuation
-        # (#68779): the resumed conversation would be a writer the Kanban board cannot
-        # observe, and unblocking the card could dispatch a competing worker. Keep the
-        # CURRENT session instead of switching.
-        from hermes_cli.kanban_resume_guard import kanban_resume_refusal
-        if (kanban_refusal := kanban_resume_refusal(self._session_db, target_id)):
-            return _cp(f"  {kanban_refusal}")
         # One session.resume, before anything changes: it subscribes the target and names its receipt
         # owner; a target the gateway refuses this viewer stops the switch, so the current session is
         # neither ended nor swapped for one whose next prompt would be refused.

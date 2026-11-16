@@ -550,19 +550,8 @@ def _stopped_before_spawn(authority, ref, row):
 
 
 def _record_lost_attempt(authority, policy, exc, reason, scope):
-    """Start the board disposition (``worker_lost``) for a lost Kanban card attempt; the task, or None.
-
-    A worker that dies in ``worker.adopt`` never writes ``worker_bound``/``worker_result``, so
-    without it the card's run learns nothing from its own loss. A deliberate Stop or a
-    superseded generation is not a loss. Tracked, so retirement joins the write.
-    """
-    if (not getattr(policy, 'kanban_json', None) or isinstance(exc, asyncio.CancelledError)
-            or reason in ('managed_worker_stopped', 'stale_generation')):
-        return None
-    from gateway.session_kanban import record_worker_loss
-    from gateway.session_runtime_workers import track_mutation
-    return track_mutation(authority, asyncio.to_thread(partial(record_worker_loss, policy, reason,
-                                                               pid=(scope or {}).get('pid'), bound=scope is not None)))
+    """Board disposition for a lost attempt: kanban excised, nothing to record. Always None."""
+    return None
 
 
 async def _settle_lost(authority, row, scope, recording):
