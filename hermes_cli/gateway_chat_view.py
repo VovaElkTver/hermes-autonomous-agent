@@ -579,7 +579,7 @@ class GatewayChatView:
                 result.update(failed=bool(result.get("failed")) or outcome not in ("completed", "cancelled"),
                               interrupted=bool(result.get("interrupted")) or outcome == "cancelled")
                 exit_code = (_oneshot_exit_code(text, result) if self.unattended
-                             else turn_exit_code(result, kanban_worker=False))
+                             else turn_exit_code(result))
                 if self.usage_file:
                     self._write_usage_file(result, outcome)
                 if self.emitter is not None:

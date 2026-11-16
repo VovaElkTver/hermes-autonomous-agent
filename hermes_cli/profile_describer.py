@@ -1,8 +1,7 @@
 """Profile describer — auto-generate ``description`` for a profile.
 
-Mirrors ``hermes_cli/kanban_specify.py``: lazy aux client import, lenient response parse,
-never raises on expected failure modes. Reads at most ``MAX_SKILLS_FOR_PROMPT`` skill
-names to keep the prompt bounded.
+Lazy aux client import, lenient response parse, never raises on expected failure
+modes. Reads at most ``MAX_SKILLS_FOR_PROMPT`` skill names to keep the prompt bounded.
 """
 
 from __future__ import annotations
@@ -22,10 +21,10 @@ logger = logging.getLogger(__name__)
 MAX_SKILLS_FOR_PROMPT = 60
 
 
-_SYSTEM_PROMPT = """You are a profile-describer for the Hermes Agent kanban board.
+_SYSTEM_PROMPT = """You are a profile-describer for the Hermes Agent.
 
 A user runs multiple "profiles" — distinct agent identities, each with their
-own skills, model, and configuration. The kanban board's orchestrator routes
+own skills, model, and configuration. The orchestrator routes
 work to whichever profile best fits each task. To do that well, every
 profile needs a short, concrete description of what it's good at.
 
@@ -105,8 +104,29 @@ def _sample_skills(names: list[str]) -> list[str]:
 
 
 def _extract_json_blob(raw: str) -> Optional[dict]:
-    from hermes_cli.kanban_specify import _extract_json_blob as _extract
-    return _extract(raw, _FENCE_RE)
+    """Lenient parse: first JSON object found in *raw* (tolerates prose around it), else None."""
+    if not isinstance(raw, str):
+        return None
+    import json
+
+    text = _FENCE_RE.sub("", raw).strip()
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        for i in range(start, len(text)):
+            ch = text[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        blob = json.loads(text[start:i + 1])
+                    except ValueError:
+                        break
+                    return blob if isinstance(blob, dict) else None
+        start = text.find("{", start + 1)
+    return None
 
 
 def describe_profile(profile_name: str, *, overwrite: bool = False, timeout: Optional[int] = None) -> DescribeOutcome:

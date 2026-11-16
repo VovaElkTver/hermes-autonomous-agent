@@ -1744,7 +1744,6 @@ cmd_logout = _forward_command("cmd_logout", "hermes_cli.auth", "logout_command",
 cmd_auth = _forward_command("cmd_auth", "hermes_cli.auth_commands", "auth_command", doc='Manage pooled credentials.')
 cmd_status = _forward_command("cmd_status", "hermes_cli.status", "show_status", doc='Show status of all components.')
 cmd_webhook = _forward_command("cmd_webhook", "hermes_cli.webhook", "webhook_command", forward_return=True, doc='Webhook subscription management.')
-cmd_kanban = _forward_command("cmd_kanban", "hermes_cli.kanban", "kanban_command", forward_return=True, doc='Multi-profile collaboration board.')
 cmd_project = _forward_command("cmd_project", "hermes_cli.projects_cmd", "projects_command", forward_return=True, doc='Manage projects (named, multi-folder workspaces).')
 cmd_hooks = _forward_command("cmd_hooks", "hermes_cli.hooks", "hooks_command", doc='Shell-hook inspection and management.')
 cmd_doctor = _forward_command("cmd_doctor", "hermes_cli.doctor", "run_doctor", forward_return=True, doc='Check configuration and dependencies.')
@@ -3228,9 +3227,6 @@ def _build_cli_parser():
 
     from hermes_cli.portal_cli import add_parser as _add_portal_parser
     _add_portal_parser(subparsers)
-
-    from hermes_cli.kanban import build_parser as _build_kanban_parser
-    _build_kanban_parser(subparsers).set_defaults(func=cmd_kanban)
 
     from hermes_cli.projects_cmd import build_parser as _build_project_parser
     _build_project_parser(subparsers).set_defaults(func=cmd_project)

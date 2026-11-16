@@ -143,6 +143,6 @@ async def test_a_finite_prompt_answered_without_running_settles_failed(tmp_path,
         await asyncio.wait_for(authority.sessions['s'].task, 10)
         assert get_session_admission(db, admission_id=receipt.admission_id)['outcome'] == outcome
         result = admission_result(db, receipt.admission_id)['result']
-        assert turn_exit_code(result, kanban_worker=False) == (1 if outcome == 'failed' else 0)
+        assert turn_exit_code(result) == (1 if outcome == 'failed' else 0)
     finally:
         db.close()

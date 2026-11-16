@@ -334,11 +334,6 @@ def _select_tool_names(enabled_toolsets: Optional[list[str]], disabled_toolsets:
     tools: set = set()
     if enabled_toolsets is not None:
         enabled = list(enabled_toolsets)
-        # Dispatcher-spawned kanban workers always get the lifecycle handoff
-        # tools, even when the assignee profile restricts its chat toolsets.
-        if (os.environ.get("HERMES_KANBAN_TASK") and not _is_delegated_child_context()
-                and _is_dispatcher_owned_worker() and "kanban" not in enabled):
-            enabled.append("kanban")
         _apply_toolset_selection(tools, enabled, quiet_mode, disable=False)
     else:
         from toolsets import TOOLSET_SESSION_PLATFORMS, get_all_toolsets
@@ -522,11 +517,7 @@ def _compute_tool_definitions(enabled_toolsets: Optional[list[str]] = None, disa
                               quiet_mode: bool = False, skip_tool_search_assembly: bool = False) -> list[dict[str, Any]]:
     """Uncached implementation of :func:`get_tool_definitions`."""
     tools_to_include = _select_tool_names(enabled_toolsets, disabled_toolsets, quiet_mode)
-    # Selection is per schema, not per process/profile. Kanban's local checks
-    # are uncached; the outer definitions cache already keys on this selection.
-    from tools.kanban_toolset_context import scoped_kanban_toolset_selection
-    with scoped_kanban_toolset_selection(enabled_toolsets):
-        filtered_tools = _apply_dynamic_schemas(registry.get_definitions(tools_to_include, quiet=quiet_mode))
+    filtered_tools = _apply_dynamic_schemas(registry.get_definitions(tools_to_include, quiet=quiet_mode))
     global _last_resolved_tool_names
     _last_resolved_tool_names = [t["function"]["name"] for t in filtered_tools]
 

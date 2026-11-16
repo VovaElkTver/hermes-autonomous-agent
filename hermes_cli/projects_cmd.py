@@ -16,9 +16,8 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         help="Manage projects (named, multi-folder workspaces)",
         description=(
             "Projects are human-named workspaces that can span multiple "
-            "folders / repos. They anchor desktop session grouping and, when "
-            "bound to a kanban board, give tasks a deterministic worktree + "
-            "branch convention. State is per-profile."
+            "folders / repos. They anchor desktop session grouping. State is "
+            "per-profile."
         ),
     )
     sub = parser.add_subparsers(dest="project_action")
@@ -210,18 +209,10 @@ def _flag_command(op: str, verb: str):
 
 @_with_project
 def _cmd_bind_board(args, conn, proj) -> str:
+    # Kanban excision (15.11): boards are gone; the slug stays as inert project metadata.
     pdb.update_project(conn, proj.id, board_slug=args.board)
     if not args.board.strip():
         return f"Unbound board from {proj.slug}"
-    if proj.primary_path:  # best-effort: point the bound board's default_workdir at the primary repo
-        try:
-            from hermes_cli import kanban_db as kb
-
-            slug = kb._normalize_board_slug(args.board)
-            if slug and (slug == kb.DEFAULT_BOARD or kb.board_exists(slug)):
-                kb.write_board_metadata(slug, default_workdir=proj.primary_path)
-        except Exception:
-            pass
     return f"Bound {proj.slug} -> board {args.board}"
 
 

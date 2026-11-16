@@ -679,20 +679,9 @@ def _launch_tui(
 
 
 def _pin_kanban_board_env() -> None:
-    """Pin the active kanban board into ``HERMES_KANBAN_BOARD`` so in-process tools and shelled-out
-    ``hermes kanban`` calls agree even if a concurrent ``boards switch`` flips the file mid-turn.
-
-    Without this, in-process tools (``kanban_*``) and shelled-out CLI calls (``hermes kanban …``) resolve
-    the board on different paths: the env-pin if set, otherwise the global ``<root>/kanban/current`` file. A
-    concurrent ``hermes kanban boards switch`` from another session can flip the file mid-turn, so the same
-    chat sees its tool calls hit board A while its shell calls hit board B (#20074). Pinning at chat boot
-    mirrors what the dispatcher already does for spawned workers.
-    """
-    if os.environ.get("HERMES_KANBAN_BOARD"):
-        return
-    with contextlib.suppress(Exception):
-        from hermes_cli.kanban_db import get_current_board
-        os.environ["HERMES_KANBAN_BOARD"] = get_current_board()
+    """Kanban excision (15.11): boards are gone; kept as a no-op because several tests
+    monkeypatch this hook at chat boot."""
+    return
 
 
 def _sync_bundled_skills_quietly() -> None:

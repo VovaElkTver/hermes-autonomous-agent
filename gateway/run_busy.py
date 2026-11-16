@@ -1049,7 +1049,7 @@ class GatewayBusySessionMixin:
     # Ordinary slash handlers shared by idle and busy dispatch.
     _PLAIN_COMMANDS = (
         "status", "context", "restart", "approve", "deny", "pause", "discard", "agents", "bg", "btw",
-        "kanban", "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
+        "subgoal", "heartbeat", "busy", "yolo", "verbose", "footer", "help",
         "commands", "profile", "login", "update", "version", "autoprune",
         "reset-safe", "reset", "next", "skip", "qlist", "qhold", "qresume",
     )

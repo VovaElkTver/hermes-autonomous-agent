@@ -230,7 +230,6 @@ class AuthorityConnection:
                     'bot_relay.settle': self.bot_settle, 'bot_relay.cancel': self.bot_cancel,
                     'bot_relay.roster.sync': self.bot_roster, 'bot_relay.outbox.drain': self.bot_outbox,
                     'bot_relay.reply': self.bot_reply, 'a2a.forward': self.a2a_forward,
-                    'kanban.run': self.kanban_run,
                     'worker.register': self.worker_register, 'worker.adopt': self.worker_adopt,
                     'worker.persist': self.worker_persist,
                     'setup.status': self.setup_status, 'setup.runtime_check': self.setup_runtime_check,
@@ -388,10 +387,6 @@ class AuthorityConnection:
     async def a2a_forward(self, ref, params):
         from gateway.session_a2a import forward
         return await forward(self, params)
-
-    async def kanban_run(self, ref, params):
-        from gateway.session_kanban import run_task
-        return await run_task(self, params)
 
     async def bot_roster(self, ref, params):
         from gateway.session_bot import relay_operation
