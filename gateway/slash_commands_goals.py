@@ -299,13 +299,19 @@ class GatewayGoalCommandsMixin:
             _first, _, _rest = args.partition(" ")
             _first = _first.strip().lower()
             if _first in {"go", "иди", "stop", "стоп", "postpone", "отложи",
-                          "approve", "reject", "status", "resume"}:
+                          "approve", "reject", "status", "resume",
+                          "topic-new", "topic-use"}:
                 reply = _managed_refine_cmd(_ckey, _first, _rest.strip())
                 if reply is not None:
                     return reply
                 return "managed_refine: вердикт принят."
             if args:
-                from gateway.refine_managed import _GATES
+                from gateway.refine_managed import _GATES, RUNS
+                run_ = RUNS.get(_ckey)
+                if run_ is not None and getattr(run_, "stage", "") == "TOPIC_CONFIRM":
+                    # свободный текст на вопрос о теме = имя темы (ответ владельца)
+                    return _managed_refine_cmd(_ckey, "topic:" + args, "", agent=None) \
+                        or "[managed_refine] вердикт темы принят."
                 gate = _GATES.get(_ckey)
                 if gate is not None and gate.verdict is None and not _first.startswith("/"):
                     _managed_refine_cmd(_ckey, args, "", agent=None)  # свободный текст = поправка промпта (§2.1)
