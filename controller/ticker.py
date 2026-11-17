@@ -50,14 +50,18 @@ import json
 import logging
 import os
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 from . import alerts, loop, model, pump_lock, queue as Q, transitions, wake
 
 logger = logging.getLogger("controller.ticker")
 
-INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0}
+INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0,
+             "autonomy_metrics": 86400.0}
 TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
 
 PUMP_STALE_S = 25 * 60   # the watchdog ticker's own freshness rule
@@ -348,12 +352,15 @@ class Ticker:
         beat does zero SQL; only a due counter touches the DB."""
         next_pump = self._mono() + self.intervals["pump"] / 2
         next_followups = self._mono() + self.intervals["followups"]
+        next_autonomy = self._mono() + self.intervals["autonomy_metrics"]
         wake_seen = wake.read_seq()
         while not self._stop.is_set():
             # Wake seam (go Вл 09.11): an external mutation (transition, new
             # follow-up, answered approval) rang the seq file — pull every due
             # counter to THIS beat. The 300 s is a policy, not latency. A tiny
             # file read, so the idle beat stays zero-SQL (doctrine 28.10).
+            # The daily autonomy-metrics counter is NOT wake-pulled: a report
+            # cadence is a cadence, not a due date.
             seq = wake.read_seq()
             if seq != wake_seen:
                 wake_seen = seq
@@ -367,8 +374,14 @@ class Ticker:
             if self._mono() >= next_followups:
                 self._guard("followups", conn, self.run_followups)
                 next_followups = max(next_followups, self._mono()) + self.intervals["followups"]
+            if self._mono() >= next_autonomy:
+                # S0 (TЗ thinking-enable): the daily autonomy report is an EVENT
+                # OF THIS EXISTING TICK — no new thread, no new timer.
+                self._guard("autonomy-metrics", conn, self.run_autonomy_metrics)
+                next_autonomy = (max(next_autonomy, self._mono())
+                                 + self.intervals["autonomy_metrics"])
             # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
-            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups) - self._mono())))
+            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups, next_autonomy) - self._mono())))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
@@ -481,6 +494,36 @@ class Ticker:
         fired = followups.scan(conn, deliver, now=self._now(), beat_s=self.tick_s)
         if fired:
             self._heartbeat(conn, "followups", {"fired": fired})
+
+    def run_autonomy_metrics(self, conn) -> None:
+        """S0 event (TЗ thinking-enable): the daily autonomy report, as an event
+        of this existing tick (no new thread, no new timer).
+
+        The script is the throat (scripts/autonomy_metrics.py): read-only SQL,
+        zero writes; its --deliver flag delivers through the stock outbox port
+        (idempotent by msg_id, durable receipt) and drains in-process. Without
+        a configured controller.alert_target the delivery degrades to
+        stdout/journal — honest, not silent. A subprocess failure raises and
+        _guard turns it into the usual deduped tick-error alert: the meter must
+        not die quietly (cautionary §5: 'есть, но не работает' must be visible)."""
+        script = Path(__file__).resolve().parents[1] / "scripts" / "autonomy_metrics.py"
+        if not script.is_file():
+            raise OSError(f"autonomy-metrics script missing: {script}")
+        from hermes_constants import get_hermes_home
+        db = get_hermes_home() / "state.db"
+        repo_root = str(Path(__file__).resolve().parents[1])
+        env = dict(os.environ)
+        env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"]
+                                         if env.get("PYTHONPATH") else "")
+        proc = subprocess.run(
+            [sys.executable, str(script), "--db", str(db), "--markdown", "--deliver"],
+            capture_output=True, text=True, timeout=120, check=False, env=env,
+            cwd=repo_root)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"autonomy-metrics exit {proc.returncode}: "
+                f"{(proc.stderr or proc.stdout or '').strip()[-200:]}")
+        self._heartbeat(conn, "autonomy-metrics", {})
 
     def _drain_live_ports(self, conn) -> int:
         """Donor ports live (stage tail): dispatch durable effects/outbox rows.

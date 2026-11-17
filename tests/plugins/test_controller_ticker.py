@@ -545,3 +545,58 @@ def test_reclaim_watchdog_armed_by_start_default(singleton):
     singleton._ensure_reclaim_watchdog()
     watches = [x for x in singleton._reclaim_threads if x.is_alive()]
     assert len(watches) <= 1
+
+
+# ── TЗ thinking-enable S0: the daily autonomy report as an event of this tick ─
+
+def test_autonomy_metrics_daily_counter_rides_the_tick(db_connect, monkeypatch):
+    """TЗ thinking-enable S0: the daily report is an EVENT OF THE EXISTING 1 Hz
+    tick — a counter on the same clock, not a new thread or timer. One guarded
+    call when due, re-anchored to the future afterwards; wake-pulling does not
+    accelerate it (a cadence is a cadence, not a due date)."""
+    from controller import ticker
+
+    calls = []
+    t = ticker.Ticker(intervals={"pump": 3600, "watchdog": 3600,
+                                "followups": 3600, "autonomy_metrics": 0.3},
+                     gates_path=None)
+    monkeypatch.setattr(t, "run_autonomy_metrics", lambda conn: calls.append(1))
+    t.start()
+    try:
+        assert _wait_for(lambda: len(calls) >= 1, timeout=5), "daily report never fired"
+        time.sleep(0.25)
+        assert len(calls) == 1, f"re-fired inside the interval: {len(calls)}"
+    finally:
+        t.stop()
+
+
+def test_run_autonomy_metrics_missing_db_raises(db_connect, monkeypatch, tmp_path, caplog):
+    """A broken meter must be LOUD, not silent: the tick raises and _guard
+    turns it into the deduped tick-error alert (cautionary §5 — 'есть, но не
+    работает' must be visible in the feed, not swallowed)."""
+    from controller import ticker
+
+    conn = db_connect()
+    empty = tmp_path / "empty-home"
+    empty.mkdir()
+    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: empty)
+    t = ticker.Ticker(gates_path=None)
+    with pytest.raises(RuntimeError):
+        t.run_autonomy_metrics(conn)
+    conn.close()
+
+
+def test_run_autonomy_metrics_green_path_hearts_beat(db_connect, monkeypatch, tmp_path):
+    """Full green path: the subprocess meter runs read-only against the state
+    db; without a configured alert target delivery degrades to stdout/journal
+    (no DB touched) and the tick still heartbeats 'autonomy-metrics'."""
+    from controller import ticker
+
+    conn = db_connect()  # creates tmp_path/state.db with the schema
+    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
+    t = ticker.Ticker(gates_path=None)
+    t.run_autonomy_metrics(conn)
+    row = conn.execute("SELECT ts, payload FROM ctl_ticker_heartbeat "
+                       "WHERE kind='autonomy-metrics'").fetchone()
+    assert row is not None, "no autonomy-metrics heartbeat row"
+    conn.close()

@@ -316,16 +316,18 @@ def to_markdown(report: dict) -> str:
 def deliver_onetime(db_path: str, report: dict) -> bool:
     """One-shot feed delivery through the stock outbox port (controller/outbox.py
     + live_ports composition). No new thread, no timer: this process is the
-    event; the outbox row is durable and idempotent by msg_id."""
+    event; the outbox row is durable and idempotent by msg_id. Without a
+    configured target the report stays in stdout/journal (honest degradation,
+    no DB touched at all)."""
     from controller import live_ports
+    target = live_ports.alert_target_from_cfg()
+    if not target:
+        print("deliver: no controller.alert_target configured — "
+              "report stays in stdout/journal", file=sys.stderr)
+        return False
     from controller import model
     conn = model.connect()
     try:
-        target = live_ports.alert_target_from_cfg()
-        if not target:
-            print("deliver: no controller.alert_target configured — "
-                  "report stays in stdout/journal", file=sys.stderr)
-            return False
         text = to_markdown(report)
         _effects, outbox = live_ports.build(conn, live_ports.default_deliver(target))
         msg_id = f"autonomy-metrics-{report['generated_at']}"
