@@ -1016,31 +1016,29 @@ def resolve_topic_answer(run: ManagedRun, answer: str) -> str:
 
 # --------------------------------------------------------------------------- commands (/refine dispatch)
 
+#: Таблица команд гейта: sub -> (вердикт, текст «нет гейта»).
+_GATE_RESOLVE = {
+    "go": ("go", "открытого гейта нет"),
+    "иди": ("go", "открытого гейта нет"),
+    "stop": ("stop", "нет открытого гейта"),
+    "стоп": ("stop", "нет открытого гейта"),
+    "postpone": ("postpone", "открытого гейта нет"),
+    "отложи": ("postpone", "открытого гейта нет"),
+    "approve": ("approve", "открытого гейта DISCUSS нет"),
+}
+
+
 def handle_command(chat_key: Optional[str], sub: str, rest: str, agent: Any = None) -> Optional[str]:
     """Вход из диспетчера /refine: sub — первое слово аргументов, rest — остаток строки.
     None — команда потреблена управляемой машиной (дальше как новый прогон её не трактовать)."""
     chat_key = str(chat_key or "")
     gate = _GATES.get(chat_key)
-    if sub in ("go", "иди"):
+    _verdict = _GATE_RESOLVE.get(sub)
+    if _verdict is not None:
         if gate:
-            gate.resolve("go")
+            gate.resolve(_verdict[0])
             return None
-        return "открытого гейта нет"
-    if sub in ("stop", "стоп"):
-        if gate:
-            gate.resolve("stop")
-            return None
-        return "нет открытого гейта"
-    if sub in ("postpone", "отложи"):
-        if gate:
-            gate.resolve("postpone")
-            return None
-        return "открытого гейта нет"
-    if sub == "approve":
-        if gate:
-            gate.resolve("approve")
-            return None
-        return "открытого гейта DISCUSS нет"
+        return _verdict[1]
     if sub.startswith("reject"):
         run = RUNS.get(chat_key)
         if run:

@@ -208,7 +208,7 @@ def test_command_guard_when_not_in_confirm(tmp_path, monkeypatch):
 def test_owner_answer_existing_name_routes(tmp_path, monkeypatch):
     """«левый» в ответе = существующая тема, без topic-use."""
     _write_registry(tmp_path, [("left", ["левый"]), ("right", ["правый"])])
-    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "левый и правый"}])
+    run, _emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "левый и правый"}])
     envelope = {"status": "PROPOSE_CHANGES",
                 "changes": [{"candidate_id": "c9", "operation": "UPDATE",
                              "kind": "memory", "topic": "?",
@@ -218,7 +218,7 @@ def test_owner_answer_existing_name_routes(tmp_path, monkeypatch):
     rm.RUNS[run.chat_key] = run
     monkeypatch.setattr(rm, "_gate", lambda key: (_FakeGate(),)[0])
     try:
-        reply = rm.handle_command(run.chat_key, "left", "", agent=None)
+        rm.handle_command(run.chat_key, "left", "", agent=None)
         assert _await_leave_confirm(run)
         assert run.topic_route == "left"
         assert run.cards and run.cards[0]["topic"] == "left"
@@ -228,14 +228,14 @@ def test_owner_answer_existing_name_routes(tmp_path, monkeypatch):
 
 def test_owner_answer_new_name_creates(tmp_path, monkeypatch):
     """Незнакомое имя в ответе = создать тему с этим именем."""
-    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    _write_registry(tmp_path, [("known-t", ["аккуратный"])])
     envelope = {"status": "PROPOSE_CHANGES",
                 "changes": [{"candidate_id": "c1", "operation": "CREATE",
                              "kind": "memory", "topic": "brand-new-x",
                              "knowledge_kind": "PROCEDURE",
                              "proposed_content": "правило",
                              "dedup_checked_ids": ["d1"], "novelty": "новое"}]}
-    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "нейтральный материал"}])
+    run, _emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "нейтральный материал"}])
     envelope["changes"][0]["operation"] = "UPDATE"      # обходим dedup-гейт CREATE: фокус теста на маршруте темы
     rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
     assert run.stage == "TOPIC_CONFIRM"
@@ -244,7 +244,7 @@ def test_owner_answer_new_name_creates(tmp_path, monkeypatch):
     try:
         # заманить вопрос NEW любым статусом: имя "Fresh" отсутствует в реестре
         run.topic_assessment["status"] = "NEW"
-        reply = rm.handle_command(run.chat_key, "fresh", "", agent=None)
+        rm.handle_command(run.chat_key, "fresh", "", agent=None)
         assert _await_leave_confirm(run)
         assert rm._registry_rule("fresh") is not None
         assert run.topic_route == "fresh"
@@ -254,14 +254,14 @@ def test_owner_answer_new_name_creates(tmp_path, monkeypatch):
 
 
 def test_owner_answer_yes_uses_proposed_name(tmp_path, monkeypatch):
-    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    _write_registry(tmp_path, [("known-t", ["аккуратный"])])
     envelope = {"status": "PROPOSE_CHANGES",
                 "changes": [{"candidate_id": "c1", "operation": "CREATE",
                              "kind": "memory", "topic": "brand-new-x",
                              "knowledge_kind": "PROCEDURE",
                              "proposed_content": "правило",
                              "dedup_checked_ids": ["d1"], "novelty": "новое"}]}
-    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "материал brand-new-x"}])
+    run, _emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "материал brand-new-x"}])
     rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
     assert run.stage == "TOPIC_CONFIRM"
     rm.RUNS[run.chat_key] = run
@@ -277,12 +277,12 @@ def test_owner_answer_yes_uses_proposed_name(tmp_path, monkeypatch):
 
 
 def test_owner_answer_empty_and_unsure(tmp_path, monkeypatch):
-    reg = _write_registry(tmp_path, [("known-t", ["аккуратный"])])
+    _write_registry(tmp_path, [("known-t", ["аккуратный"])])
     envelope = {"status": "PROPOSE_CHANGES",
                 "changes": [{"candidate_id": "c1", "operation": "CREATE",
                              "kind": "memory", "topic": "z",
                              "knowledge_kind": "FACT", "proposed_content": "x"}]}
-    run, emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "неопределённый материал"}])
+    run, _emitted = _mk_run(tmp_path, monkeypatch, [{"role": "user", "content": "неопределённый материал"}])
     rm._finalize_analysis(run, "```json\n" + json.dumps(envelope) + "\n```")
     assert run.stage == "TOPIC_CONFIRM"
     out = rm.handle_command(run.chat_key, "какая-то ерунда без темы?", "", agent=None)
