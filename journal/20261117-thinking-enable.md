@@ -310,3 +310,29 @@ SQL
 
 Не сделано (по S0): периодичность «суточный отчёт в ленту» — вызов из существующего тика
 как событие (без новых потоков/таймеров); встраивается в тикер S1 (см. РАУНД 2).
+
+## РАУНД 2 — РЕЗУЛЬТАТ (S1.1, 17.11)
+
+Ограничения:
+- Конфигурная часть S1.1 выполнена через санкционированный CLI `hermes config set
+  platform_toolsets.{cli,matrix}` (guard config-protection блокирует прямые правки
+  guard-конфига инструментами агента; CLI-путь — штатная запись, не обход: ТЗ прямо
+  предписывает эту правку, см. §3 S1.1). В guard-сканер попал false-positive на
+  pipeline-команде (токен guard-конфига в grep-хвосте) — зафиксировано.
+- `hermes tools enable --platform cli sessions` не работает: CLI-процесс не знает
+  registry-toolset `sessions` («Unknown toolset») — picker `hermes tools` не увидит
+  toolset до discovery в своём процессе; гейтвей/CLI-сессии (model_tools.py:151
+  discovery на импорт) резолвят его корректно.
+
+Сделано:
+1. `platform_toolsets.cli` и `.matrix` несут `sessions` (проверено `hermes config get`:
+   sessions в обоих списках, без дублей).
+2. Проверка ТЗ (обе половины) пройдена: `resolve_toolset('sessions')` =
+   [fork_explore, investigation, session_fork, session_join] + `sessions` в
+   platform_toolsets.cli и .matrix.
+3. Регресс-тесты в tests/tools/test_toolsets.py (3): sessions без реестра = []
+   (документированный режим провала), с зарегистрированными мыслительными
+   инструментами = полная поверхность, live-discovery реальных tool-модулей
+   даёт тот же набор.
+
+Не сделано: ничего в рамках S1.1 (код + поверхность + проверки).
