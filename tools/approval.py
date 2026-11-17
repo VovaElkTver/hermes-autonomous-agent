@@ -144,13 +144,30 @@ def unregister_gateway_notify(session_key: str) -> None:
 def resolve_gateway_approval(session_key: str, choice: str,
                              resolve_all: bool = False,
                              reason: Optional[str] = None,
-                             request_id: Optional[str] = None) -> int:
+                             request_id: Optional[str] = None,
+                             structured: Optional[bool] = None) -> int:
     """Unblock waiting agent thread(s) from the gateway's /approve or /deny handler.
 
     *resolve_all* resolves every pending approval (``/approve all``); otherwise the oldest
     (FIFO) or the one matching *request_id*. *reason* is the ``/deny <reason>`` free text,
     relayed to the agent in the BLOCKED message. Returns the number resolved.
+
+    *structured* (B2, TZ-2026-11-16-dsh-B): None = enforce the structured-answer
+    contract when ``approvals.once_and_ttl`` is on (typed /approve|/deny and API
+    surfaces); False = legacy surface (a card tap answers with implicit consent,
+    never a reason string); True = force the contract on regardless of the flag.
     """
+    if structured or (structured is None and _b2_active()):
+        # B2a: the structured answer {decision, reason, scope: "once"}. The
+        # reason is required (empty → ValueError) and lands in the ledger row
+        # (the durable *reason* below) and the gate result (meta.error.reason).
+        from tools import approval_contract
+        decision = "deny" if choice in ("deny", "denied") else "allow"
+        approval_contract.structured_answer(decision, (reason or "").strip())
+        if decision == "allow" and choice in ("session", "always"):
+            raise ValueError(
+                "structured answer: only an allowed-once grant is in the B2 contract; "
+                "persistent grants (session/always) stay on the legacy channel")
     with _lock:
         queue = _gateway_queues.get(session_key)
         targets: list = []
@@ -231,6 +248,12 @@ def resolve_gateway_approval_card(session_key: str, choice: str, request_id: Opt
             from gateway.approval_actor import may_answer
             if not may_answer(target.authority, actor_id, admin_ids, extra):
                 return 0
+        # A card tap is a legacy surface (implicit consent, no reason string) —
+        # it never enforces the B2 structured-answer contract. The keyword is
+        # only present on the wire while the flag is on: with the flag off the
+        # call keeps its legacy shape (platform test mocks assert it exactly).
+        if _b2_active():
+            return resolve_gateway_approval(session_key, choice, request_id=request_id, structured=False)
         return resolve_gateway_approval(session_key, choice, request_id=request_id)
 
 
@@ -685,6 +708,28 @@ def _gateway_notify_cb(session_key: str):
         return _gateway_notify_cbs.get(session_key)
 
 
+def _b2_active() -> bool:
+    """``approvals.once_and_ttl`` (B2, TZ-2026-11-16-dsh-B): the structured
+    answer, the pending TTL key, and the denial-code tags on gate results."""
+    try:
+        from tools import approval_contract
+        return approval_contract.once_and_ttl_enabled()
+    except Exception:
+        return False
+
+
+def _tag_b2(result: dict, outcome: str, reason: str = "") -> dict:
+    """Fold the B2 denial code (stable, structural — B2d) into a gate result
+    dict. No-op when the flag is off (byte-identical legacy results)."""
+    if not _b2_active():
+        return result
+    from tools import approval_contract
+    result["approval_code"] = approval_contract.gate_code(outcome)
+    if reason:
+        result["approval_reason"] = str(reason)[:280]
+    return result
+
+
 def _pending_result(spec, session_key: str, *, command: str, description: str,
                     pattern_key: str, pattern_keys: list[str], body: str | None,
                     smart_denied: bool) -> dict:
@@ -697,7 +742,30 @@ def _pending_result(spec, session_key: str, *, command: str, description: str,
     pending["description"] = description
     if smart_denied:
         pending.update(smart_denied=True, allow_permanent=False)
+    if _b2_active():
+        # B2c trace: the no-surface denial lands in the ledger with its code.
+        from tools import approval_contract
+        pending["approval_code"] = approval_contract.APPROVAL_UNAVAILABLE
     submit_pending(session_key, pending)
+    if _b2_active():
+        # B2c: nobody to ask (detached process: no notify channel, no live
+        # surface) → the gate denies up front with the stable code, no
+        # agent-facing pending; the ledger above keeps the trace (the
+        # _pending_result→ledger path stays, the code is added).
+        from tools import approval_contract
+        noun = "command" if spec.pending_keys else "action"
+        return {
+            "approved": False, "pattern_key": pattern_key, "status": "blocked",
+            "command": command, "description": description,
+            "approval_code": approval_contract.APPROVAL_UNAVAILABLE,
+            "approval_reason": "no approval surface is available to ask",
+            "message": (
+                f"BLOCKED: this {noun} requires approval ({description}) and nobody can be "
+                "asked right now (detached run: no notify channel, no live surface). It was NOT "
+                "executed, and the request was recorded in the approval ledger for review. "
+                "Do NOT retry it or attempt the same outcome via a different tool."
+            ),
+        }
     if not spec.pending_keys:
         return {
             "approved": False, "pattern_key": pattern_key, "status": "approval_required",
@@ -836,6 +904,8 @@ def _unattended_deny(command: str, ctx: _Unattended) -> dict | None:
         result = block(f"Command flagged as dangerous ({description})")
         if ctx.name == "single_query":
             result.update(pattern_key=keys[0], description=description)
+        # B2d: no surface can ask (unattended context) → the stable code.
+        _tag_b2(result, "notify_failed")
         return result
     return None
 
@@ -986,9 +1056,13 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
             breaker = _denial_breaker_addendum(session_key)
         deny_reason = fmt.pop("deny_reason", None)
         extra = {"deny_reason": deny_reason} if "reason" in fmt else {}
-        return _denied(template.format(description=description, breaker=breaker, **fmt),
-                       pattern_key=pattern_key, description=description,
-                       outcome=outcome, noun=spec.noun, **extra)
+        result = _denied(template.format(description=description, breaker=breaker, **fmt),
+                         pattern_key=pattern_key, description=description,
+                         outcome=outcome, noun=spec.noun, **extra)
+        # B2d: the stable denial code (APPROVAL_REJECTED / APPROVAL_CANCELLED)
+        # tags the result; legacy (flag off) results stay byte-identical.
+        _tag_b2(result, outcome, fmt.get("reason") or deny_reason or "")
+        return result
 
     def grant(choice: str) -> dict:
         # A smart-DENY owner override is always one operation, even if an older client returns "session" or "always".
@@ -1034,8 +1108,10 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
                 data["smart_denied"] = True
             decision = _await_gateway_decision(session_key, notify_cb, data, surface="gateway")
             if decision.get("notify_failed"):
-                return _denied(spec.notify_failed, pattern_key=pattern_key,
-                               description=description, outcome="notify_failed", noun=spec.noun)
+                return _tag_b2(
+                    _denied(spec.notify_failed, pattern_key=pattern_key,
+                            description=description, outcome="notify_failed", noun=spec.noun),
+                    "notify_failed")
             # Consent contract: silence is NOT consent, and an explicit deny is a hard
             # halt — both produce a BLOCKED outcome. ``/deny <reason>`` free text is
             # relayed verbatim so the agent can adapt rather than only hearing "denied".

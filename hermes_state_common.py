@@ -1018,6 +1018,7 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   text TEXT NOT NULL,
   due_at REAL,
   period_s INTEGER,
+  rrule TEXT,
   state TEXT NOT NULL DEFAULT 'pending'
        CHECK (state IN ('pending','awaiting_ack','done','cancelled')),
   recipient TEXT NOT NULL DEFAULT 'agent'
@@ -1194,7 +1195,15 @@ CREATE TABLE IF NOT EXISTS event_observations (
   redaction_status TEXT NOT NULL DEFAULT 'pending',
   timeline_placement TEXT NOT NULL DEFAULT 'pending',
   normalization_consistency TEXT NOT NULL DEFAULT 'pending',
-  created_at REAL NOT NULL
+  created_at REAL NOT NULL,
+  -- B3 (TZ-2026-11-16-dsh-B): tool-call identity (two-step migration, stage 1: the
+  -- nullable columns are declarative and reconciled additively on live stores;
+  -- stage 2: the flag-gated writer in controller.transport fills them, on the
+  -- tool_call rows only). NULL for transport-event rows.
+  call_id TEXT,
+  args_hash TEXT,
+  decision TEXT,
+  lowered_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_event_obs_lookup ON event_observations(room_id, event_id);
 CREATE TABLE IF NOT EXISTS reconciliation_checks (
@@ -1358,6 +1367,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_effective_activity
 CREATE INDEX IF NOT EXISTS idx_sessions_local_created_started
     ON sessions(created_source, started_at DESC)
     WHERE source = 'local';
+-- B3 (TZ-2026-11-16-dsh-B): the call_id column is reconciled onto legacy stores
+-- additively, so the index on it lives here, not in SCHEMA_SQL (the same
+-- rule as idx_sessions_local_created_started above).
+CREATE INDEX IF NOT EXISTS idx_event_obs_call
+    ON event_observations(call_id)
+    WHERE call_id IS NOT NULL;
 """
 
 

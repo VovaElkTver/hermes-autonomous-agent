@@ -1112,18 +1112,31 @@ class GatewaySlashCommandsMixin(
 
     async def _handle_approve_command(self, event: MessageEvent) -> Optional[str]:
         """Handle /approve — unblock waiting agent thread(s). They block inside tools/approval.py;
-        signalling the event resumes them so the command executes inline (same flow as the CLI)."""
+        signalling the event resumes them so the command executes inline (same flow as the CLI).
+
+        B2 structured answer (``approvals.once_and_ttl``): the args that are not scope
+        words are the reason; the reason is then mandatory (an empty reason or a
+        session/always scope raises from ``resolve_gateway_approval`` and is relayed
+        verbatim — the contract is allowed-once with a reason)."""
         from tools.approval import resolve_gateway_approval
         # Args: "all", "all session", "all always", "session", "always" ("always" beats "session").
-        args = event.get_command_args().strip().lower().split()
+        raw_args = event.get_command_args().strip()
+        args = raw_args.lower().split()
         session_key, stale, request_ids = self._blocking_approval_or_stale(
             event, "gateway.approval_expired", "gateway.approve.no_pending", resolve_all="all" in args)
         if stale:
             return stale
         choices = {_APPROVE_CHOICE_BY_ARG[a] for a in args if a in _APPROVE_CHOICE_BY_ARG}
         choice = "always" if "always" in choices else "session" if "session" in choices else "once"
-        # Exactly the approvals the sender was checked against, never "the oldest" again.
-        count = sum(resolve_gateway_approval(session_key, choice, request_id=rid) for rid in request_ids)
+        # B2: the reason is the arg text that is not a scope word (original case kept).
+        scope_tokens = {"all", *(_APPROVE_CHOICE_BY_ARG)}
+        reason = " ".join(t for t in raw_args.split() if t.lower() not in scope_tokens).strip() or None
+        try:
+            # Exactly the approvals the sender was checked against, never "the oldest" again.
+            count = sum(resolve_gateway_approval(session_key, choice, reason=reason, request_id=rid)
+                        for rid in request_ids)
+        except ValueError as exc:
+            return str(exc)
         if not count:
             return t("gateway.approve.no_pending")
         confirmation_text = t(f"gateway.approve.{choice}_{'plural' if count > 1 else 'singular'}", count=count)
@@ -1148,8 +1161,12 @@ class GatewaySlashCommandsMixin(
         if stale:
             return stale
         reason = (raw_args[len(tokens[0]):].strip() if resolve_all else raw_args)[:280].strip()
-        count = sum(resolve_gateway_approval(session_key, "deny", reason=reason or None, request_id=rid)
-                    for rid in request_ids)
+        try:
+            count = sum(resolve_gateway_approval(session_key, "deny", reason=reason or None, request_id=rid)
+                        for rid in request_ids)
+        except ValueError as exc:
+            # B2 structured answer: a bare /deny (no reason) is refused by the contract.
+            return str(exc)
         if not count:
             return t("gateway.deny.no_pending")
         logger.info("User denied %d dangerous command(s) via /deny%s", count,

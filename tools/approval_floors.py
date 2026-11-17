@@ -203,3 +203,46 @@ def _matching_permanent_allowlist_entry(command: str) -> str | None:
 def _command_matches_permanent_allowlist(command: str) -> bool:
     """True when command_allowlist holds this exact command text or a matching glob."""
     return _matching_permanent_allowlist_entry(command) is not None
+
+
+# ---------------------------------------------------------------------------
+# B1 guard adapter (TZ-2026-11-16-dsh-B): the floors as ONE structured denial
+# ---------------------------------------------------------------------------
+
+def floor_denial(command: str) -> "object | None":
+    """The unconditional floors for *command*, re-expressed as a structured
+    ``Denial`` for the tool-contract guard pass (B1): the hardline block, the
+    runtime self-delete floor, the sudo-stdin guard (full guard, matching
+    ``check_all_command_guards``), and the user's own ``approvals.deny``
+    globs — the SAME checks the live gate runs, so a contract denial is the
+    live floor's own denial with a layer name.
+
+    Returns a ``tools.tool_contract.Denial`` when a floor fires, else None.
+    Never raises: a broken floor must not open the door (the guard pass fails
+    closed on an exception anyway, but the floors themselves stay total)."""
+    command = (command or "").strip()
+    if not command:
+        return None
+    try:
+        from tools import approval as _a
+        from tools.tool_contract import Denial
+    except Exception:
+        return None
+    try:
+        result = _a._floor_block(command, sudo_guard=True)
+    except Exception:
+        logger.error("floors check raised in the contract guard; refusing the command",
+                     exc_info=True)
+        return Denial(reason="floor check failed closed (floors raised)",
+                      info={"floor": "error"}, layer="approval_floors")
+    if result is None:
+        return None
+    message = str(result.get("message", ""))
+    if result.get("user_deny"):
+        floor = "user_deny"
+    elif "BLOCKED (hardline)" in message:
+        floor = "hardline"
+    else:
+        floor = "sudo_stdin"
+    return Denial(reason=message or "blocked by the approval floors",
+                  info={"floor": floor}, layer="approval_floors")
