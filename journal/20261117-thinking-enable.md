@@ -466,3 +466,39 @@ SQL
    M8 fresh read-back (доля edit-сессий, закрытых наблюдением; на
    baseline 21/295 = 0.071) и M9 verify-nudges (счётчик шума с ленты;
    0 на baseline). Оба детерминированы по снапшоту.
+
+Примечание (внешнее действие в ходе захода): 08:42 в историю ветки
+вошёл мерж origin/main -> elk/thinking-enable-s0 (2929f6398c6,
+«kanban excision follow-ups + dsh-B») — не моё действие (мои коммиты
+в 08:41 и 08:48 — S1.3 и S1.4; мерж между ними, авторство
+неустановленное, вероятно параллельный агент/тикер). Состояние
+после мержа мной НЕ игнорировалось: прогоны 177 и 184 тестов
+затронутого подмножества выполнены ПОСЛЕ мержа (зелёные); S1.4/S1.5
+сидят на мерже в истории.
+
+## РАУНД 7 — РЕЗУЛЬТАТ (S1.6, 17.11)
+
+Ограничения:
+- Пункт «внешний не-LLM проверитель MAX(ts) из ctl_ticker_heartbeat»
+  ЧАСТИЧНО: внешний не-LLM systemd-таймер существует
+  (hermes-gateway-watchdog.timer, 30s, user-unit, WATCHDOG_HANG_ACTION=1),
+  НО он читает gateway-пульс/heartbeat-файл, а НЕ MAX(ts) из
+  ctl_ticker_heartbeat. Расширение watchdog-скрипта (~/.hermes/scripts/
+  gateway-watchdog.py — инфраструктура Вл с доказанной action-лестницей:
+  budget/freeze/shadow) НЕ выполнялось без отдельного слова: минимальный
+  безопасный вариант = log-only (shadow) проверка staleness
+  ctl_ticker_heartbeat, не затрагивающая restart/freeze-пути. Следующий
+  шаг: решение Вл (или отдельный заход с мандатом).
+
+Сделано (верификация, а не новый код — все три пункта гигиены УЖЕ в коде
+после аудита 28.10):
+1. conn.rollback() до error-heartbeat: _tick_error делает conn.rollback()
+   с suppress, heartbeat/alert идут на кратковременной scratch-связи
+   (main-writer — подозреваемый).
+2. Heartbeat на отдельной связи: _open_scratch_conn; сам heartbeat —
+   bounded busy-окно + retry + SKIP (никогда не бросает exception).
+3. Регрессия «тихая смерть автономии»: тест
+   test_ticker_survives_a_locked_database (locked-БД на каждом тике:
+   тред жив, каденция держится, алерт один — дедуп, half-cycle
+   откатан, heartbeat-строки деградировали в skip) — ЗАПЕЛ, зелёный
+   (1.3с, 17.11).
