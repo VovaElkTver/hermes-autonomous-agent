@@ -311,6 +311,23 @@ SQL
 Не сделано (по S0): периодичность «суточный отчёт в ленту» — вызов из существующего тика
 как событие (без новых потоков/таймеров); встраивается в тикер S1 (см. РАУНД 2).
 
+## РАУНД 1 — ДОПОЛНЕНИЕ (S0 daily-report event, 17.11)
+
+Сделано (закрывает «не сделано» раунда 1):
+- `controller/ticker.py`: интервал `autonomy_metrics` (86400 s) добавлен в
+  существующую таблицу INTERVALS — СЧЁТЧИК НА ТОМ ЖЕ 1 ГЦ-ТИКЕ, не новый
+  поток/таймер (правило ТЗ «отложенное — событие, не таймер»); в `_schedule`
+  деадлайн-ветка вызывает `run_autonomy_metrics` через штатный `_guard`
+  (сбой метрика = deduped tick-error alert, метрика не умирает молча).
+  Wake-pull этот счётчик НЕ ускоряет (каденция — не due date).
+- `run_autonomy_metrics`: subprocess-вызов `scripts/autonomy_metrics.py
+  --markdown --deliver` (PYTHONPATH=repo root, cwd=repo root; read-only SQL,
+  без записей; без alert_target доставка деградирует в stdout/journal).
+- Тесты (tests/plugins/test_controller_ticker.py, 3): суточный счётчик
+  однократно срабатывает за интервал и ре-анкорится; сломанный метр =
+  loud RuntimeError (не тихий пропуск); зелёный путь пишет heartbeat
+  'autonomy-metrics'. Все 39 тестов тикера/wake/live-ports зелёные.
+
 ## РАУНД 2 — РЕЗУЛЬТАТ (S1.1, 17.11)
 
 Ограничения:
@@ -336,3 +353,27 @@ SQL
    даёт тот же набор.
 
 Не сделано: ничего в рамках S1.1 (код + поверхность + проверки).
+
+## РАУНД 3 — РЕЗУЛЬТАТ (S1.2, 17.11)
+
+Ограничения:
+- 2 упавших теста TestH4StopGate (test_gate_nudges_once_then_stays_quiet,
+  test_gate_silent_when_assessed) — ПРЕСУЩЕСТВУЮЩИЙ breakage на базе ветки:
+  monkeypatch отсылает к `turn_stop_gates._kanban_stop_nudge`, который удалён
+  kanban-excision (проверено git stash: те же 2 падают без моих изменений).
+  По ТЗ §2 kanban-остатки — не трогать до S4; фикс отложен туда.
+
+Сделано:
+1. Автоподвязка H2 (agent/investigation_hooks.py): явный probe_id = точный путь
+   (первый контакт переводит пробы pending→dispatched — «вызов и есть
+   диспатч»); без явного probe_id результат привязывается к ПОСЛЕДНЕЙ
+   dispatched-пробе открытого investigation сессии (снимает «модель должна
+   помнить id» — тот же класс ошибки, что controller_task_id в S1.4).
+   Без dispatched-проб — unbound, хук не гадает.
+2. `stamp_fork_probe` переводит pending-пробу в dispatched (форк теперь её
+   исполняет; исход вернётся H3-join'ом).
+3. Тесты (tests/test_investigation_hooks.py, 5 новых): результат без
+   probe_id → assessed=0-строка с верным probe_id (требование ТЗ),
+   unbound при отсутствии dispatched, явный echo dispatched→observed,
+   «последняя созданная побеждает», fork-stamp диспатчит. Все 50 тестов
+   двух файлов зелёные кроме 2 предушествующих (выше).

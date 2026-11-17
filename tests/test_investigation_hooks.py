@@ -296,3 +296,56 @@ class TestMixinBootSettle:
         db.assess_observation(oid, "inconclusive: не разделяет H1/H2")
         assert db.close_investigation(iid, "done", "none")["closed"] is True
         assert db.list_open_investigation_unknown_sessions() == []
+
+
+class TestS12AutoAttach:
+    """S1.2 (TЗ thinking-enable): the runtime auto-attaches a tool result to the
+    session's LATEST dispatched probe of the open investigation — the model no
+    longer has to remember the probe id after dispatching (the 09.11
+    controller_task_id lesson, same error class). The explicit probe_id echo
+    stays the exact path; the hook never guesses (no dispatched probe ->
+    unbound capture)."""
+
+    def test_result_without_probe_id_binds_last_dispatched_probe(self, db, agent):
+        iid, pid = _open_inv(db)
+        db.set_probe_status(pid, "dispatched")
+        obs_id = investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-1", {"content": "no eviction line"})
+        assert obs_id is not None
+        obs = [o for o in db.list_observations(iid) if o["observation_id"] == obs_id]
+        assert len(obs) == 1
+        assert obs[0]["probe_id"] == pid
+        assert obs[0]["assessed"] == 0
+        assert db.get_probe(pid)["status"] == "observed"
+
+    def test_no_dispatched_probe_keeps_capture_unbound(self, db, agent):
+        iid, _ = _open_inv(db)  # probe still pending: nothing dispatched
+        investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-1", {"content": "x"})
+        obs = db.list_observations(iid)
+        assert len(obs) == 1 and obs[0]["probe_id"] is None
+
+    def test_explicit_echo_dispatches_then_observes(self, db, agent):
+        _, pid = _open_inv(db)
+        investigation_hooks.capture_tool_result(
+            agent, "terminal", {"probe_id": pid}, "call-a", {"content": "y"})
+        assert db.get_probe(pid)["status"] == "observed"
+
+    def test_latest_dispatched_probe_wins(self, db, agent):
+        import time
+        iid, pid1 = _open_inv(db)
+        db.set_probe_status(pid1, "dispatched")
+        time.sleep(0.002)  # deterministic created_at ordering
+        pid2 = db.add_probe(iid, "second check")
+        db.set_probe_status(pid2, "dispatched")
+        obs_id = investigation_hooks.capture_tool_result(
+            agent, "terminal", {}, "call-1", {"content": "z"})
+        obs = [o for o in db.list_observations(iid) if o["observation_id"] == obs_id]
+        assert obs and obs[0]["probe_id"] == pid2
+
+    def test_fork_stamp_dispatches_the_probe(self, db, agent):
+        _, pid = _open_inv(db)
+        binding = investigation_hooks.stamp_fork_probe(
+            db, "sess-parent", "br-1", pid, "check log")
+        assert binding is not None
+        assert db.get_probe(pid)["status"] == "dispatched"
