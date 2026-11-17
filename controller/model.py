@@ -302,6 +302,28 @@ def budget_exhausted(conn, task_id: str, metric: str) -> bool:
     return bool(row and row["limit_value"] is not None and row["used"] >= row["limit_value"])
 
 
+def block_on_budget_exhausted(conn, task_id: str, metric: str,
+                              origin: str = "controller") -> bool:
+    """S1.4 (TЗ thinking-enable): a spent limit is a VISIBLE stop, not a silent
+    stall. running -> blocked (the deterministic transition) + one ctl_event
+    row (the alert, idempotent per limit value). No-op when the task is not
+    running — the barrier keeps refusing calls regardless, and re-blocking is
+    not legal on a parked task. Returns True when the stop happened here."""
+    from . import transitions
+    t = get_task(conn, task_id)
+    if t is None or t["state"] != "running":
+        return False
+    row = conn.execute("SELECT used, limit_value FROM ctl_budget_counter"
+                       " WHERE task_id=? AND metric=?", (task_id, metric)).fetchone()
+    used, limit = (row["used"], row["limit_value"]) if row else (None, None)
+    transitions.transition(conn, task_id, "blocked",
+                           basis=f"budget {metric} exhausted ({used}/{limit})")
+    emit(conn, kind="budget-blocked", origin=origin, task_id=task_id,
+         payload={"metric": metric, "used": used, "limit": limit},
+         idempotency_key=f"budget-blocked:{task_id}:{metric}:{limit}")
+    return True
+
+
 # ---- steps / artifacts / reviews --------------------------------------------
 
 def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = True,

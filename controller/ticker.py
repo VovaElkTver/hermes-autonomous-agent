@@ -557,14 +557,30 @@ class Ticker:
             cfg = {}
         ctl = cfg.get("controller", {}) or {}
         return (ctl.get("worker_model") or self.worker_model,
-                ctl.get("worker_provider") or self.worker_provider)
+                ctl.get("worker_provider") or self.worker_provider,
+                self._worker_budget_s(ctl))
+
+    def _worker_budget_s(self, ctl: dict) -> float | None:
+        """S1.4 (TЗ thinking-enable): the autonomous period is bounded — a default
+        wall budget for autonomous worker steps (no contract today limits it).
+        Unset key -> built-in default 3600s; an explicit 0/None -> legacy
+        unbounded (opt-out)."""
+        v = ctl.get("worker_budget_default_s")
+        if v is None:
+            return 3600.0
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return 3600.0
+        return None if v <= 0 else v
 
     def _worker_fn(self, conn):
         from controller.workers import make_worker
         lock_path = str(pump_lock.default_lock_path())
-        model_id, provider = self._worker_cfg()
+        model_id, provider, budget_s = self._worker_cfg()
         return make_worker(
             conn,
+            timeout_s=budget_s,
             model_id=model_id, provider=provider,
             on_poll=lambda: pump_lock.heartbeat(lock_path))
 

@@ -409,3 +409,60 @@ SQL
    pass cmd → completed, без cmd → legacy completed, legacy dict-форма
    уважается, draft-gate не активен до решения #4 (guard проверен
    напрямую). Все 184 тестов controller-подмножества зелёные.
+
+## РАУНД 5 — РЕЗУЛЬТАТ (S1.4, 17.11)
+
+Ограничения:
+- Живое исполнение хуков на боевом экземпляре НЕ прогонялось: проверено
+  тестами (tests/plugins/test_controller_budget.py, 5 шт.) на фиксуре;
+  живой эффект (бюджет накапливается в боевом процессе) — с ближайшего
+  автономного дренажа тикера.
+- Бюджет-пауза wall-clock (пауза шага при исчерпании timeout_s) — путь
+  graceful-pause уже существовал; S1.4 добавил только дефолт (3600с)
+  для автономного тикер- дренажа и config-ключ
+  controller.worker_budget_default_s (0 = legacy безлимит).
+
+Сделано:
+1. Диспач-контекст: HERMES_CONTROLLER_TASK_ID (уже ставился make_worker
+   в env рабочего процесса) теперь ЧИТАЕТСЯ хуками: pre-hook
+   (barrier) и post-hook (бюджет) резолвят контроллер-задачу по
+   kwarg -> env -> scope-fallback (pre) / без fallback (post, строгое
+   — учёт в чужую задачу = порча лимита). До этого kwarg никогда не
+   передавался -> tool_calls-бюджет тождественно 0/NULL.
+2. Достигнутый лимит = видимый стоп: barrier «budget exhausted» ->
+   model.block_on_budget_exhausted (running -> blocked, детерминирован-
+   ный переход) + ctl_event kind=budget-blocked (идемпотентен по
+   idempotency_key). Снапшот human-gates (alerts.render_gates_snapshot)
+   теперь включает budget-blocked задачи -> существующий ticker-alert
+   канал сообщает в ленту. Без этого стоп был «тихим»: guard рефьил
+   каждый вызов, а задача выглядела живой.
+3. Тесты: 5 новых (post-hook учитывает из env; без контекста noop;
+   pre-hook при spent budget блокирует И паркует задачу + ровно одно
+   ctl_event; gates-snapshot показывает; правила дефолта бюджета).
+   177 тестов затронутого подмножества зелёные.
+
+## РАУНД 6 — РЕЗУЛЬТАТ (S1.5, 17.11)
+
+Ограничения:
+- Изменения конфига вступают в силу с НОВОЙ сессии/spawn (read при
+  spawn / session start); рестарт гейтвея НЕ выполнялся (orphan-ловушка
+  15.11: рестарт только вне cgroup). Живой эффект — с ближайшего
+  интерактивного кодового терна (verify_on_stop auto) и ближайшего
+  авто-ревью (background_review enabled, managed-local -> idle-очередь).
+- М9=0 на baseline ЧЕСТНО: гейт был выключен, нуджей не было — это не
+  «тихо», это «не запускали» (пометка в метрике).
+
+Сделано:
+1. hermes config set agent.verify_on_stop auto (ранее false): нуджи
+   только на интерактивных кодовых поверхностях («auto» = митигация из
+   риск-таблицы ТЗ); max_verify_nudges=3 не тронуто.
+2. hermes config set auxiliary.background_review.enabled true (ранее
+   false): авто-ревью включено; отсрочка в idle-очередь
+   (agent/review_idle_queue.py) УЖЕ была провайрена (defer: auto,
+   _review_should_defer -> QUEUE.enqueue, dispatcher с idle-гейтом) —
+   подключать было нечего, проверено чтением пути run_agent._spawn_
+   background_review.
+3. Метрики S0.3-проверки S1.5 добавлены в scripts/autonomy_metrics.py:
+   M8 fresh read-back (доля edit-сессий, закрытых наблюдением; на
+   baseline 21/295 = 0.071) и M9 verify-nudges (счётчик шума с ленты;
+   0 на baseline). Оба детерминированы по снапшоту.

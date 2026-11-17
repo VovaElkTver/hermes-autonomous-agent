@@ -16,6 +16,7 @@ Wiring:
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -26,6 +27,13 @@ _ctx = None
 _lock_obj = threading.RLock()
 _tls = threading.local()
 _scope_by_session: dict[str, str] = {}
+# S1.4 (TЗ thinking-enable): the worker process is spawned by make_worker WITH
+# HERMES_CONTROLLER_TASK_ID in its environment — until now the hook side never
+# read it, so the controller_task_id kwarg was always None: the tool_calls
+# budget stayed at 0/NULL and budget_exhausted was identically False (same
+# class as the 09.11 budget_exhausted fix). Resolution order: hook kwarg
+# (explicit) -> dispatch env (the real path) -> scope fallback (pre only).
+_TASK_ENV = "HERMES_CONTROLLER_TASK_ID"
 
 
 def _enabled() -> bool:
@@ -85,9 +93,20 @@ def _on_pre_tool_call(tool_name: str = "", args: dict | None = None, task_id: st
         if origin != "autonomous":
             return None
         scope = _scope_by_session.get(session_id) or _default_scope()
-        task_id_ctl = kw.get("controller_task_id") or _task_for_scope(_db(), scope)
+        task_id_ctl = kw.get("controller_task_id") or os.environ.get(_TASK_ENV) \
+            or _task_for_scope(_db(), scope)
         ok, why = barrier.check(_db(), scope=scope, origin=origin, task_id=task_id_ctl)
         if not ok:
+            # S1.4 (TЗ thinking-enable): a spent tool_calls budget is not a silent
+            # stall — the running task is blocked and the ctl_event row recorded,
+            # so the stop is a visible state change, not 'the next call got
+            # refused' (reached only through the env/kwarg path, not scope).
+            if task_id_ctl and "budget" in (why or ""):
+                from controller import model as _m
+                try:
+                    _m.block_on_budget_exhausted(_db(), task_id_ctl, "tool_calls")
+                except Exception as _exc:
+                    logger.warning("controller budget-block transition failed: %s", _exc)
             from . import agent_tools
             if agent_tools.is_read_only(tool_name):
                 # Declared read-only tools survive a blocked dispatch: looking at
@@ -115,7 +134,9 @@ def _on_post_tool_call(tool_name: str = "", args: dict | None = None, task_id: s
         return
     try:
         from controller import model
-        tid = kw.get("controller_task_id")
+        # Strict (no scope fallback): budget accounting must hit the RIGHT task —
+        # crediting another scope's task would corrupt its limit check.
+        tid = kw.get("controller_task_id") or os.environ.get(_TASK_ENV)
         if not tid:
             return
         model.add_budget(_db(), tid, "tool_calls", 1)
