@@ -99,8 +99,35 @@ def _mandate_still_valid(conn, t, **kw) -> str | None:
     return None
 
 
+def _machine_validation(conn, t, **kw) -> str | None:
+    """S1.3 (TЗ thinking-enable): the contract's machine predicate precedes every
+    completion verdict — a judge `pass` on a failing validation_cmd is not a
+    completion. The refusal message is matched by the loop's finish_verifying,
+    which re-opens the finished checkpoint step (revise) and re-enters running."""
+    from . import workers
+    ok, detail = workers.run_validation(conn, t["task_id"], t.get("workdir") or ".")
+    if not ok:
+        return f"validation_cmd failed: {detail.strip()[-200:]}"
+    return None
+
+
+def _draft_has_predicate(conn, t, **kw) -> str | None:
+    """Decision #4 (TЗ thinking-enable §5, Вл) — NOT ACTIVE in S1.
+
+    The one-line activation when the decision lands:
+        GUARDS.setdefault(("draft", "ready"), []).append(_draft_has_predicate)
+    (kept defined so the decision is a config-level switch, not a re-implementation;
+    the strict form gates every draft contract, plan-generated or not — S1 only
+    owns the machine predicate in verifying, which is decision-free)."""
+    from . import workers
+    return None if workers.contract_validation_cmd(conn, t["task_id"]) \
+        else "draft contract without validation_cmd"
+
+
 for _edge in ((s, "ready") for s in OPEN_TASK_STATES_FOR_RESUME):
     GUARDS.setdefault(_edge, []).append(_mandate_still_valid)
+
+GUARDS[("verifying", "completed")].append(_machine_validation)
 
 
 def transition(conn, task_id: str, to_state: str, *, basis: str,

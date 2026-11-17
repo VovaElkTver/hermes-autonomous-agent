@@ -377,3 +377,35 @@ SQL
    unbound при отсутствии dispatched, явный echo dispatched→observed,
    «последняя созданная побеждает», fork-stamp диспатчит. Все 50 тестов
    двух файлов зелёные кроме 2 предушествующих (выше).
+
+## РАУНД 4 — РЕЗУЛЬТАТ (S1.3, 17.11)
+
+Ограничения:
+- Часть S1.3 «validation_cmd обязателен в draft-контракте» реализована
+  КАК МЕХАНИЗМ (guard `_draft_has_predicate` в transitions.py определён и
+  машиной проверен тестом), но НЕ АКТИВИРОВАНА: активная строгая форма
+  ломала followups и agent-tools пути draft→ready (4 упавших тестов,
+  поймано прогоном) — это территория решения #4 Вл («обязателен для всех
+  новых контрактов?»). Активация при решении = одна строка
+  `GUARDS.setdefault(("draft","ready"), []).append(_draft_has_predicate)`
+  (документировано в докстринге функции).
+
+Сделано:
+1. Машинный предикат в verifying (горло = transition guard):
+   `("verifying","completed")` теперь несёт `_machine_validation` —
+   `run_validation` (contract validation_cmd, legacy dict-acceptance
+   поддерживается) предшествует вердикту завершённости: judge-pass при
+   падающем cmd ≠ completion. Отказ → finish_verifying реопенит
+   последний checkpoint-шаг (done→pending CAS, `model.reopen_step`) и
+   возвращает задачу в ready — REVISE, не park; попытки ограничены
+   step-бюджетом контракта.
+2. Форма (починка ТЗ «acceptance dict vs list»): канон = топовый ключ
+   контракта `validation_cmd` (acceptance остаётся списком критериев);
+   `_empty_contract` дополнен `"validation_cmd": ""`; `run_validation` +
+   новый `contract_validation_cmd` читают канон, legacy dict-acceptance
+   уважается; в бриф рабочего шага строка предиката вписывается явно.
+3. Тесты (tests/plugins/test_controller_loop.py, 5): judge-pass при
+   failed cmd → revalidate (задача ready, шаг pending — регресс ТЗ),
+   pass cmd → completed, без cmd → legacy completed, legacy dict-форма
+   уважается, draft-gate не активен до решения #4 (guard проверен
+   напрямую). Все 184 тестов controller-подмножества зелёные.

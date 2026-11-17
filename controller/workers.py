@@ -269,6 +269,13 @@ def _brief(conn, task, step) -> str:
         f"Task: {task['goal']}",
         "",
         "Acceptance criteria:", *[f"- {a}" for a in c.get("acceptance", []) or ["(none listed)"]],
+    ]
+    # S1.3 (TЗ thinking-enable): the machine predicate is part of the brief —
+    # the worker sees WHAT must hold, not only the prose criteria.
+    pred = contract_validation_cmd(conn, task["task_id"])
+    if pred:
+        lines.append(f"Machine predicate (must pass in the workdir before completion): {pred}")
+    lines += [
         "Confirmed facts:", *[f"- {a}" for a in (c.get("facts") or [])[:20]],
         "Restrictions:", *[f"- {a}" for a in (c.get("restrictions") or [])[:20]],
         "",
@@ -324,11 +331,23 @@ def make_review(conn, *, judge_cfg: dict | None = None):
     return review_fn
 
 
-def run_validation(conn, task_id: str, workdir: str) -> tuple[bool, str]:
-    """Optional contract-level gate: acceptance.validation_cmd must pass (code, not prose)."""
+def contract_validation_cmd(conn, task_id: str) -> str:
+    """The contract's machine predicate (S1.3, TЗ thinking-enable).
+
+    Canonical shape: top-level ``validation_cmd`` (``acceptance`` stays the list
+    of acceptance criteria). Legacy dict-shaped ``acceptance`` carrying the
+    command is honoured, so persisted contracts in that shape keep working."""
     from controller import model
     c = model.current_contract(conn, task_id)
-    cmd = (c.get("acceptance") or {}).get("validation_cmd") if isinstance(c.get("acceptance"), dict) else None
+    cmd = c.get("validation_cmd")
+    if not cmd and isinstance(c.get("acceptance"), dict):
+        cmd = c["acceptance"].get("validation_cmd")
+    return str(cmd or "")
+
+
+def run_validation(conn, task_id: str, workdir: str) -> tuple[bool, str]:
+    """Contract-level gate: acceptance.validation_cmd must pass (code, not prose)."""
+    cmd = contract_validation_cmd(conn, task_id)
     if not cmd:
         return True, "no validation_cmd in contract"
     p = subprocess.run(cmd, shell=True, cwd=workdir, capture_output=True, text=True,

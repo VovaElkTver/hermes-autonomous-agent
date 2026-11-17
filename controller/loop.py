@@ -289,7 +289,32 @@ def finish_verifying(conn, task_id: str, review_fn=None) -> str:
                 conn, task_id, "needs_human",
                 basis="verify: missing reviews (no runnable artifact to backfill)")
             outcome = "needs_human"
+    if outcome == "validation-failed":
+        # S1.3 (TЗ thinking-enable): the machine predicate refused completion —
+        # REVISE, not park: re-open the finished checkpoint step and re-enter
+        # running so the loop re-runs it (the step budget bounds the attempts).
+        # No re-openable step (empty plan) is the needs_human fallback.
+        reopened = _revalidate_step(conn, task_id)
+        if reopened:
+            transitions.transition(conn, task_id, "ready",
+                                   basis="validate: validation_cmd failed — re-run step (S1.3)")
+            outcome = "revalidate"
+        else:
+            transitions.transition(conn, task_id, "needs_human",
+                                   basis="validate: validation_cmd failed, no step to re-open")
+            outcome = "needs_human"
     return outcome
+
+
+def _revalidate_step(conn, task_id: str) -> bool:
+    """The newest finished checkpoint step goes back to pending (done->pending
+    CAS). False when there is no finished checkpoint step to re-open."""
+    row = conn.execute(
+        "SELECT step_id FROM ctl_step WHERE task_id=? AND status='done'"
+        " AND checkpoint IS NOT 0 ORDER BY rowid DESC LIMIT 1", (task_id,)).fetchone()
+    if row is None:
+        return False
+    return bool(model.reopen_step(conn, row["step_id"]).get("ok"))
 
 
 def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
@@ -306,6 +331,10 @@ def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
             # allow_retry=False: caller may remediate via review backfill before
             # parking (finish_verifying handles it); parking stays the fallback.
             return "needs_human-backfill"
+        if "validation_cmd" in msg:
+            # S1.3: the machine predicate refused — finish_verifying re-opens the
+            # finished checkpoint step and re-enters running (revise, not park).
+            return "validation-failed"
         if "review" in msg:
             transitions.transition(conn, task_id, "needs_human", basis=f"verify: {msg}")
             return "needs_human"

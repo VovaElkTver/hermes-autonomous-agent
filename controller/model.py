@@ -99,7 +99,8 @@ def _empty_contract(goal: str, priority: float = 0.0) -> dict:
             "approval_required": [], "restrictions": [], "facts": [], "hypotheses": [],
             "proposals": [], "open_questions": [], "input_artifacts": [], "dependencies": [],
             "start_conditions": [], "budgets": {}, "stop_conditions": [],
-            "reclassification_rules": [], "notify_channel": ""}
+            "reclassification_rules": [], "notify_channel": "",
+            "validation_cmd": ""}
 
 
 def set_priority(conn, task_id: str, *, head: bool) -> None:
@@ -402,6 +403,14 @@ def unstick_step(conn, step_id: str) -> dict:
     """Worker ended normally (fail/revise path) — release an in_progress claim back to
     pending so the step stays dispatchable (CAS)."""
     return _set_step_status_cas(conn, step_id, expect="in_progress", new="pending")
+
+
+def reopen_step(conn, step_id: str) -> dict:
+    """Verification revalidation (TЗ thinking-enable S1.3): the contract's machine
+    predicate failed on the task's output — the finished checkpoint step goes back
+    to pending so the loop re-runs it (revise semantics at task level; the step
+    budget bounds the attempts)."""
+    return _set_step_status_cas(conn, step_id, expect="done", new="pending")
 
 
 def paused_handoff_note(conn, step_id: str) -> str:
