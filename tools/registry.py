@@ -1069,11 +1069,30 @@ class ToolRegistry:
     def dispatch(
         self, name: str, args: dict, *, scope: Optional[str] = None, **kwargs) -> str | dict:
         """Execute a tool handler by name: async handlers bridged via ``_run_async()``,
-        results normalized, every exception returned as ``{"error": ...}``."""
+        results normalized, every exception returned as ``{"error": ...}``.
+
+        With ``tools.call_contract_v2`` (default OFF) the dispatch entry also: builds the
+        frozen call identity (tools/tool_contract.ToolCallSpec), runs the monotonic final
+        guard pass before the handler, detects identical repeats, and folds the identity
+        into the result's ``meta.call_contract`` and the event_observations row (B1+B3,
+        TZ-2026-11-16-dsh-B). Flag OFF: byte-identical legacy path."""
         entry = self.get_entry(name, scope=scope)
         if not entry:
             return tool_error(f"Unknown tool: {name}")
         trace_session = kwargs.get("session_id")  # inspector-trace context (pre-filter)
+        from tools import tool_contract
+        spec: Optional[tool_contract.ToolCallSpec] = None
+        decision: Optional[tool_contract.ToolDecision] = None
+        repeat = False
+        if tool_contract.call_contract_enabled():
+            tool_contract.ensure_contract_guards()
+            session_key = str(trace_session or scope or "")
+            spec = tool_contract.build_call_spec(tool=name, args=args, session_key=session_key)
+            repeat = tool_contract.note_repeat(spec)
+            decision = tool_contract.apply_guards(spec, tool_contract.Allow(), args)
+            if isinstance(decision, tool_contract.Deny):
+                tool_contract.record_call_observation(spec, decision, repeat=repeat)
+                return tool_contract.denial_result(name, spec, decision, repeat=repeat)
         try:
             # Plugin contract (plugins/AGENTS.md): optional context kwargs (task_id, session_id, user_task,
             # parent_agent, ...) are signature-inspected like hook payloads, so a narrow ``handle(args)``
@@ -1089,7 +1108,21 @@ class ToolRegistry:
             emit_tool_call(session_id=trace_session, name=name,
                            toolset=getattr(entry, "toolset", "-"), args=args,
                            result=result, ok=True)
+            if spec is not None:
+                mutated = tool_contract.canonical_args_hash(args) != spec.args_hash
+                if mutated:
+                    if tool_contract.call_spec_debug():
+                        raise tool_contract.ArgsMutatedError(
+                            f"tool args mutated inside a wrapper: {name} ({spec.call_id}); "
+                            "the frozen spec's args_hash no longer matches")
+                    logger.warning("tool args mutated inside a wrapper: %s (%s)",
+                                   name, spec.call_id)
+                result = tool_contract.attach_call_meta(
+                    result, spec, decision=decision, repeat=repeat, mutated=mutated)
+                tool_contract.record_call_observation(spec, decision, repeat=repeat)
             return result
+        except tool_contract.ArgsMutatedError:
+            raise  # debug-flag contract violation: propagate, never convert to a result
         except Exception as e:
             from tools.tool_trace import emit_tool_call
             emit_tool_call(session_id=trace_session, name=name,
@@ -1104,6 +1137,13 @@ class ToolRegistry:
                 sanitized = _sanitize_tool_error(raw)
             except Exception:
                 sanitized = raw  # defensive: never let the sanitizer block error propagation
+            if spec is not None:
+                # The guard's verdict still stands: the call was allowed, the handler failed.
+                mutated = tool_contract.canonical_args_hash(args) != spec.args_hash
+                tool_contract.record_call_observation(spec, decision, repeat=repeat)
+                meta = {"call_contract": tool_contract.call_meta(spec, decision, repeat=repeat,
+                                                                 mutated=mutated)}
+                return tool_error(sanitized, meta=meta)
             return tool_error(sanitized)
 
     # ---- Query helpers -----------------------------------------------

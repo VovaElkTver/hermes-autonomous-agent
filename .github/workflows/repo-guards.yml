@@ -115,6 +115,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 scripts/ci/check_lazy_deps_imports.py
 
+      # B5 (TZ-2026-11-16-dsh-B): eval signals never enter the model's input.
+      # The prompt-assembly surface group (agent/prompt_builder.py and friends) must not
+      # carry eval-signal identifiers (eval_label/gepa text-level, feedback AST-level).
+      # Pure stdlib, runs on the bare checkout; fail-closed on inventory errors.
+      # Doctrine: docs/design/eval-signals-contour.md; tests: tests/ci/test_eval_signal_guard.py.
+      - name: "Guard: eval signals stay out of prompt assembly (B5)"
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/check_eval_signals.py
+
       # ── Pull requests: unrelated histories ────────────────────────────────────────────────
 
       # PR #25045 was merged from a branch disconnected from main's history; GitHub's merge UI

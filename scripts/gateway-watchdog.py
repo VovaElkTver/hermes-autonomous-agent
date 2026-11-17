@@ -34,9 +34,14 @@ tree — survives a dead gateway):
    sensor -> heal (R1's reconnect watcher retries the adapter in-process first) ->
    restart -> freeze (human). Absent or unparsable pulse map = UNKNOWN, never
    assumed deaf (old-format two-token heartbeats must not fire it).
+   Boot grace (16.11): a stale pulse that predates the current gateway process
+   is never charged to it — the streak resets and no action fires when the
+   heartbeat PID changes (a new generation inherits persisted pulse ages from
+   the previous life) or the process has been alive < DEAF_STALE_SECONDS. A
+   15.7 h host suspend + reboot must not kill a seconds-old, healthy gateway.
 
 Audit: ~/.hermes/logs/gateway-watchdog.log
-Test overrides: HERMES_GATEWAY_WD_NR/_ACTIVE/_DIRTY/_HB_AGE/_PULSES/_STATE/_LOG/_REPO.
+Test overrides: HERMES_GATEWAY_WD_NR/_ACTIVE/_DIRTY/_HB_AGE/_PULSES/_BOOT_AGE/_STATE/_LOG/_REPO.
 ``--dry-run`` computes decisions without side effects (bookkeeping state still saved).
 """
 from __future__ import annotations
@@ -158,6 +163,36 @@ def read_receive_pulses() -> dict | None:
             return None
         got = json.loads(parts[2])
         return got if isinstance(got, dict) else None
+    except Exception:
+        return None
+
+
+def heartbeat_pid() -> int | None:
+    """PID token (first field) from the heartbeat file; None = unknown."""
+    try:
+        return int(HEARTBEAT.read_text().split(" ", 1)[0])
+    except Exception:
+        return None
+
+
+def gateway_boot_age(pid: int | None) -> float | None:
+    """Wall-clock seconds since <pid> started; None = unknown (fail-visible).
+
+    /proc-based (btime + starttime) so the age shares the wall clock of the
+    receive pulses — a host suspend counts into both, never asymmetrically.
+    Test override: HERMES_GATEWAY_WD_BOOT_AGE.
+    """
+    override = os.environ.get("HERMES_GATEWAY_WD_BOOT_AGE", "").strip()
+    if override.replace(".", "", 1).isdigit():
+        return float(override)
+    if pid is None:
+        return None
+    try:
+        with open("/proc/stat", encoding="utf-8") as fh:
+            btime = next(int(line.split()[1]) for line in fh if line.startswith("btime "))
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as fh:
+            starttime = int(fh.read().rsplit(")", 1)[1].split()[19])
+        return max(0.0, _now() - (btime + starttime / os.sysconf("SC_CLK_TCK")))
     except Exception:
         return None
 
@@ -298,10 +333,27 @@ def main(argv: list[str]) -> int:
         deaf = {p: v for p, v in pulses.items()
                 if v == "no_adapter" or (isinstance(v, (int, float)) and v > DEAF_STALE_SECONDS)}
         streaks = st.get("deaf_streaks", {})
-        for p in pulses:
-            streaks[p] = streaks.get(p, 0) + 1 if p in deaf else 0
+        grace = False
+        pid = heartbeat_pid()
+        if pid is not None and st.get("pulse_pid") != pid:
+            # A new process generation: the persisted pulse ages and any
+            # accumulated streak describe the PREVIOUS life (16.11: after a
+            # 15.7 h suspend + host reboot, a 17 s old gateway was restarted
+            # on an inherited matrix=56664 s pulse). This process has not had
+            # a chance to publish its own receive evidence yet.
+            st["pulse_pid"] = pid
+            streaks = {}
+            grace = True
+            log(f"deaf-stall: new gateway generation pid={pid}, streaks reset")
+        boot_age = gateway_boot_age(pid)
+        if boot_age is not None and boot_age < DEAF_STALE_SECONDS:
+            streaks = {}
+            grace = True
+        if not grace:
+            for p in pulses:
+                streaks[p] = streaks.get(p, 0) + 1 if p in deaf else 0
         st["deaf_streaks"] = streaks
-        confirmed = [p for p in deaf if streaks.get(p, 0) >= DEAF_CONFIRM_SAMPLES]
+        confirmed = [] if grace else [p for p in deaf if streaks.get(p, 0) >= DEAF_CONFIRM_SAMPLES]
         if confirmed:
             detail = " ".join(f"{p}={pulses[p]}" for p in sorted(confirmed))
             if FREEZE_FILE.exists():

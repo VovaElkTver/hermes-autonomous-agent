@@ -4,7 +4,8 @@ When the model stops with a text answer, five gates may instead append the answe
 interim row plus a user-role nudge and continue the turn: late language-server verdicts on this
 turn's edits (a durable row, see ``_late_lsp_verdicts``), verify-on-stop (#65919),
 the ``pre_verify`` plugin hook after code edits, the kanban worker terminal-tool guard,
-and the investigation H4 unassessed-observations nudge (one per turn).
+the investigation H4 unassessed-observations nudge (one per turn), and the claim-verify
+phantom-path / effect-claim gate (``agent.claim_verify``, one per turn, session-capped).
 Each keeps the candidate answer as a budget-exhaustion fallback
 (``pending_verification_response``) and clears ``final_response`` so the finalizer can tell
 this gate from error exits (#61631). Nothing here imports ``agent.conversation_loop`` at
@@ -202,6 +203,32 @@ def apply_stop_gates(
             )
             verdict = _continue(_inv_nudge, "_investigation_stop_synthetic")
             logger.debug("investigation stop nudge issued (unassessed observations)")
+            return verdict
+
+    # CLAIM-VERIFY gate (agent/claim_verify.py): phantom paths and completed-effect
+    # claims with no effecting command in this turn. One nudge per turn, session-capped.
+    if getattr(agent, "_claim_verify_nudges", 0) < 3:
+        try:
+            from agent.claim_verify import _turn_start_index, build_claim_nudge
+
+            _tstart = _turn_start_index(messages)
+            already_nudged = any(
+                m.get("role") == "user" and m.get("_claim_verify_synthetic")
+                for m in messages[_tstart:])
+            _claim_nudge = None if already_nudged else build_claim_nudge(
+                agent, final_response, messages)
+        except Exception:  # deliberate boundary — the probe never breaks the stop path
+            logger.debug("claim-verify gate check failed", exc_info=True)
+            _claim_nudge = None
+        if _claim_nudge:
+            agent._claim_verify_nudges = getattr(agent, "_claim_verify_nudges", 0) + 1
+            final_msg["finish_reason"] = "claims_unverified"
+            _append_interim_answer(
+                agent, final_msg, messages, conversation_history,
+                "claim-verify stop gate interim flush failed"
+            )
+            verdict = _continue(_claim_nudge, "_claim_verify_synthetic")
+            logger.debug("claim-verify nudge issued (attempt %d)", agent._claim_verify_nudges)
             return verdict
     return StopGateVerdict(
         continue_turn=False, final_response=final_response,
