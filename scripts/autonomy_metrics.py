@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """scripts/autonomy_metrics.py — TЗ thinking-enable S0: the autonomy meter.
 
-Read-only SQL over ``state.db`` (or a snapshot of it): the seven metrics of
+Read-only SQL over ``state.db`` (or a snapshot of it): the nine metrics of
 TЗ thinking-enable S0 (README, раздел «thinking-enable (stage004)»), computed
 from EXISTING tables only — no new state, no new writes, no threads/timers.
 The script itself never writes to the database.
@@ -34,6 +34,13 @@ Metric definitions (TЗ S0, all from existing tables):
   M7  cost of one human intervention: turns (ctl_run count) and tokens per
       task, with vs without intervention. Tokens: NOT MEASURABLE — the
       schema carries no run->session link, reported as null, not as 0.
+  M8  fresh read-back share (TЗ S1.5 check for verify_on_stop): of the
+      sessions containing an edit tool, the share whose LAST tool call is
+      an observation tool. terminal/execute_code are ambiguous and excluded
+      from both sets (stated in the metric note).
+  M9  verify-on-stop nudge noise, counted from the tape: the risk-table
+      rule — noise is measured separately and is NOT a basis for switching
+      the gate off.
 
 Empty cognitive tables yield zeros, never an exception.
 """
@@ -229,6 +236,57 @@ def m6_cognitive_tables(conn) -> dict:
     }
 
 
+_READ_TOOLS = ("read_file", "search_files", "session_search", "web_extract",
+               "vision_analyze", "video_analyze", "skill_view")
+_EDIT_TOOLS = ("write_file", "patch", "skill_manage")
+# terminal / execute_code can both observe and mutate — excluded from both sets
+# rather than miscounted (stated in the metric note).
+_NUDGE_MARKER = "does not have fresh passing verification evidence"
+
+
+def m8_fresh_readback(conn) -> dict:
+    """Share of edit-sessions whose LAST tool call is an observation tool —
+    'did the work close with a fresh read-back?' (TЗ S1.5 check for
+    verify_on_stop: a share, not a nudge count)."""
+    per: dict = {}
+    for r in _q(conn, "SELECT session_id, timestamp, tool_name FROM messages "
+                      "WHERE tool_name IN ({obs}) OR tool_name IN ({edit}) "
+                      "ORDER BY session_id, timestamp".format(
+                          obs=",".join("?" * len(_READ_TOOLS)),
+                          edit=",".join("?" * len(_EDIT_TOOLS))),
+                  _READ_TOOLS + _EDIT_TOOLS):
+        sid, ts, tool = r[0], r[1], r[2]
+        entry = per.setdefault(sid, {"edited": False, "last_tool": None, "last_ts": -1.0})
+        if ts >= entry["last_ts"]:
+            entry["last_ts"], entry["last_tool"] = ts, tool
+        if tool in _EDIT_TOOLS:
+            entry["edited"] = True
+    with_edits = {s: e for s, e in per.items() if e["edited"]}
+    closed = sum(1 for e in with_edits.values() if e["last_tool"] in _READ_TOOLS)
+    n = len(with_edits)
+    return {"sessions_with_edits": n,
+            "closed_with_observation": closed,
+            "share": round(closed / n, 3) if n else None,
+            "note": "the session's last tool call must be an observation tool; "
+                    "terminal/execute_code are ambiguous (observe AND mutate) "
+                    "and excluded from both sets"}
+
+
+def m9_verify_nudges(conn) -> dict:
+    """verify-on-stop nudge noise, counted from the tape (TЗ risk table: noise
+    is measured SEPARATELY and is not a basis for switching the gate off)."""
+    rows = _q(conn, "SELECT session_id, COUNT(*) FROM messages "
+                    "WHERE content LIKE ? GROUP BY session_id",
+               (f"%{_NUDGE_MARKER}%",))
+    total = sum(int(r[1]) for r in rows)
+    return {"nudges": total,
+            "sessions_with_nudges": len(rows),
+            "per_affected_session": round(total / len(rows), 2) if rows else None,
+            "note": "message-text count of the verify-on-stop synthetic "
+                    "follow-up; a 0 count after enabling means the gate never "
+                    "fired, NOT that it is quiet"}
+
+
 def m7_intervention_cost(conn) -> dict:
     rows = _q(conn, "SELECT task_id, created_at, updated_at FROM ctl_task "
                     "WHERE state='completed'")
@@ -270,6 +328,8 @@ def compute(db_path: str, now: float | None = None) -> dict:
                 "M5_pending_depth": m5_pending_depth(conn, now),
                 "M6_cognitive_tables": m6_cognitive_tables(conn),
                 "M7_intervention_cost": m7_intervention_cost(conn),
+                "M8_fresh_readback": m8_fresh_readback(conn),
+                "M9_verify_nudges": m9_verify_nudges(conn),
             },
         }
     finally:
@@ -310,6 +370,13 @@ def to_markdown(report: dict) -> str:
                  f"без={m7['turns_per_task_without_intervention']['total']}"
                  f"({m7['turns_per_task_without_intervention']['n']}); "
                  f"tokens: {m7['tokens_note'].split(':')[0]}")
+    m8 = m["M8_fresh_readback"]
+    lines.append(f"M8 fresh read-back: {m8['closed_with_observation']}/"
+                 f"{m8['sessions_with_edits']} ({m8['share']}) edit-сессий "
+                 f"закрыты наблюдением")
+    m9 = m["M9_verify_nudges"]
+    lines.append(f"M9 verify-nudges: {m9['nudges']} в {m9['sessions_with_nudges']} "
+                 f"сессиях (шум — не основание выключать гейт)")
     return "\n".join(lines)
 
 
