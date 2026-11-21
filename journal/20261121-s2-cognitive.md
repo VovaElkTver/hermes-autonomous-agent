@@ -1,0 +1,18 @@
+# S2.1+S2.2 — класс cognitive и когнитивные тулзы (21.11)
+
+Решение 1 ТЗ thinking-enable утверждено Вл ('да', 21.11, DM). Реализовано в
+elk/thinking-enable-s0 (f9c31f6fbbd, запушено):
+
+* barrier.COGNITIVE_ACTIONS = investigation, ctl_todo, ctl_followup,
+  ctl_status, ctl_enqueue — диспатчатся БЕЗ гейта разрешения/эпохи.
+  Доктринальный тупик 'no model text can approve' закрыт человечески
+  утверждённой константой; тест-падинадл замораживает список.
+* Хук pre_tool_call: байпас до barrier.check (плагиб выключен — байпаса нет).
+* Новые тулзы ctl_todo / ctl_followup поверх model.todo_* и controller.followups;
+  каждое действие = durable-строка в своем ledger с provenance. MATERIAL —
+  под полным барьером, как жили.
+* Тесты: 9 новых (inвариант списка, байпас pause, roundtrip ledger, регистрация
+  поверхности);全套 tests/controller — 51 passed; ruff чисто.
+
+Активация тулз — рестарт гейтвея (регистрация на import).
+После активации M6 (todo/followup/investigations) могут наполняться живьём.
