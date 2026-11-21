@@ -16,3 +16,13 @@ supervisor, tmux-session) побайтово равны репо — синхр�
 РОК: деплой плагинов = либо bundled (репо), либо тень, но не молча оба.
 Проверка живости тулз после этого инцидента — headless-прогон реестра, а не
 только тесты в дереве.
+
+## ДОСТАВКА (тот же час)
+
+- mv в _controller.shadow-20261121 (скип по '_' префиксу; простой mv в
+  controller.shadow-* НЕ отключал: key берётся из plugin.yaml, лоадер видел
+  конфликт и грузил тень).
+- Probe (.venv python): 'Ignoring user plugin ... shadow', плагин controller
+  загружен из bundled, tool_defs = 6 (ctl_todo/ctl_followup в составе).
+- Осталось: рестарт гейтвея (висит с тенью с 09:23) + headless-верификация
+  реестра. `hermes plugins show` после mv обязан показать source=bundled.
