@@ -355,6 +355,23 @@ def _brief(conn, task, step) -> str:
     return "\n".join(lines)
 
 
+def _diffstat(workdir: str, max_chars: int = 1500) -> str:
+    """What the run actually changed (S2.5): working-tree diffstat + file list.
+    Empty string on any problem (not a repo, no git, dirty index) — the judge
+    then grades on what it has, it never crashes on missing evidence."""
+    import subprocess
+    try:
+        st = subprocess.run(["git", "-C", workdir, "diff", "--stat"],
+                            capture_output=True, text=True, timeout=20, check=False)
+        un = subprocess.run(["git", "-C", workdir, "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=20, check=False)
+        out = ((st.stdout or "") + ("\nUNTRACKED/CHANGED:\n" + un.stdout
+                                    if (un.stdout or "").strip() else ""))
+        return out.strip()[:max_chars]
+    except Exception:
+        return ""
+
+
 def make_review(conn, *, judge_cfg: dict | None = None):
     from controller import model
     def review_fn(run, step, artifacts):
@@ -365,9 +382,32 @@ def make_review(conn, *, judge_cfg: dict | None = None):
             return {"verdict": "needs_human", "detail": "judge not configured"}
         try:
             from plugins.supervisor.judge import review as _j
-            hist = [{"tool": "worker", "status": str(artifacts[0].get("returncode")),
-                     "args": step.get("title", ""), "result": tail[:8000]}] if artifacts else []
-            v = _j(judge_cfg, step.get("title", "step"), hist)
+            # S2.5 (ТЗ thinking-enable): the judge sees meaning, not the tail.
+            # The population it grades against is the contract's acceptance
+            # criteria (fixed, owner-declared — src/claims shape); the run
+            # only reports which criteria its evidence covers.
+            tid = str(step.get("task_id") or "")
+            c = model.current_contract(conn, tid) if tid else {}
+            criteria = [str(a) for a in (c.get("acceptance") or []) if isinstance(a, str)]
+            facts = [str(f)[:160] for f in (c.get("facts") or [])[:10]]
+            workdir = ""
+            if tid:
+                trow = model.get_task(conn, tid)
+                workdir = str(dict(trow).get("workdir") or "") if trow else ""
+            evidence = tail
+            stat = _diffstat(workdir) if workdir else ""
+            if stat:
+                evidence = f"DIFFSTAT (working tree):\n{stat}\n\nSTDOUT:\n{tail}"
+            hist = ([{"tool": "worker", "status": str(artifacts[0].get("returncode")),
+                       "args": step.get("title", ""), "result": evidence[:8000]}]
+                    if artifacts else [])
+            if facts:
+                hist = hist + [{"tool": "contract-facts", "status": "given",
+                                "args": "confirmed before this run",
+                                "result": "\n".join(facts)}]
+            v = _j(judge_cfg, step.get("title", "step"), hist,
+                   criteria=criteria or None)
+            covered = v.get("covered")
             verdict = v.get("verdict", "revise")
             # judge.review is fail-OPEN by design (advisory checkpoint); completion needs
             # fail-closed. degraded is judge.py's machine flag (HTTP down, unparsable/empty
@@ -382,7 +422,17 @@ def make_review(conn, *, judge_cfg: dict | None = None):
             # code-side gate: worker must have exited clean for a pass
             if verdict == "pass" and artifacts and artifacts[0].get("returncode") not in (0, None):
                 return {"verdict": "revise", "detail": "judge pass but worker exit != 0"}
-            return {"verdict": verdict, "detail": v.get("reason", "")}
+            # S2.5 counterexample gate (ТЗ): a pass that cannot name a single
+            # acceptance criterion its evidence verifies is exactly the vacuous
+            # shape the machine predicate passed but the meaning did not. The
+            # predicate being green does NOT excuse empty coverage.
+            if verdict == "pass" and criteria and not covered:
+                return {"verdict": "revise",
+                        "detail": "judge pass with zero acceptance-criteria "
+                                  "coverage — name the criteria the evidence verifies",
+                        "criteria_covered": []}
+            return {"verdict": verdict, "detail": v.get("reason", ""),
+                    "criteria_covered": covered}
         except Exception as exc:  # FAIL CLOSED unlike checkpoint judge
             return {"verdict": "needs_human", "detail": f"judge unavailable: {exc}"}
     return review_fn

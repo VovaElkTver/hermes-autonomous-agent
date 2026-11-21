@@ -936,7 +936,8 @@ CREATE TABLE IF NOT EXISTS ctl_artifact_revision (
 CREATE TABLE IF NOT EXISTS ctl_review (
   review_id TEXT PRIMARY KEY, step_id TEXT NOT NULL, run_id TEXT NOT NULL,
   artifact_hash TEXT NOT NULL, verdict TEXT NOT NULL, reviewer TEXT NOT NULL,
-  detail TEXT, created_at REAL NOT NULL
+  detail TEXT, created_at REAL NOT NULL,
+  criteria_covered TEXT
 );
 CREATE TABLE IF NOT EXISTS ctl_autonomy_permission (
   scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,

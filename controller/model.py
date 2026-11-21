@@ -481,10 +481,18 @@ def add_artifact(conn, task_id: str, run_id: str, kind: str, payload: dict) -> s
 
 
 def add_review(conn, step_id: str, run_id: str, artifact_hash: str, verdict: str,
-               reviewer: str, detail: str = "") -> str:
+               reviewer: str, detail: str = "",
+               criteria_covered: list | None = None) -> str:
+    # Named columns (S2.3 lesson): schema growth must not break positional writes.
+    # criteria_covered (S2.5, ТЗ thinking-enable): the acceptance-criterion
+    # indices the judge claims to have verified — coverage, not confidence.
     rid = new_id("rev")
-    conn.execute("INSERT INTO ctl_review VALUES (?,?,?,?,?,?,?,?)",
-                 (rid, step_id, run_id, artifact_hash, verdict, reviewer, detail, time.time()))
+    conn.execute("INSERT INTO ctl_review (review_id, step_id, run_id, artifact_hash,"
+                 " verdict, reviewer, detail, created_at, criteria_covered)"
+                 " VALUES (?,?,?,?,?,?,?,?,?)",
+                 (rid, step_id, run_id, artifact_hash, verdict, reviewer, detail,
+                  time.time(),
+                  json.dumps(criteria_covered) if criteria_covered is not None else None))
     conn.commit()
     return rid
 

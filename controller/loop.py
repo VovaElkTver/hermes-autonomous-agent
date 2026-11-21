@@ -271,7 +271,8 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
             verdict = review_fn({"run_id": run_id}, step, res.get("artifacts", []))
             model.add_review(conn, step["step_id"], run_id, ah,
                              verdict.get("verdict", "revise"), "controller-loop",
-                             verdict.get("detail", ""))
+                             verdict.get("detail", ""),
+                             criteria_covered=verdict.get("criteria_covered"))
         if verdict.get("verdict") == "pass":
             model.finish_step(conn, step["step_id"])
             log.append({"task": task["task_id"], "run": run_id,
@@ -327,7 +328,8 @@ def _backfill_missing_reviews(conn, task_id: str, review_fn) -> int:
         v = review_fn({"status": "finished", "artifacts": items}, dict(s), items)
         model.add_review(conn, step_id=s["step_id"], run_id=run["run_id"], artifact_hash=ah,
                          verdict=v.get("verdict", "needs_human"),
-                         detail=str(v.get("detail", ""))[:4000], reviewer="review-backfill")
+                         detail=str(v.get("detail", ""))[:4000], reviewer="review-backfill",
+                         criteria_covered=v.get("criteria_covered"))
         n += 1
     return n
 
