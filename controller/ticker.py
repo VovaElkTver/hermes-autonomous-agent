@@ -56,12 +56,15 @@ import threading
 import time
 from pathlib import Path
 
-from . import alerts, loop, model, pump_lock, queue as Q, transitions, wake
+from . import alerts, decide, loop, model, pump_lock, queue as Q, transitions, wake
 
 logger = logging.getLogger("controller.ticker")
 
 INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0,
-             "autonomy_metrics": 86400.0}
+             "autonomy_metrics": 86400.0,
+             # S2.6 (ТЗ thinking-enable): the decide scan — cheap indexed SQL,
+             # a wake-turn only on non-empty material (empty queue ≠ turn).
+             "decide": 300.0}
 TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
 
 PUMP_STALE_S = 25 * 60   # the watchdog ticker's own freshness rule
@@ -353,6 +356,11 @@ class Ticker:
         next_pump = self._mono() + self.intervals["pump"] / 2
         next_followups = self._mono() + self.intervals["followups"]
         next_autonomy = self._mono() + self.intervals["autonomy_metrics"]
+        # S2.6 (ТЗ thinking-enable): the decide scan. Wake-pulled like pump —
+        # transitions ring the seam, so a decision moment lands on the NEXT
+        # beat; the 300 s floor only bounds the scan, it never manufactures
+        # a turn (empty queue + no material = zero lines = zero wake).
+        next_decide = self._mono() + self.intervals["decide"]
         wake_seen = wake.read_seq()
         while not self._stop.is_set():
             # Wake seam (go Вл 09.11): an external mutation (transition, new
@@ -367,6 +375,7 @@ class Ticker:
                 now = self._mono()
                 next_pump = min(next_pump, now)
                 next_followups = min(next_followups, now)
+                next_decide = min(next_decide, now)
             if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
@@ -380,8 +389,12 @@ class Ticker:
                 self._guard("autonomy-metrics", conn, self.run_autonomy_metrics)
                 next_autonomy = (max(next_autonomy, self._mono())
                                  + self.intervals["autonomy_metrics"])
+            if self._mono() >= next_decide:
+                self._guard("decide", conn, self.run_decide)
+                next_decide = (max(next_decide, self._mono())
+                               + self.intervals["decide"])
             # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
-            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups, next_autonomy) - self._mono())))
+            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups, next_autonomy, next_decide) - self._mono())))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
@@ -546,6 +559,18 @@ class Ticker:
         return [r["workdir"] for r in conn.execute(
             "SELECT DISTINCT workdir FROM ctl_task"
             " WHERE state IN ('ready','running')").fetchall()]
+
+    def run_decide(self, conn) -> None:
+        """S2.6 (ТЗ thinking-enable): the «решить, что делать» scan.
+        Zero-SQL-cheap read over ctl_state_transition/ctl_event + a material
+        count; a wake-turn is delivered ONLY when lines exist and the same
+        digest has not been shown within the cooldown hour. The watermark
+        advances only after a successful delivery — a down transport retries
+        next beat instead of silently eating the decision moment."""
+        from . import live_ports
+        deliver = live_ports.default_deliver(self.alert_target,
+                                             deliver_fn=self.deliver_fn)
+        decide.decide_tick(conn, deliver_fn=deliver, now=self._now())
 
     def _worker_cfg(self) -> tuple:
         """Fresh config read per drain (the periodic tick did the same); a failed

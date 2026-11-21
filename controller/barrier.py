@@ -29,6 +29,9 @@ COGNITIVE_ACTIONS = frozenset({
     "ctl_followup",    # due-date wake notes (ticker delivers, not model text)
     "ctl_status",      # read-only look at the queue (recovery path)
     "ctl_enqueue",     # proposing work is drafting, never starting
+    "ctl_decision",    # S2.6 (Вл 21.11): the decided-answer over one's own
+                       # queue — event noop / editorial reorder, no MATERIAL
+                       # world-touch, so the right to decide needs no gate
 })
 
 

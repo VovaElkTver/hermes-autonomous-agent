@@ -255,6 +255,54 @@ def _ctl_todo(args: dict, **kw: Any) -> str:
         return _err(f"unknown op {op!r} (use add/list/drop)")
 
 
+def _ctl_decision(args: dict, **kw: Any) -> str:
+    """S2.6 wake-turn outcome (ТЗ thinking-enable): the closed answer menu.
+    draft lives in ctl_enqueue; here only reprioritize and noop are asserted,
+    both land in the event ledger — a decision that leaves no trace is not a
+    decision."""
+    kind = str(args.get("kind") or "").strip().lower()
+    reason = str(args.get("reason") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import model
+        if kind == "noop":
+            if not reason:
+                return _err("decision noop is an asserted success — reason "
+                            "required (что рассмотрено и почему без действий)")
+            like = reason.replace("%", r"\%").replace("_", r"\_")
+            prior = conn.execute(
+                "SELECT COUNT(*) FROM ctl_event WHERE kind='decision_noop'"
+                " AND payload LIKE ?", (f"%{like}%",)).fetchone()[0]
+            model.emit(conn, kind="decision_noop", origin="agent",
+                       payload={"reason": reason, "same_reason_count": prior + 1})
+            return _out(ok=True, kind="noop", same_reason_count=prior + 1,
+                        note="the decide scan reads this counter with the same "
+                             "threshold as step noops — sittings are surveilled, "
+                             "not punished")
+        if kind == "reprioritize":
+            task_id = str(args.get("task_id") or "").strip()
+            if not task_id:
+                return _err("reprioritize requires task_id")
+            head = args.get("head")
+            head = True if head is None else bool(head)
+            try:
+                model.set_priority(conn, task_id, head=head)
+            except LookupError as exc:
+                return _err(str(exc))
+            except ValueError as exc:
+                return _err(str(exc))
+            conn.commit()
+            model.emit(conn, kind="decision_reprioritize", origin="agent",
+                       task_id=task_id,
+                       payload={"head": head, "reason": reason or "(none)"})
+            from controller import wake as _wake
+            _wake.notify()  # queue order changed: the pump may pick differently now
+            return _out(ok=True, kind="reprioritize", task_id=task_id, head=head)
+        if kind == "draft":
+            return _err("draft is said with ctl_enqueue (a contract, not a "
+                        "sentence); ctl_decision takes noop|reprioritize")
+        return _err("unknown kind (noop|reprioritize; draft -> ctl_enqueue)")
+
+
 def _ctl_followup(args: dict, **kw: Any) -> str:
     """Due-date wake notes (S2.2): the ticker delivers them as events — an agent
     cannot wake itself with model text, only register a due row here."""
@@ -402,6 +450,23 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                       "followup_id": _str("Target for cancel"),
                       "reason": _str("Why cancelling (cancel)")},
                      ["op"]),
+    "ctl_decision": (_ctl_decision,
+                     "The OUTCOME of a DECIDE wake-turn (S2.6). The wake message "
+                     "lists decision material; your answer is exactly one of: "
+                     "draft (say it with ctl_enqueue — a real contract, not here), "
+                     "reprioritize (move a draft/ready task head or tail of its "
+                     "scope queue), or noop (asserted success: you looked, nothing "
+                     "to do, reason mandatory). A noop carries the same-reason "
+                     "counter as step noops — repeated identical sittings surface "
+                     "in the next digest, they do not hide.",
+                     {"kind": {"type": "string", "enum": ["noop", "reprioritize"]},
+                      "reason": _str("What was considered and why no action (noop) "
+                                     "or why this order (reprioritize)"),
+                      "task_id": _str("Target for reprioritize"),
+                      "head": {"type": "boolean",
+                               "description": "reprioritize: true = front of queue "
+                                              "(default), false = back"}},
+                     ["kind"]),
 }
 
 # Tool classification in the spirit of MCP annotations (borrowed from NVIDIA's
@@ -417,6 +482,7 @@ TOOL_META: dict[str, dict[str, bool]] = {
     # not from readOnlyHint (only ctl_status keeps the read-only survival path).
     "ctl_todo": {"readOnlyHint": False, "destructiveHint": False},
     "ctl_followup": {"readOnlyHint": False, "destructiveHint": False},
+    "ctl_decision": {"readOnlyHint": False, "destructiveHint": False},
 }
 
 

@@ -32,6 +32,7 @@ def test_registry_is_exactly_the_approved_set():
         "ctl_followup",    # due-date wake rows (ticker delivers)
         "ctl_status",      # read-only queue look (recovery path)
         "ctl_enqueue",     # proposing = drafting, never starting
+        "ctl_decision",    # S2.6 wake-turn answer (Вл mandate over S2 block, 21.11)
     }), ("COGNITIVE_ACTIONS changed — extending the cognitive class is a human "
          "decision (Вл), not an agent convenience")
 
