@@ -197,6 +197,80 @@ def ctl_block(args: dict, **_: Any) -> str:
         return _out(ok=True, **res)
 
 
+def _ctl_todo(args: dict, **kw: Any) -> str:
+    """Intent notes on the ledger (S2.2): add/list/drop. Never pump-selected —
+    only a human materializes a todo into a real contract."""
+    op = str(args.get("op") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import model
+        if op == "add":
+            text = str(args.get("text") or "").strip()
+            if not text:
+                return _err("add requires text")
+            owner = str(args.get("owner") or kw.get("session_id") or "agent")
+            tid = model.todo_add(conn, owner=owner, text=text,
+                                 origin_ref=args.get("origin_ref"),
+                                 deadline_hint=args.get("deadline_hint"))
+            return _out(ok=True, todo_id=tid, status="open")
+        if op == "list":
+            rows = model.todo_list(conn, owner=args.get("owner") or None,
+                                   status=args.get("status") or None,
+                                   include_text=True)
+            return _out(ok=True, todos=rows, count=len(rows),
+                        note="the pump never selects from ctl_todo; only a human "
+                             "materializes a todo into a contracted task")
+        if op == "drop":
+            todo_id = str(args.get("todo_id") or "").strip()
+            if not todo_id:
+                return _err("drop requires todo_id")
+            try:
+                model.todo_drop(conn, todo_id)
+            except LookupError as exc:
+                return _err(str(exc))
+            except ValueError as exc:
+                return _err(str(exc))
+            return _out(ok=True, todo_id=todo_id, status="dropped")
+        return _err(f"unknown op {op!r} (use add/list/drop)")
+
+
+def _ctl_followup(args: dict, **kw: Any) -> str:
+    """Due-date wake notes (S2.2): the ticker delivers them as events — an agent
+    cannot wake itself with model text, only register a due row here."""
+    import os
+    op = str(args.get("op") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import followups
+        if op == "add":
+            text = str(args.get("text") or "").strip()
+            kind = str(args.get("kind") or "").strip()
+            if not (text and kind):
+                return _err("add requires kind and text")
+            scope_task = str(args.get("scope_task") or "").strip() \
+                or os.environ.get("HERMES_CONTROLLER_TASK_ID", "") \
+                or "session:" + str(kw.get("session_id") or "unknown")
+            try:
+                fid = followups.add(conn, kind=kind, scope_task=scope_task,
+                                    text=text,
+                                    due_at=args.get("due_at"),
+                                    period_s=args.get("period_s"),
+                                    rrule=args.get("rrule"),
+                                    recipient=str(args.get("recipient") or "agent"),
+                                    created_by="agent-tool")
+            except ValueError as exc:
+                return _err(str(exc))
+            return _out(ok=True, followup_id=fid, scope_task=scope_task)
+        if op == "list":
+            rows = followups.list_open(conn, scope_task=args.get("scope_task") or None)
+            return _out(ok=True, followups=rows, count=len(rows))
+        if op == "cancel":
+            fid = str(args.get("followup_id") or "").strip()
+            if not fid:
+                return _err("cancel requires followup_id")
+            done = followups.cancel(conn, fid, str(args.get("reason") or ""))
+            return _out(ok=done, followup_id=fid, cancelled=done)
+        return _err(f"unknown op {op!r} (use add/list/cancel)")
+
+
 # ------------------------------------------------------------------ schema ----
 
 def _str(desc: str) -> dict:
@@ -261,6 +335,44 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                   {"task_id": _str("Task to block"),
                    "reason": _str("Why it cannot proceed")},
                   ["task_id", "reason"]),
+    "ctl_todo": (_ctl_todo,
+                 "Intent notes on your own ledger (cognitive class: allowed even while "
+                 "autonomy is paused). add: a thing you intend to do later, with optional "
+                 "deadline_hint (free text) and origin_ref; list: your open notes; drop: "
+                 "abandon one (soft delete, audit kept). The queue pump NEVER selects "
+                 "from these — only a human materializes a todo into a contracted task, "
+                 "so writing one is recording, not committing. A todo is a durable "
+                 "intention; an intention you never write down is not durable.",
+                 {"op": {"type": "string", "enum": ["add", "list", "drop"]},
+                  "text": _str("The intention, one line (add)"),
+                  "deadline_hint": _str("Optional free-text when it matters (e.g. 'before S2 acceptance')"),
+                  "origin_ref": _str("Optional pointer to what prompted it (event/journal path)"),
+                  "todo_id": _str("Target for drop"),
+                  "owner": _str("Optional owner filter/label (default: this session)"),
+                  "status": {"type": "string", "enum": ["open", "materialized", "dropped"],
+                             "description": "list filter (default: all)"}},
+                 ["op"]),
+    "ctl_followup": (_ctl_followup,
+                     "Register a due-date wake note (cognitive class): the ticker "
+                     "delivers it as an event when it comes due — you cannot wake "
+                     "yourself with model text, only with a row like this. kind='reminder' "
+                     "needs due_at (epoch seconds); kind='review' needs period_s or rrule "
+                     "(periodic re-check). Fires at most max_repeats times, then sleeps. "
+                     "list shows open rows with next_due; cancel retires one. Text goes "
+                     "through the scheduled-prompt tripwire at INSERT (a command you "
+                     "would not execute verbatim, do not register verbatim).",
+                     {"op": {"type": "string", "enum": ["add", "list", "cancel"]},
+                      "kind": {"type": "string", "enum": ["reminder", "review"]},
+                      "text": _str("What to do when it fires, one line (add)"),
+                      "due_at": {"type": "number", "description": "Epoch seconds (reminder)"},
+                      "period_s": {"type": "integer", "description": "Review period seconds"},
+                      "rrule": _str("Optional RFC-style recurrence for review kind"),
+                      "scope_task": _str("Task the wake belongs to (default: running task or session)"),
+                      "recipient": {"type": "string", "enum": ["agent", "user"],
+                                    "description": "Default agent (self-wake); user pings the owner in chat"},
+                      "followup_id": _str("Target for cancel"),
+                      "reason": _str("Why cancelling (cancel)")},
+                     ["op"]),
 }
 
 # Tool classification in the spirit of MCP annotations (borrowed from NVIDIA's
@@ -271,6 +383,11 @@ TOOL_META: dict[str, dict[str, bool]] = {
     "ctl_enqueue": {"readOnlyHint": False, "destructiveHint": False},
     "ctl_step_done": {"readOnlyHint": False, "destructiveHint": False},
     "ctl_block": {"readOnlyHint": False, "destructiveHint": False},
+    # S2.2: ledger-writing cognitive tools — mutability lives in the cognitive
+    # ledger, not the world; dispatch admission comes from barrier.COGNITIVE_ACTIONS,
+    # not from readOnlyHint (only ctl_status keeps the read-only survival path).
+    "ctl_todo": {"readOnlyHint": False, "destructiveHint": False},
+    "ctl_followup": {"readOnlyHint": False, "destructiveHint": False},
 }
 
 

@@ -13,6 +13,28 @@ from __future__ import annotations
 
 from . import model
 
+# S2.1 (ТЗ thinking-enable, утверждено Вл 21.11 'да'): the cognitive class.
+# Thinking actions are allowed ALWAYS, with no approval and regardless of the
+# autonomy permission/epoch — the doctrine barrier ('no model text can
+# approve') is closed by this human-approved constant, not by model text.
+# Ledger discipline holds: every member below writes its own durable row with
+# origin/session provenance (investigations.*, ctl_todo, ctl_followup,
+# ctl_event) — a cognitive action that leaves no row did not happen.
+# MATERIAL world-mutations are NOT in this class and keep the full barrier.
+# The list is frozen by tests/controller/test_cognitive_class.py: extending it
+# requires a human decision, and the test says so loudly.
+COGNITIVE_ACTIONS = frozenset({
+    "investigation",   # hypothesis / probe / prediction / verdict ledger
+    "ctl_todo",        # intent notes: add/list/drop (never pump-selected)
+    "ctl_followup",    # due-date wake notes (ticker delivers, not model text)
+    "ctl_status",      # read-only look at the queue (recovery path)
+    "ctl_enqueue",     # proposing work is drafting, never starting
+})
+
+
+def is_cognitive(tool_name: str) -> bool:
+    return tool_name in COGNITIVE_ACTIONS
+
 
 def check(conn, *, scope: str, origin: str, task_id: str | None = None,
           action_class: str = "ordinary") -> tuple[bool, str]:

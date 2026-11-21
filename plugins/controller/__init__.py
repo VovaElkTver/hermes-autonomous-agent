@@ -92,6 +92,11 @@ def _on_pre_tool_call(tool_name: str = "", args: dict | None = None, task_id: st
         origin = _origin_of(task_id, session_id)
         if origin != "autonomous":
             return None
+        # S2.1: the cognitive class is dispatched WITHOUT the permission/epoch
+        # gate (human-approved constant; ledger discipline holds inside each
+        # tool). This is what lets a paused or untasked child still think.
+        if barrier.is_cognitive(tool_name):
+            return None
         scope = _scope_by_session.get(session_id) or _default_scope()
         task_id_ctl = kw.get("controller_task_id") or os.environ.get(_TASK_ENV) \
             or _task_for_scope(_db(), scope)
