@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
 import sys
 
 log = __import__("logging").getLogger(__name__)
@@ -72,13 +73,26 @@ def _candidates(tool_name: str, args: dict, basenames: frozenset[str]):
     if tool_name in _PATH_ARG_TOOLS:
         p = args.get("path") or args.get("file_path") or args.get("file")
         if p:
-            yield str(p)
+            yield str(p), True  # direct-edit tools: every mention is an edit
     elif tool_name in _TEXT_TOOLS:
         text = str(args.get("command") or args.get("code") or "")
-        for tok in text.replace('"', " ").replace("'", " ").split():
-            tok = tok.rstrip(",;)")
-            if "/" in tok or tok.lower().split(os.sep)[-1].split("/")[-1] in basenames:
-                yield tok
+        for line in text.splitlines():
+            for tok in line.replace('"', " ").replace("'", " ").split():
+                tok = tok.rstrip(",;)")
+                if "/" in tok or tok.lower().split(os.sep)[-1].split("/")[-1] in basenames:
+                    yield tok, bool(_WRITE_HINT_RE.search(line))
+
+
+# A free-text line counts as an edit only when it carries a write directive: the
+# guard-blocks-`grep` era made protected paths unreadable (17.11 doctrine — the
+# gate must fire on edits, not on mentions; reads of a guard-config are how the
+# agent finds out what to fix instead). Deliberately over-broad verb list: when
+# in doubt the line looks like a write and gets blocked (the pre-10.11 behavior).
+_WRITE_HINT_RE = re.compile(
+    r"(>>?|\btee\b|\bsed\b[^|;\n]*\s-i|\btruncate\b|\bof=|\btouch\b"
+    r"|\b(?:cp|mv|rm|install|ln|chmod|chown)\b|\bwrite_text\b|\bwrite_bytes\b"
+    r"|\bpatch\b|\bsave_config\b|atomic_config|open\s*\([^)]*['\"]{1}[wa])"
+)
 
 
 def pre_tool_call(tool_name: str = "", args: dict | None = None, **kw):
@@ -89,7 +103,9 @@ def pre_tool_call(tool_name: str = "", args: dict | None = None, **kw):
         # full glob matching below remains the authority
         basenames = frozenset(
             g.rsplit(os.sep, 1)[-1].rsplit("/", 1)[-1] for g in globs)
-        for cand in _candidates(tool_name, args, basenames):
+        for cand, is_edit in _candidates(tool_name, args, basenames):
+            if tool_name in _TEXT_TOOLS and not is_edit:
+                continue  # a read mentioning the path is how the agent finds the fix
             try:
                 if not _hit(cand, globs):
                     continue

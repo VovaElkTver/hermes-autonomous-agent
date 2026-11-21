@@ -131,7 +131,7 @@ def test_t2_prompt_correction_reaches_analysis(fake_cfg, tmp_home, fast_gate, mo
 def test_t7_specialty_slot_disappears_when_empty(fake_cfg, tmp_home):
     fake_cfg["specialty_context"] = ""
     run = rm.ManagedRun(run_id="r", chat_key="k", source="manual", focus=None,
-                        messages_snapshot=[{"role": "user", "content": "m"}])
+                        messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}])
     prompt = rm._compile_prompt(run, None)
     assert "Specialty context" not in prompt
     fake_cfg["specialty_context"] = "инженерия полётов"
@@ -161,7 +161,7 @@ def test_t4_invalid_topic_rejected_valid_passes_to_propose(fake_cfg, tmp_home, f
     agent = StubAgent()
     raw_bad = ('```json\n[{"kind": "memory", "topic": "нет-такой-темы", "action": "add",'
                ' "content": "x"}]\n```')
-    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m"}],
+    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}],
                               review_memory=True, explicit=True) is True
     monkeypatch.setattr(rm, "_run_analysis_fork", lambda *a, **k: raw_bad)
     rm.handle_command(agent.session_chat_id, "го промпт", "")
@@ -174,7 +174,7 @@ def test_t4_invalid_topic_rejected_valid_passes_to_propose(fake_cfg, tmp_home, f
     # валидная карточка доходит до DISCUSS и публикуется
     agent2 = StubAgent(key="platform-x:chat-2")
     monkeypatch.setattr(rm, "_run_analysis_fork", lambda *a, **k: CARDS_RAW)
-    assert rm.intercept_spawn(agent2, messages_snapshot=[{"role": "user", "content": "m"}],
+    assert rm.intercept_spawn(agent2, messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}],
                               review_memory=True, explicit=True) is True
     rm.handle_command(agent2.session_chat_id, "го", "")
     assert wait_until(lambda: any("CANDIDATES" in p for p in agent2.published))
@@ -190,7 +190,7 @@ def test_t3_defer_at_discuss_then_resume_applies_without_rerun(
     fake_cfg["managed_refine"] = True
     store_path = _seed_topic_registry(tmp_home, tmp_home)
     agent = StubAgent()
-    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m"}],
+    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}],
                               review_memory=True, explicit=True) is True
     fork_calls = {"n": 0}
 
@@ -230,7 +230,7 @@ def test_t5_apply_under_administrator_mode_redirects_with_run_id(
     fake_cfg.update({"managed_refine": True, "administrator_mode": True})
     _seed_topic_registry(tmp_home, tmp_home)
     agent = StubAgent()
-    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m"}],
+    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}],
                               review_memory=True, explicit=True) is True
     monkeypatch.setattr(rm, "_run_analysis_fork", lambda *a, **k: CARDS_RAW)
     rm.handle_command(agent.session_chat_id, "го", "")
@@ -278,7 +278,7 @@ def test_t9_flag_off_keeps_upstream_atomic_behavior(fake_cfg, tmp_home):
 def test_status_and_stop_surface(fake_cfg, tmp_home, fast_gate):
     fake_cfg["managed_refine"] = True
     agent = StubAgent()
-    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m"}],
+    assert rm.intercept_spawn(agent, messages_snapshot=[{"role": "user", "content": "m (elk-topic)"}],
                               review_memory=True, explicit=True) is True
     status = rm.handle_command(agent.session_chat_id, "status", "")
     assert "stage=PREPARE" in status

@@ -21,7 +21,46 @@ def rebase_for_save(config: dict[str, Any], live_raw: dict[str, Any], merge_exis
         return _three_way(live_raw or {}, config, _config.load_config(), _frozen_for_deletion(snapshot))
     if merge_existing and live_raw:
         return _config._merge_partial_save(live_raw, config)
+    return _preserve_concurrent_branches(config, live_raw or {})
+
+
+def _preserve_concurrent_branches(config: dict[str, Any], live_raw: dict[str, Any]) -> dict[str, Any]:
+    """A stale full-tree save must not silently delete branches it never saw.
+
+    The ordinary caller does ``load_config(); mutate; save_config(config)`` without
+    ``merge_existing``. When another process adds a section between this process's load
+    and save, the whole-tree write drops it (measured 17.11: ``agent.verify_on_stop``
+    was lost to an evening rewrite by a process that had loaded before the morning
+    activation). Caller *deletion* is only credible for branches the caller actually
+    saw: existence in the last config this process loaded or saved
+    (``_LAST_EXPANDED_CONFIG_BY_PATH``, refreshed by both) is the provenance. Live
+    branches absent from that base are restored; anything the caller saw and dropped
+    stays dropped. Mappings recurse; lists and scalars are replaced wholesale by the
+    caller (matching ``_merge_partial_save``'s add-only contract). Fail-open: any
+    internal error keeps the old whole-tree semantics, never blocks a save.
+    """
+    try:
+        from hermes_cli import config as _config
+        base = _config._LAST_EXPANDED_CONFIG_BY_PATH.get(str(_config.get_config_path()))
+        _reconcile_against_live(config, live_raw, base)
+    except Exception:  # pragma: no cover - never block a save on reconciliation
+        return config
     return config
+
+
+def _reconcile_against_live(dst: Any, live: Any, base: Any) -> None:
+    if not isinstance(dst, dict) or not isinstance(live, dict):
+        return
+    for key, live_val in live.items():
+        if key not in dst:
+            seen = isinstance(base, dict) and key in base
+            if base is None or not seen:
+                # Appeared on disk after this process last looked; the caller cannot
+                # have intended to delete what it never received.
+                dst[key] = copy.deepcopy(live_val)
+        elif isinstance(dst[key], dict) and isinstance(live_val, dict):
+            child_base = base.get(key) if isinstance(base, dict) else None
+            _reconcile_against_live(dst[key], live_val, child_base)
 
 
 def _frozen_for_deletion(snapshot: dict[str, Any]) -> Any:

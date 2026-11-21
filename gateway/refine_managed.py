@@ -100,6 +100,8 @@ DEFAULT_TEMPLATE = (
     "future_decision_changed: '...', novelty: '...', source_event_ids: [], dedup_checked_ids: []}.\\n"
     "deferred[i]: {candidate_id, reason, required_check, artifact_ids_to_read: []}.\\n"
     "rejected[i]: {candidate_id, reason}.\\n"
+    '"topic": {"proposed_name": "...", "matched": ["имена тем из реестра"], '
+    '"evidence": "..."} — оценка ТЕМЫ материала (см. §0);\\n'
     "Не выдумывай идентификаторы событий. Не повторяй журнал в обоснованиях.\\n\\n"
     "Материал — журнал диалога:\n{material}\n\n{focus_block}\n"
 )
@@ -162,6 +164,9 @@ class ManagedRun:
     cards: list = field(default_factory=list)      # валидированные карточки PROPOSE
     approved: dict = field(default_factory=dict)   # idx(str) -> "reject"|...
     history: list = field(default_factory=list)
+    topic_assessment: Optional[dict] = None        # {status, matched, proposed_name, ...}
+    topic_route: Optional[str] = None              # подтверждённая тема (TOPIC_CONFIRM -> EXISTING)
+    last_raw: str = ""                             # сырой вердикт модели для повторной финализации
 
     @property
     def dir(self) -> Path:
@@ -191,7 +196,10 @@ class ManagedRun:
             messages_snapshot=[], review_memory=bool(data.get("review_memory")),
             review_skills=bool(data.get("review_skills")), stage=data.get("stage") or "PREPARE",
             cards=list(data.get("cards") or []), approved=dict(data.get("approved") or {}),
-            history=list(data.get("history") or []))
+            history=list(data.get("history") or []),
+            topic_assessment=data.get("topic_assessment"),
+            topic_route=data.get("topic_route"),
+            last_raw=str(data.get("last_raw") or ""))
 
     def note(self, event: str) -> None:
         self.history.append({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "event": event})
@@ -295,6 +303,126 @@ def _registry_rule(topic_name: str):
         if rule.name == topic_name:
             return rule
     return None
+
+
+_TOPIC_NEW_HINT_LEN = 6000
+
+
+def extract_topic(raw) -> Optional[dict]:
+    """Достаёт top-level {"topic": {...}} из ответа модели (None — если нет/битый).
+
+    Формат совпадает с parse_plan: fenced ```json или готовый dict/JSON-текст."""
+    if isinstance(raw, dict):
+        obj = raw
+    else:
+        s = str(raw)
+        fence = None
+        for marker in ("```json", "```JSON", "```"):
+            k = s.rfind(marker)
+            if k >= 0:
+                fence = k + len(marker)
+                break
+        if fence is not None:
+            end = s.find("```", fence)
+            blob = s[fence:end if end >= 0 else None].strip()
+        else:
+            blob = s.strip()
+        try:
+            obj = json.loads(blob)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    tp = obj.get("topic")
+    if not isinstance(tp, dict):
+        return None
+    out = {
+        "proposed_name": str(tp.get("proposed_name") or "").strip()[:80],
+        "evidence": str(tp.get("evidence") or "").strip()[:400],
+    }
+    matched = tp.get("matched")
+    out["matched"] = [str(m).strip() for m in matched if str(m).strip()] \
+        if isinstance(matched, list) else []
+    return out
+
+
+def assess_topic(digest_text: str, model_topic: Optional[dict] = None,
+                 hint: Optional[str] = None,
+                 registry_path=None) -> dict:
+    """Детерминированная оценка темы материала прогона против topics.yaml.
+
+    Слои: детерминированные match-паттерны реестра; модельный ответ учитывается
+    только внутри допустимого множества имён. Статусы: EXISTING (маршрут известен),
+    NEW (темы нет — нужно подтверждение владельца), AMBIGUOUS (несколько кандидатов).
+    """
+    from tools.memory_topic_gate import load_registry, pattern_matches
+    rules = load_registry(registry_path or _registry_path())
+    text = (digest_text or "")[:_TOPIC_NEW_HINT_LEN]
+    det: list[str] = []
+    for rule in rules:
+        for pat in rule.match:
+            if pattern_matches(pat, text):
+                det.append(rule.name)
+                break
+    names = {r.name for r in rules}
+    model_matched = [m for m in ((model_topic or {}).get("matched") or [])
+                     if m in names]
+    ta = {"proposed_name": "", "evidence": "",
+          **(model_topic or {}),
+          "matched": [], "deterministic": det}
+    if len(det) == 1:
+        ta["status"], ta["matched"] = "EXISTING", [det[0]]
+    elif len(det) > 1 and len(model_matched) == 1 and model_matched[0] in det:
+        ta["status"], ta["matched"] = "EXISTING", model_matched
+        ta["resolved_by_model"] = True
+    elif len(det) > 1:
+        ta["status"] = "AMBIGUOUS"
+        ta["candidates"] = det
+    else:  # детерминированных попаданий нет
+        single_model = model_matched[:1]
+        if single_model:
+            ta["status"], ta["matched"] = "EXISTING", single_model
+        else:
+            proposed = str((model_topic or {}).get("proposed_name") or "").strip()
+            ta["status"] = "NEW"
+            ta["proposed_name"] = proposed or str(hint or "").strip()[:80]
+    ta.setdefault("candidates", [])
+    return ta
+
+
+def _registry_append(topic_name: str) -> Path:
+    """Добавляет тему в topics.yaml (курируемый реестр; правка по явной команде
+    владельца из /refine topic-new) и создаёт store-файл. Возвращает store путь."""
+    safe = re.sub(r"[^\w\-.]+", "_", topic_name.strip()).strip("_") or "topic"
+    store = _hermes_home() / "memories" / "topics" / f"{safe}.md"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    if not store.exists():
+        header = (f"# {topic_name} — тематическая память\n\n"
+                  f"Создано командой /refine topic-new ({safe}).\n")
+        tmp = store.with_suffix(".tmp")
+        tmp.write_text(header, encoding="utf-8")
+        tmp.replace(store)
+    reg_path = _registry_path()
+    row = (f"  - name: {topic_name}\n"
+           "    match:\n"
+           f"      - '{topic_name}'\n"
+           f"      - 're:^{re.escape(topic_name)}\\b'\n"
+           f"    store: '{store}'\n"
+           f"    pointer: 'Канон темы {topic_name} — {{store}}'\n")
+    if not reg_path.exists():
+        reg_path.parent.mkdir(parents=True, exist_ok=True)
+        reg_path.write_text("topics:\n", encoding="utf-8")
+    txt = reg_path.read_text(encoding="utf-8")
+    if not txt.endswith("\n"):
+        txt += "\n"
+    # идемпотентность по нормализованному имени (учёт кавычек/пробелов в заголовке)
+    already = ("\n" + f"  - name: {topic_name}\n") in ("\n" + txt)
+    already = already or txt.lstrip().startswith(f"- name: {topic_name}")
+    if not already and f"  - name: {topic_name}" not in txt:
+        with reg_path.open("a", encoding="utf-8") as fh:
+            fh.write(row)
+    # прогрев кэша гейта новым mtime не нужен: gate перечитывает по mtime сам.
+    return store
 
 
 def parse_cards(raw_text: str) -> list[dict]:
@@ -549,7 +677,7 @@ def _begin_run(run: ManagedRun) -> bool:
         f"[refine {run.run_id}] {header}\n"
         f"Digest:\n{_digest(run.messages_snapshot)}\n\n"
         f"Prompt → {run.dir / 'prompt_used.txt'}\n"
-        "Commands: /refine go · /refine <исправленный промпт> · /refine stop · /refine resume <id>"
+        "Commands: /refine go · /refine <исправленный промпт> · /refine stop · /refine resume <id> · /refine topic-new|topic-use (при TOPIC_CONFIRM)"
     ))
     return True
 
@@ -605,7 +733,16 @@ def _analyze(run: ManagedRun, prompt_edit: Optional[str] = None) -> None:
     except OSError:
         pass
     _emit(run, f"[refine {run.run_id}] RAW VERDICT:\n{(raw or '(пусто)')[:4000]}")
-    status, changes = parse_plan(raw or "")
+    _finalize_analysis(run, raw or "")
+
+
+def _finalize_analysis(run: ManagedRun, raw: str) -> None:
+    """Обработка вердикта модели: гейт темы → screen → cards → DISCUSS.
+
+    Отделена от _analyze, чтобы команды /refine topic-new|topic-use могли
+    продолжить обработку того же вердикта после подтверждения темы."""
+    run.last_raw = raw
+    status, changes = parse_plan(raw)
     if status == "NO_CHANGE" and not changes:
         run.stage = "FINISHED"
         run.note("NO_CHANGE verdict")
@@ -619,6 +756,36 @@ def _analyze(run: ManagedRun, prompt_edit: Optional[str] = None) -> None:
                    "переспроси вручную с уточнением (/refine <focus>).")
         RUNS.pop(run.chat_key, None)
         return
+    # --- тематический роутер (память-карточки требуют существующую тему) ---
+    has_memory = any(str(c.get("kind")) == "memory" for c in changes)
+    if not run.topic_route and has_memory:
+        ta = assess_topic(_digest(run.messages_snapshot), extract_topic(raw),
+                          hint=run.focus)
+        run.topic_assessment = ta
+        if ta["status"] != "EXISTING":
+            run.persist()
+            names = ", ".join(ta["candidates"]) or "-"
+            if ta["status"] == "NEW":
+                q = ("Материал выглядит НОВОЙ темой «{}» (evidence: {}). "
+                     "Создать тему и разместить записи там?\n"
+                     "/refine topic-new {}\n"
+                     "/refine topic-use <имя существующей темы>").format(
+                        ta['proposed_name'] or '?', ta['evidence'] or 'нет',
+                        (ta['proposed_name'] or '').strip())
+            else:
+                q = ("Материал может относиться к нескольким темам: "
+                     f"{names}. Куда разместить записи памяти?\n"
+                     "/refine topic-use <имя> — маршрутизировать в существующую\n"
+                     f"/refine topic-new <Имя> — создать новую тему")
+            _emit(run, f"[refine {run.run_id}] TOPIC_CONFIRM ({ta['status']}):\n{q}")
+            run.note(f"topic gate: {ta['status']} waiting")
+            run.stage = "TOPIC_CONFIRM"
+            return
+    elif run.topic_route:
+        for c in changes:
+            if str(c.get("kind")) == "memory":
+                c["topic"] = run.topic_route
+
     validated, rejected = [], []
     deferred, rejected2 = [], []
     if changes:
@@ -628,7 +795,7 @@ def _analyze(run: ManagedRun, prompt_edit: Optional[str] = None) -> None:
         validated = [(c, "ok") for c in cards]
     else:
         # Legacy prose-card path (older prompt templates / config overrides).
-        for card in parse_cards(raw or "")[:12]:
+        for card in parse_cards(raw)[:12]:
             ok, reason = validate_card(card)
             (validated if ok else rejected).append((card, reason))
         if rejected:
@@ -722,7 +889,7 @@ def _render_cards(run: ManagedRun) -> str:
         parts.append(
             f"--- card-{i} [{card.get('kind')}] target={card.get('topic')} ---\n"
             f"{(card.get('content') or '')[:600]}\nrationale: {card.get('rationale', '')}")
-    parts.append("Commands: /refine approve · /refine reject N · /refine stop · /refine status")
+    parts.append("Commands: /refine topic-new <Имя> · /refine topic-use <имя> · /refine reject N · /refine stop")
     return "\n".join(parts)
 
 
@@ -790,33 +957,88 @@ def cleanup_agent_flags(agent: Any) -> None:
             pass
 
 
+def _norm_topic(text: str) -> str:
+    s = str(text or "").strip().strip("\u00ab\u00bb\"'`").strip()
+    s = re.sub(r"^\s*(?:тема|в тему|topick?|topic)\s*[:\-]?\s*", "", s, flags=re.IGNORECASE)
+    return s.strip()
+
+
+def resolve_topic_answer(run: ManagedRun, answer: str) -> str:
+    """Ответ владельца на вопрос о теме — голым текстом.
+
+    «да»/«создавай» при NEW = предложенное имя; существующее имя (нормализуемое
+    сравнение без учёта регистра/подчёркиваний) = маршрут туда; любое другое
+    непустое имя = создать новую тему. Сомнение владельца выражается вопросом —
+    тогда в ответ уходит краткая сводка кандидатов."""
+    ta = run.topic_assessment or {}
+    name = _norm_topic(answer)
+    if not name or name.lower() in ("да", "давай", " го", "го", "yes", "ok", "ок"):
+        name = str(ta.get("proposed_name") or "").strip()
+    if not name:
+        names = ", ".join(ta.get("candidates") or [])
+        base = f"Кандидаты: {names}." if names else ""
+        return ("Назови тему одним словом/словосочетанием: " + base).strip()
+    # нормализованное сравнение с реестром
+    target = None
+    for rule_name in _topic_names():
+        n1 = re.sub(r"[\s_\-]+", "", rule_name.lower())
+        n2 = re.sub(r"[\s_\-]+", "", name.lower())
+        if n1 == n2:
+            target = rule_name
+            break
+    if target is None:
+        # мягкое совпадение: введённое имя целиком содержится в теме реестра
+        for rule_name in _topic_names():
+            if name.lower() in rule_name.lower():
+                target = rule_name
+                break
+    if target is not None:
+        run.topic_route = target
+        run.note(f"topic route -> existing: {target}")
+        created = False
+    else:
+        _registry_append(name)
+        run.topic_route = name
+        run.note(f"topic created: {name}")
+        created = True
+    raw = run.last_raw
+    if not raw:
+        try:
+            raw = (run.dir / "response_raw.txt").read_text(encoding="utf-8")
+        except OSError:
+            pass
+    threading.Thread(target=_finalize_analysis, args=(run, raw),
+                     daemon=True, name="managed-refine-topic").start()
+    where = target if target is not None else name
+    verb = "маршрутизирована в существующую" if not created else "создана"
+    return f"[refine {run.run_id}] тема «{where}» {verb} — продолжаю обработку вердикта."
+
+
 # --------------------------------------------------------------------------- commands (/refine dispatch)
+
+#: Таблица команд гейта: sub -> (вердикт, текст «нет гейта»).
+_GATE_RESOLVE = {
+    "go": ("go", "открытого гейта нет"),
+    "иди": ("go", "открытого гейта нет"),
+    "stop": ("stop", "нет открытого гейта"),
+    "стоп": ("stop", "нет открытого гейта"),
+    "postpone": ("postpone", "открытого гейта нет"),
+    "отложи": ("postpone", "открытого гейта нет"),
+    "approve": ("approve", "открытого гейта DISCUSS нет"),
+}
+
 
 def handle_command(chat_key: Optional[str], sub: str, rest: str, agent: Any = None) -> Optional[str]:
     """Вход из диспетчера /refine: sub — первое слово аргументов, rest — остаток строки.
     None — команда потреблена управляемой машиной (дальше как новый прогон её не трактовать)."""
     chat_key = str(chat_key or "")
     gate = _GATES.get(chat_key)
-    if sub in ("go", "иди"):
+    _verdict = _GATE_RESOLVE.get(sub)
+    if _verdict is not None:
         if gate:
-            gate.resolve("go")
+            gate.resolve(_verdict[0])
             return None
-        return "открытого гейта нет"
-    if sub in ("stop", "стоп"):
-        if gate:
-            gate.resolve("stop")
-            return None
-        return "нет открытого гейта"
-    if sub in ("postpone", "отложи"):
-        if gate:
-            gate.resolve("postpone")
-            return None
-        return "открытого гейта нет"
-    if sub == "approve":
-        if gate:
-            gate.resolve("approve")
-            return None
-        return "открытого гейта DISCUSS нет"
+        return _verdict[1]
     if sub.startswith("reject"):
         run = RUNS.get(chat_key)
         if run:
@@ -825,6 +1047,21 @@ def handle_command(chat_key: Optional[str], sub: str, rest: str, agent: Any = No
             run.persist()
             return f"карточка {idx or '-'} снята"
         return "активного прогона нет"
+    if sub in ("topic-new", "topic-use"):
+        run = RUNS.get(chat_key)
+        if not run or run.stage != "TOPIC_CONFIRM":
+            return "нет прогона в статусе TOPIC_CONFIRM"
+        RUNS[run.chat_key] = run
+        return resolve_topic_answer(run, rest)
+
+    if sub.startswith("topic:"):
+        answer = (sub[len("topic:"):] + " " + rest).strip()
+        return resolve_topic_answer(RUNS[chat_key], answer)
+
+    if RUNS.get(chat_key, None) is not None and RUNS[chat_key].stage == "TOPIC_CONFIRM" \
+            and sub not in ("resume",):
+        # свободный текст в статусе вопроса о теме = имя темы (ответ владельца)
+        return resolve_topic_answer(RUNS[chat_key], (sub + " " + rest).strip())
     if sub == "status":
         run = RUNS.get(chat_key)
         return f"stage={run.stage} run={run.run_id}" if run else "активных прогонов нет"
