@@ -211,6 +211,16 @@ def emit(conn, *, kind: str, origin: str, task_id: str | None = None,
         conn.execute("INSERT INTO ctl_event VALUES (?,?,?,?,?,?,?)",
                      (eid, time.time(), kind, task_id, origin,
                       json.dumps(payload or {}, ensure_ascii=False), idempotency_key))
+        if task_id:
+            # S2.4 (ТЗ thinking-enable): every task-bound event is `about` its
+            # task in the causal graph — the worker brief reader (workers.
+            # _consequences) walks exactly these edges. Direction is
+            # subject→event: the writer contract orders edges predecessor→
+            # consequence and the task always predates the event about it.
+            # strict=False: a rejected bookkeeping edge never sinks the event.
+            from .causal import link as _causal_link
+            _causal_link(conn, frm=f"task:{task_id}", to=f"ctl:{eid}",
+                         kind="about", commit=False, strict=False)
         conn.commit()
         return eid
     except sqlite3.IntegrityError:

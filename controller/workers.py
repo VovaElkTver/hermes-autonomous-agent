@@ -261,6 +261,55 @@ def make_worker(conn, *, timeout_s: float | None = None,
     return worker_fn
 
 
+def _consequences(conn, task, *, window_s: float = 14 * 86400, cap: int = 8,
+                  max_chars: int = 1200) -> str:
+    """S2.4 (ТЗ thinking-enable): consequences into the brief — the machine
+    version of cautionary §7. Walks the causal subgraph `about`/`causes` around
+    the task (writer: model.emit) and appends the last reviews' detail, so a
+    worker sees WHAT HAPPENED AROUND this task ("мой стоп породил вторую
+    аварию", "внешний агент снял interim-патч") instead of only the contract.
+    Hard caps keep this O(recent-window), never O(store); silent on empty."""
+    tid = task["task_id"]
+    lines: list[str] = []
+    rows = conn.execute(
+        "SELECT e.event_id, e.kind, e.ts, e.payload FROM ctl_causal_link cl"
+        " JOIN ctl_event e ON e.event_id = substr(cl.to_event, 5)"
+        " WHERE cl.from_event = ? AND cl.kind IN ('about','causes')"
+        "   AND cl.ts > ? ORDER BY cl.ts DESC LIMIT ?",
+        (f"task:{tid}", time.time() - window_s, cap)).fetchall()
+    from collections import Counter
+    per_kind: dict[str, tuple] = {}
+    counts: Counter[str] = Counter()
+    for _eid, kind, ts, payload in rows:
+        counts[kind] += 1
+        if kind not in per_kind:  # rows are ts-DESC: first per kind is the freshest
+            summ = ""
+            try:
+                p = json.loads(payload) if payload else {}
+                summ = str(p.get("reason") or p.get("detail") or p.get("note")
+                           or p.get("basis") or "")[:110]
+            except (ValueError, TypeError):
+                pass
+            per_kind[kind] = (ts, summ)
+    for kind, (ts, summ) in sorted(per_kind.items(),
+                                   key=lambda kv: -kv[1][0]):
+        age_h = max(0.0, (time.time() - ts)) / 3600.0
+        n = counts[kind]
+        lines.append(f"- {age_h:.0f}h назад: {kind}" + (f" x{n}" if n > 1 else "")
+                     + (f" — {summ}" if summ else ""))
+    revs = conn.execute(
+        "SELECT r.verdict, r.detail, s.title FROM ctl_review r"
+        " JOIN ctl_step s ON s.step_id = r.step_id"
+        " WHERE s.task_id = ? ORDER BY r.created_at DESC LIMIT 3",
+        (tid,)).fetchall()
+    for verdict, detail, title in revs:
+        lines.append(f"- review «{(title or '')[:40]}»: {verdict}"
+                     + (f" — {str(detail or '')[:140]}" if detail else ""))
+    if not lines:
+        return ""
+    return "\n".join(lines)[:max_chars]
+
+
 def _brief(conn, task, step) -> str:
     from controller import model
     c = model.current_contract(conn, task["task_id"])
@@ -279,6 +328,13 @@ def _brief(conn, task, step) -> str:
     lines += [
         "Confirmed facts:", *[f"- {a}" for a in (c.get("facts") or [])[:20]],
         "Restrictions:", *[f"- {a}" for a in (c.get("restrictions") or [])[:20]],
+    ]
+    # S2.4: what happened around this task (causal graph + last reviews), before
+    # the worker starts touching things. Empty ledger adds nothing.
+    cons = _consequences(conn, task)
+    if cons:
+        lines += ["", "Recent consequences around this task (causal graph):", cons]
+    lines += [
         "",
         "Work ONLY on this step. When done, state exactly how each acceptance",
         "criterion is verified (command output). This run is checkpointed.",
