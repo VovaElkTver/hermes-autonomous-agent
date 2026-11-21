@@ -66,10 +66,10 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
                           "to": "paused", "interrupted": True}, "stop": True}
     if status != "finished":
         model.unstick_step(conn, sid)  # release the claim: a ready->running retry must find it dispatchable
-        transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
         from . import live_ports
         err_tail = str(res.get("error") or status)
         reason_txt = err_tail
+        fa = None
         try:
             from . import failure_analysis as FA
             fa = FA.apply(conn, task_id=tid, run_id=run_id,
@@ -77,15 +77,79 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
                           task_goal=str(task.get("goal") or ""),
                           step_summary=f"step {sid}",
                           error_tail=err_tail)
-            if fa:
-                reason_txt += (f"; анализ ({fa.get('strategy')}): "
-                               f"{str(fa.get('reasoning'))[:300]}")
         except Exception:  # analyzer must never block the durable failed path
             pass
+        if fa:
+            reason_txt += (f"; анализ ({fa.get('strategy')}): "
+                           f"{str(fa.get('reasoning'))[:300]}")
+            # S2.3 (TЗ thinking-enable): the strategy is a routing decision now,
+            # not decoration in a failure message. Repeat costs more than a
+            # refusal: a step reruns only on fresh basis, otherwise the task
+            # parks at needs_human with the missing knowledge named.
+            to = _route_recovery(conn, task_id=tid, step_id=sid,
+                                 run_id=run_id, fa=fa)
+            model.emit(conn, kind="failure_routed", origin="failure_analysis",
+                       task_id=tid,
+                       payload={"to": to, "strategy": fa.get("strategy")})
+            if to != "ready":
+                live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
+                                              goal=task["goal"], reason=reason_txt)
+            return {"entry": {"task": tid, "run": run_id, "to": to}, "stop": False}
+        transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
         live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
                                       goal=task["goal"], reason=reason_txt)
         return {"entry": {"task": tid, "run": run_id, "to": "failed"}, "stop": False}
     return None
+
+
+def _fresh_basis(conn, *, task_id: str, run_id: str) -> str | None:
+    """S2.3: what makes a retry legitimate — something must have changed in the
+    world of knowledge since the failed run started: a prediction recorded after
+    it (the agent's own experiment said 'now it will behave differently'), or a
+    contract newer than the one the run executed under."""
+    run = conn.execute("SELECT started_at, contract_version FROM ctl_run WHERE run_id=?",
+                       (run_id,)).fetchone()
+    started = float(run["started_at"] or 0.0) if run else 0.0
+    pred = conn.execute(
+        "SELECT 1 FROM investigation_predictions WHERE created_at>? LIMIT 1",
+        (started,)).fetchone()
+    if pred:
+        return "fresh prediction recorded after the failed run started"
+    task = model.get_task(conn, task_id)
+    if run and task and task["contract_version"] != run["contract_version"]:
+        return "contract changed since the failed run"
+    return None
+
+
+def _route_recovery(conn, *, task_id: str, step_id: str, run_id: str,
+                    fa: dict) -> str:
+    """Turn the analyzer strategy into audited transitions (S2.3). Returns the
+    state the task was left in. The failed hop is recorded explicitly for the
+    retry routes (running->failed->ready) — the graph stays as transitions.py
+    defines it; nothing here invents edges."""
+    strategy = str(fa.get("strategy") or "")
+    reasoning = str(fa.get("reasoning") or "")[:200]
+    brief = str(fa.get("modified_brief") or "").strip()
+    if strategy == "revise_step_brief" and brief:
+        model.set_step_brief(conn, step_id, brief)
+        transitions.transition(conn, task_id, "failed",
+                               basis="run failed; analyzer revised the brief")
+        transitions.transition(conn, task_id, "ready",
+                               basis="retry with corrected step brief (fresh basis: revised text)")
+        return "ready"
+    if strategy == "retry_same_step":
+        basis = _fresh_basis(conn, task_id=task_id, run_id=run_id)
+        if basis:
+            transitions.transition(conn, task_id, "failed", basis="run failed")
+            transitions.transition(conn, task_id, "ready", basis=f"retry: {basis}")
+            return "ready"
+        transitions.transition(conn, task_id, "needs_human",
+                               basis="repeat refused: no fresh prediction and contract "
+                                     f"unchanged; missing: {reasoning}")
+        return "needs_human"
+    transitions.transition(conn, task_id, "needs_human",
+                           basis=f"analyzer parked ({strategy or 'no-strategy'}): {reasoning}")
+    return "needs_human"
 
 
 def _release_orphan_claims(conn, task_id: str) -> bool:

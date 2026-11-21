@@ -265,7 +265,8 @@ def _brief(conn, task, step) -> str:
     from controller import model
     c = model.current_contract(conn, task["task_id"])
     lines = [
-        f"# Controlled step ({step['kind']}): {step['title']}",
+        f"# Controlled step ({step['kind']}): "
+        f"{(dict(step).get('brief') or '').strip() or step['title']}",
         f"Task: {task['goal']}",
         "",
         "Acceptance criteria:", *[f"- {a}" for a in c.get("acceptance", []) or ["(none listed)"]],

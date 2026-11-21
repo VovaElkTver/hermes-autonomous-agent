@@ -329,7 +329,10 @@ def block_on_budget_exhausted(conn, task_id: str, metric: str,
 def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = True,
              depends_on: list | None = None) -> str:
     sid = new_id("step")
-    conn.execute("INSERT INTO ctl_step VALUES (?,?,?,?,?,?,?)",
+    # Named columns: the positional INSERT broke the day ctl_step gained `brief`
+    # (S2.3) — a schema reconcile must not depend on column ORDER of the VALUES.
+    conn.execute("INSERT INTO ctl_step (step_id, task_id, kind, title, status,"
+                 " checkpoint, depends_on) VALUES (?,?,?,?,?,?,?)",
                  (sid, task_id, kind, title, "pending", 1 if checkpoint else 0,
                   json.dumps(depends_on or [])))
     conn.commit()
@@ -338,6 +341,14 @@ def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = Tr
 
 def finish_step(conn, step_id: str, status: str = "done") -> None:
     conn.execute("UPDATE ctl_step SET status=? WHERE step_id=?", (status, step_id))
+    conn.commit()
+
+
+def set_step_brief(conn, step_id: str, brief: str) -> None:
+    """S2.3 (TЗ thinking-enable): persist an analyzer-revised brief for the step.
+    workers._brief() prefers it over the title on the next dispatch — the
+    'corrected text' the strategy promises finally lands somewhere durable."""
+    conn.execute("UPDATE ctl_step SET brief=? WHERE step_id=?", (brief, step_id))
     conn.commit()
 
 

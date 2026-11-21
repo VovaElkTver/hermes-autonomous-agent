@@ -918,6 +918,7 @@ CREATE TABLE IF NOT EXISTS ctl_approval (
 CREATE TABLE IF NOT EXISTS ctl_step (
   step_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', checkpoint INT NOT NULL DEFAULT 1,
+  brief TEXT,
   depends_on TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS ctl_run (

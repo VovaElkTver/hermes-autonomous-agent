@@ -143,13 +143,21 @@ def ctl_step_done(args: dict, **_: Any) -> str:
     concurrent session having already moved the step."""
     step_id = str(args.get("step_id") or "").strip()
     status = str(args.get("status") or "done").strip()
+    reason = str(args.get("reason") or "").strip()
     expected = str(args.get("expected_status") or "pending").strip()
     if not step_id:
         return _err("'step_id' is required")
-    if status not in ("done", "blocked"):
-        return _err("status must be 'done' or 'blocked'")
-    if expected not in ("pending", "done", "blocked", "failed"):
-        return _err("expected_status must be one of: pending, done, blocked, failed")
+    if status not in ("done", "blocked", "noop"):
+        return _err("status must be 'done', 'blocked' or 'noop'")
+    if status == "noop" and not reason:
+        # S2.2/decision-2 (Вл 21.11): noop is a judgment, not a log — the reason
+        # is mandatory and lands in the ledger with a same-reason counter
+        # (parametric state; escalation policy reads the counter, no graph arc).
+        return _err("noop requires a reason ('осмотрелся и осознанно ничего "
+                    "не сделал, потому что...')")
+    if expected not in ("pending", "done", "blocked", "failed", "in_progress"):
+        return _err("expected_status must be one of: pending, done, blocked, "
+                    "failed, in_progress")
     with _lock, _conn() as conn:
         from controller import model
         # Write transaction opened BEFORE the check: the SELECT-then-update pair
@@ -172,6 +180,20 @@ def ctl_step_done(args: dict, **_: Any) -> str:
         if actual != status:
             return _out(ok=False, step_id=step_id, requested=status, stored=actual,
                         error="finish_step did not stick — read-back mismatch")
+        if status == "noop":
+            like = reason.replace("%", r"\%").replace("_", r"\_")
+            prior = conn.execute(
+                "SELECT COUNT(*) FROM ctl_event WHERE task_id=? AND kind='step_noop'"
+                " AND payload LIKE ?", (row["task_id"], f"%{like}%")).fetchone()[0]
+            model.emit(conn, kind="step_noop", origin="agent", task_id=row["task_id"],
+                       payload={"reason": reason, "step_id": step_id,
+                                "same_reason_count": prior + 1})
+            return _out(ok=True, step_id=step_id, status=actual,
+                        task_id=row["task_id"], same_reason_count=prior + 1,
+                        note="noop is a closed step (success class). Repeating the "
+                             "same reason is visible in the ledger: at 3+ identical "
+                             "noops the honest move is a needs_human question or a "
+                             "changed basis, not another sitting.")
         return _out(ok=True, step_id=step_id, status=actual, task_id=row["task_id"])
 
 
@@ -314,15 +336,22 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                                   "description": "Queue position among live tasks (default tail)"}},
                     ["goal", "workdir"]),
     "ctl_step_done": (ctl_step_done,
-                      "Close one of your controller steps (done or blocked) and VERIFY it "
-                      "landed: the reply reports the status actually stored. Use it only "
-                      "for steps of the task you are executing. It does not review, approve "
-                      "or complete the task — a passing review is still separate. If the "
-                      "step is not in expected_status (default pending), nothing is "
-                      "written: re-read with ctl_status instead of blind-retrying.",
+                      "Close one of your controller steps (done / blocked / noop) and "
+                      "VERIFY it landed: the reply reports the status actually stored. "
+                      "noop(reason) is the deliberate 'looked around, consciously did "
+                      "nothing' outcome — a SUCCESS, not a failure, but the reason is "
+                      "mandatory and repeats of the same reason are counted in the "
+                      "ledger (3 identical noops = ask or change basis, don't sit). "
+                      "Use it only for steps of the task you are executing. It does "
+                      "not review, approve or complete the task — a passing review is "
+                      "still separate. If the step is not in expected_status (default "
+                      "pending), nothing is written: re-read with ctl_status instead "
+                      "of blind-retrying.",
                       {"step_id": _str("Step id to finish"),
-                       "status": {"type": "string", "enum": ["done", "blocked"],
+                       "status": {"type": "string", "enum": ["done", "blocked", "noop"],
                                   "description": "Default: done"},
+                       "reason": _str("Required for noop: what you assessed and why "
+                                      "inaction is the right call"),
                        "expected_status": {"type": "string",
                                            "description": "Precondition; default 'pending'."}},
                       ["step_id"]),
