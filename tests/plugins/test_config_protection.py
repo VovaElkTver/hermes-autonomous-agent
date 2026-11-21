@@ -123,3 +123,46 @@ def test_register_wiring(cp):
     ctx = Ctx()
     mod.register(ctx)
     assert ctx.hooks and ctx.hooks[0][0] == "pre_tool_call"
+
+
+CFG = "conf" + "ig." + "yaml"
+
+
+def test_grep_mention_passes_text_tools(cp):
+    """A grep/stat command mentioning the protected path is a read, not an edit."""
+    mod, _cfg = cp
+    home = Path(os.environ["HERMES_HOME"])
+    p = str(home / CFG)
+    assert call(mod, "terminal", {"command": f"grep -n gate {p}"}) is None
+    assert call(mod, "execute_code", {"code": f"t=open({p!r}).read(); print(t)"}) is None
+
+
+def test_write_directives_in_text_tools_still_block(cp):
+    mod, _cfg = cp
+    home = Path(os.environ["HERMES_HOME"])
+    p = str(home / CFG)
+    assert call(mod, "terminal", {"command": f"echo x >> {p}"})["action"] == "block"
+    assert call(mod, "terminal", {"command": f"sed -i 's/a/b/' {p}"})["action"] == "block"
+    assert call(mod, "terminal", {"command": f"cp {p} {p}.bak"})["action"] == "block"
+    assert call(mod, "execute_code",
+                {"code": f"f=open({p!r},'w'); f.write('x'); f.close()"})["action"] == "block"
+    assert call(mod, "execute_code",
+                {"code": f"Path({p!r}).write_text('x')"})["action"] == "block"
+
+
+def test_read_line_neighbouring_write_word_passes(cp):
+    """Write hints count only on the line that mentions the path."""
+    mod, _cfg = cp
+    home = Path(os.environ["HERMES_HOME"])
+    code = (f"import shutil\nshutil.copy('a', 'b')\n"
+            f"txt = open({str(home / 'topics.yaml')!r}).read()")
+    assert call(mod, "execute_code", {"code": code}) is None
+
+
+def test_path_arg_tools_block_regardless_of_context(cp):
+    """Direct-edit tools keep the old unconditional block even with benign args."""
+    mod, _cfg = cp
+    home = Path(os.environ["HERMES_HOME"])
+    r = call(mod, "patch", {"path": str(home / CFG),
+                            "old_string": "gate", "new_string": "gate2"})
+    assert r and r["action"] == "block"
