@@ -99,7 +99,8 @@ def _empty_contract(goal: str, priority: float = 0.0) -> dict:
             "approval_required": [], "restrictions": [], "facts": [], "hypotheses": [],
             "proposals": [], "open_questions": [], "input_artifacts": [], "dependencies": [],
             "start_conditions": [], "budgets": {}, "stop_conditions": [],
-            "reclassification_rules": [], "notify_channel": ""}
+            "reclassification_rules": [], "notify_channel": "",
+            "validation_cmd": ""}
 
 
 def set_priority(conn, task_id: str, *, head: bool) -> None:
@@ -210,6 +211,16 @@ def emit(conn, *, kind: str, origin: str, task_id: str | None = None,
         conn.execute("INSERT INTO ctl_event VALUES (?,?,?,?,?,?,?)",
                      (eid, time.time(), kind, task_id, origin,
                       json.dumps(payload or {}, ensure_ascii=False), idempotency_key))
+        if task_id:
+            # S2.4 (ТЗ thinking-enable): every task-bound event is `about` its
+            # task in the causal graph — the worker brief reader (workers.
+            # _consequences) walks exactly these edges. Direction is
+            # subject→event: the writer contract orders edges predecessor→
+            # consequence and the task always predates the event about it.
+            # strict=False: a rejected bookkeeping edge never sinks the event.
+            from .causal import link as _causal_link
+            _causal_link(conn, frm=f"task:{task_id}", to=f"ctl:{eid}",
+                         kind="about", commit=False, strict=False)
         conn.commit()
         return eid
     except sqlite3.IntegrityError:
@@ -301,12 +312,37 @@ def budget_exhausted(conn, task_id: str, metric: str) -> bool:
     return bool(row and row["limit_value"] is not None and row["used"] >= row["limit_value"])
 
 
+def block_on_budget_exhausted(conn, task_id: str, metric: str,
+                              origin: str = "controller") -> bool:
+    """S1.4 (TЗ thinking-enable): a spent limit is a VISIBLE stop, not a silent
+    stall. running -> blocked (the deterministic transition) + one ctl_event
+    row (the alert, idempotent per limit value). No-op when the task is not
+    running — the barrier keeps refusing calls regardless, and re-blocking is
+    not legal on a parked task. Returns True when the stop happened here."""
+    from . import transitions
+    t = get_task(conn, task_id)
+    if t is None or t["state"] != "running":
+        return False
+    row = conn.execute("SELECT used, limit_value FROM ctl_budget_counter"
+                       " WHERE task_id=? AND metric=?", (task_id, metric)).fetchone()
+    used, limit = (row["used"], row["limit_value"]) if row else (None, None)
+    transitions.transition(conn, task_id, "blocked",
+                           basis=f"budget {metric} exhausted ({used}/{limit})")
+    emit(conn, kind="budget-blocked", origin=origin, task_id=task_id,
+         payload={"metric": metric, "used": used, "limit": limit},
+         idempotency_key=f"budget-blocked:{task_id}:{metric}:{limit}")
+    return True
+
+
 # ---- steps / artifacts / reviews --------------------------------------------
 
 def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = True,
              depends_on: list | None = None) -> str:
     sid = new_id("step")
-    conn.execute("INSERT INTO ctl_step VALUES (?,?,?,?,?,?,?)",
+    # Named columns: the positional INSERT broke the day ctl_step gained `brief`
+    # (S2.3) — a schema reconcile must not depend on column ORDER of the VALUES.
+    conn.execute("INSERT INTO ctl_step (step_id, task_id, kind, title, status,"
+                 " checkpoint, depends_on) VALUES (?,?,?,?,?,?,?)",
                  (sid, task_id, kind, title, "pending", 1 if checkpoint else 0,
                   json.dumps(depends_on or [])))
     conn.commit()
@@ -315,6 +351,14 @@ def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = Tr
 
 def finish_step(conn, step_id: str, status: str = "done") -> None:
     conn.execute("UPDATE ctl_step SET status=? WHERE step_id=?", (status, step_id))
+    conn.commit()
+
+
+def set_step_brief(conn, step_id: str, brief: str) -> None:
+    """S2.3 (TЗ thinking-enable): persist an analyzer-revised brief for the step.
+    workers._brief() prefers it over the title on the next dispatch — the
+    'corrected text' the strategy promises finally lands somewhere durable."""
+    conn.execute("UPDATE ctl_step SET brief=? WHERE step_id=?", (brief, step_id))
     conn.commit()
 
 
@@ -404,6 +448,14 @@ def unstick_step(conn, step_id: str) -> dict:
     return _set_step_status_cas(conn, step_id, expect="in_progress", new="pending")
 
 
+def reopen_step(conn, step_id: str) -> dict:
+    """Verification revalidation (TЗ thinking-enable S1.3): the contract's machine
+    predicate failed on the task's output — the finished checkpoint step goes back
+    to pending so the loop re-runs it (revise semantics at task level; the step
+    budget bounds the attempts)."""
+    return _set_step_status_cas(conn, step_id, expect="done", new="pending")
+
+
 def paused_handoff_note(conn, step_id: str) -> str:
     """The newest step_paused handoff for a step ('' when none) — the cheap-resume text
     the re-anchored worker receives instead of re-narrating its interrupted turn."""
@@ -429,10 +481,18 @@ def add_artifact(conn, task_id: str, run_id: str, kind: str, payload: dict) -> s
 
 
 def add_review(conn, step_id: str, run_id: str, artifact_hash: str, verdict: str,
-               reviewer: str, detail: str = "") -> str:
+               reviewer: str, detail: str = "",
+               criteria_covered: list | None = None) -> str:
+    # Named columns (S2.3 lesson): schema growth must not break positional writes.
+    # criteria_covered (S2.5, ТЗ thinking-enable): the acceptance-criterion
+    # indices the judge claims to have verified — coverage, not confidence.
     rid = new_id("rev")
-    conn.execute("INSERT INTO ctl_review VALUES (?,?,?,?,?,?,?,?)",
-                 (rid, step_id, run_id, artifact_hash, verdict, reviewer, detail, time.time()))
+    conn.execute("INSERT INTO ctl_review (review_id, step_id, run_id, artifact_hash,"
+                 " verdict, reviewer, detail, created_at, criteria_covered)"
+                 " VALUES (?,?,?,?,?,?,?,?,?)",
+                 (rid, step_id, run_id, artifact_hash, verdict, reviewer, detail,
+                  time.time(),
+                  json.dumps(criteria_covered) if criteria_covered is not None else None))
     conn.commit()
     return rid
 

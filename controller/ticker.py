@@ -50,14 +50,21 @@ import json
 import logging
 import os
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
-from . import alerts, loop, model, pump_lock, queue as Q, transitions, wake
+from . import alerts, decide, loop, model, pump_lock, queue as Q, transitions, wake
 
 logger = logging.getLogger("controller.ticker")
 
-INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0}
+INTERVALS = {"pump": 300.0, "watchdog": 1800.0, "followups": 15.0,
+             "autonomy_metrics": 86400.0,
+             # S2.6 (ТЗ thinking-enable): the decide scan — cheap indexed SQL,
+             # a wake-turn only on non-empty material (empty queue ≠ turn).
+             "decide": 300.0}
 TICK_S = 1.0   # базовый такт: внутренние часы ядра 1 Гц (доктрина Вл 28.10/02.11)
 
 PUMP_STALE_S = 25 * 60   # the watchdog ticker's own freshness rule
@@ -348,18 +355,27 @@ class Ticker:
         beat does zero SQL; only a due counter touches the DB."""
         next_pump = self._mono() + self.intervals["pump"] / 2
         next_followups = self._mono() + self.intervals["followups"]
+        next_autonomy = self._mono() + self.intervals["autonomy_metrics"]
+        # S2.6 (ТЗ thinking-enable): the decide scan. Wake-pulled like pump —
+        # transitions ring the seam, so a decision moment lands on the NEXT
+        # beat; the 300 s floor only bounds the scan, it never manufactures
+        # a turn (empty queue + no material = zero lines = zero wake).
+        next_decide = self._mono() + self.intervals["decide"]
         wake_seen = wake.read_seq()
         while not self._stop.is_set():
             # Wake seam (go Вл 09.11): an external mutation (transition, new
             # follow-up, answered approval) rang the seq file — pull every due
             # counter to THIS beat. The 300 s is a policy, not latency. A tiny
             # file read, so the idle beat stays zero-SQL (doctrine 28.10).
+            # The daily autonomy-metrics counter is NOT wake-pulled: a report
+            # cadence is a cadence, not a due date.
             seq = wake.read_seq()
             if seq != wake_seen:
                 wake_seen = seq
                 now = self._mono()
                 next_pump = min(next_pump, now)
                 next_followups = min(next_followups, now)
+                next_decide = min(next_decide, now)
             if self._mono() >= next_pump:
                 self._owner_refresh(conn)
                 self._guard("pump", conn, self.run_pump)
@@ -367,8 +383,18 @@ class Ticker:
             if self._mono() >= next_followups:
                 self._guard("followups", conn, self.run_followups)
                 next_followups = max(next_followups, self._mono()) + self.intervals["followups"]
+            if self._mono() >= next_autonomy:
+                # S0 (TЗ thinking-enable): the daily autonomy report is an EVENT
+                # OF THIS EXISTING TICK — no new thread, no new timer.
+                self._guard("autonomy-metrics", conn, self.run_autonomy_metrics)
+                next_autonomy = (max(next_autonomy, self._mono())
+                                 + self.intervals["autonomy_metrics"])
+            if self._mono() >= next_decide:
+                self._guard("decide", conn, self.run_decide)
+                next_decide = (max(next_decide, self._mono())
+                               + self.intervals["decide"])
             # sleep to the NEXT BASE BEAT (1 Hz), never past the deadline
-            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups) - self._mono())))
+            self._stop.wait(min(self.tick_s, max(0.0, min(next_pump, next_followups, next_autonomy, next_decide) - self._mono())))
 
     def _guard(self, kind: str, conn, fn) -> None:
         """One tick: any exception becomes a heartbeat + a deduped tick-error
@@ -482,6 +508,36 @@ class Ticker:
         if fired:
             self._heartbeat(conn, "followups", {"fired": fired})
 
+    def run_autonomy_metrics(self, conn) -> None:
+        """S0 event (TЗ thinking-enable): the daily autonomy report, as an event
+        of this existing tick (no new thread, no new timer).
+
+        The script is the throat (scripts/autonomy_metrics.py): read-only SQL,
+        zero writes; its --deliver flag delivers through the stock outbox port
+        (idempotent by msg_id, durable receipt) and drains in-process. Without
+        a configured controller.alert_target the delivery degrades to
+        stdout/journal — honest, not silent. A subprocess failure raises and
+        _guard turns it into the usual deduped tick-error alert: the meter must
+        not die quietly (cautionary §5: 'есть, но не работает' must be visible)."""
+        script = Path(__file__).resolve().parents[1] / "scripts" / "autonomy_metrics.py"
+        if not script.is_file():
+            raise OSError(f"autonomy-metrics script missing: {script}")
+        from hermes_constants import get_hermes_home
+        db = get_hermes_home() / "state.db"
+        repo_root = str(Path(__file__).resolve().parents[1])
+        env = dict(os.environ)
+        env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"]
+                                         if env.get("PYTHONPATH") else "")
+        proc = subprocess.run(
+            [sys.executable, str(script), "--db", str(db), "--markdown", "--deliver"],
+            capture_output=True, text=True, timeout=120, check=False, env=env,
+            cwd=repo_root)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"autonomy-metrics exit {proc.returncode}: "
+                f"{(proc.stderr or proc.stdout or '').strip()[-200:]}")
+        self._heartbeat(conn, "autonomy-metrics", {})
+
     def _drain_live_ports(self, conn) -> int:
         """Donor ports live (stage tail): dispatch durable effects/outbox rows.
 
@@ -504,6 +560,18 @@ class Ticker:
             "SELECT DISTINCT workdir FROM ctl_task"
             " WHERE state IN ('ready','running')").fetchall()]
 
+    def run_decide(self, conn) -> None:
+        """S2.6 (ТЗ thinking-enable): the «решить, что делать» scan.
+        Zero-SQL-cheap read over ctl_state_transition/ctl_event + a material
+        count; a wake-turn is delivered ONLY when lines exist and the same
+        digest has not been shown within the cooldown hour. The watermark
+        advances only after a successful delivery — a down transport retries
+        next beat instead of silently eating the decision moment."""
+        from . import live_ports
+        deliver = live_ports.default_deliver(self.alert_target,
+                                             deliver_fn=self.deliver_fn)
+        decide.decide_tick(conn, deliver_fn=deliver, now=self._now())
+
     def _worker_cfg(self) -> tuple:
         """Fresh config read per drain (the periodic tick did the same); a failed
         load degrades to default routing, never a crash."""
@@ -514,14 +582,30 @@ class Ticker:
             cfg = {}
         ctl = cfg.get("controller", {}) or {}
         return (ctl.get("worker_model") or self.worker_model,
-                ctl.get("worker_provider") or self.worker_provider)
+                ctl.get("worker_provider") or self.worker_provider,
+                self._worker_budget_s(ctl))
+
+    def _worker_budget_s(self, ctl: dict) -> float | None:
+        """S1.4 (TЗ thinking-enable): the autonomous period is bounded — a default
+        wall budget for autonomous worker steps (no contract today limits it).
+        Unset key -> built-in default 3600s; an explicit 0/None -> legacy
+        unbounded (opt-out)."""
+        v = ctl.get("worker_budget_default_s")
+        if v is None:
+            return 3600.0
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return 3600.0
+        return None if v <= 0 else v
 
     def _worker_fn(self, conn):
         from controller.workers import make_worker
         lock_path = str(pump_lock.default_lock_path())
-        model_id, provider = self._worker_cfg()
+        model_id, provider, budget_s = self._worker_cfg()
         return make_worker(
             conn,
+            timeout_s=budget_s,
             model_id=model_id, provider=provider,
             on_poll=lambda: pump_lock.heartbeat(lock_path))
 

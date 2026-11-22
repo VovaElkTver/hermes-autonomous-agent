@@ -37,8 +37,15 @@ def _db_and_session(agent: Any) -> tuple[Any, str]:
 def capture_tool_result(agent, function_name, function_args, tool_call_id, tool_message) -> str | None:
     """Record a real tool result as an observation-candidate (assessed=0).
 
-    Probe binding is a structural echo, not a guess: the call's own args must
-    carry a ``probe_id`` that names a probe of THIS session's open investigation.
+    Probe binding is a structural echo first, auto-attach second (S1.2, TЗ
+    thinking-enable): an explicit ``probe_id`` in the call's own args is the
+    exact path and flips the probe to ``dispatched`` on first sight (the probe
+    is being run by THIS call). When the model names no probe (or names one
+    that does not resolve here), the result binds to the session's open
+    investigation's LATEST probe already in ``dispatched`` state — the model
+    no longer has to remember the id after dispatching a probe (same error
+    class as the 09.11 ``controller_task_id`` lesson). Without any
+    dispatched probe the capture stays unbound — the hook never guesses.
     The ``investigation`` tool's own calls are skipped — its writes are the
     model's own bookkeeping, not evidence about the world.
     """
@@ -56,6 +63,14 @@ def capture_tool_result(agent, function_name, function_args, tool_call_id, tool_
                 probe = db.get_probe(pid)
                 if probe is not None and probe.get("investigation_id") == inv["investigation_id"]:
                     probe_id = pid
+                    if probe.get("status") == "pending":
+                        db.set_probe_status(pid, "dispatched")  # the call IS the dispatch
+        if probe_id is None:
+            # Auto-attach: latest probe of this investigation awaiting its outcome.
+            dispatched = [p for p in db.list_probes(inv["investigation_id"])
+                          if p.get("status") == "dispatched"]
+            if dispatched:
+                probe_id = str(dispatched[-1]["probe_id"])
         content = tool_message.get("content") if isinstance(tool_message, dict) else None
         if content is None:
             return None
@@ -136,6 +151,8 @@ def stamp_fork_probe(db, current_session_id: str, branch_id: str,
         if inv is None or probe.get("investigation_id") != inv["investigation_id"]:
             return None
         db.bind_probe_branch(pid, branch_id)
+        if probe.get("status") == "pending":
+            db.set_probe_status(pid, "dispatched")  # the fork now runs the probe
         db.set_branch_meta(branch_id, {
             "investigation_id": inv["investigation_id"],
             "probe_id": pid,

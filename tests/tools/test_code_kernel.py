@@ -432,7 +432,7 @@ class TestKernelOwnershipAndLifecycle(unittest.TestCase):
 class TestInScriptToolErrors(unittest.TestCase):
     def test_ignored_helper_error_is_reported_for_that_cell_only(self):
         """A script that drops a helper's {"error": ...} return must not read as a clean success."""
-        def _handle(tool_name, tool_args, task_id=None):
+        def _handle(tool_name, tool_args, task_id=None, session_id=None, turn_id=None, **_kw):
             if tool_name == "write_file":
                 return json.dumps({"error": "Refusing to overwrite a.py: never read"})
             return json.dumps({"ok": True})
@@ -449,7 +449,7 @@ class TestPerCellRpcAuthority(unittest.TestCase):
     """Interpreter state persists across cells; RPC authority must not."""
 
     def _recorder(self, seen):
-        def _handle(tool_name, tool_args, task_id=None):
+        def _handle(tool_name, tool_args, task_id=None, session_id=None, turn_id=None, **_kw):
             from tools.thread_context import _callback_api
 
             (get_approval, _set_a), *_rest = _callback_api()
@@ -457,6 +457,8 @@ class TestPerCellRpcAuthority(unittest.TestCase):
                 {
                     "tool": tool_name,
                     "task_id": task_id,
+                    "session_id": session_id,
+                    "turn_id": turn_id,
                     "approval_cb": get_approval(),
                 }
             )
@@ -521,6 +523,35 @@ class TestPerCellRpcAuthority(unittest.TestCase):
         self.assertEqual(second["status"], "success", second)
         self.assertEqual(len(seen), 1)
         self.assertIs(seen[0]["approval_cb"], cb_two)
+
+    def test_session_identity_reaches_kernel_dispatch(self):
+        # D1 identity fix: session_id/turn_id ride the RPC dispatch so kernel-internal
+        # tool calls (and their pre_tool_call hooks) carry session identity, not just task.
+        seen = []
+        cell = "import hermes_tools\nhermes_tools.web_search(query='q')\n"
+        with _kernel_config(), patch(
+            "model_tools.handle_function_call", new=self._recorder(seen)
+        ):
+            result = _run(cell, session_id="sess-d1", turn_id="turn-d1")
+        self.assertEqual(result["status"], "success", result)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["task_id"], "kernel-test")
+        self.assertEqual(seen[0]["session_id"], "sess-d1")
+        self.assertEqual(seen[0]["turn_id"], "turn-d1")
+
+    def test_kernel_dispatch_defaults_to_no_session_identity(self):
+        # Backward compat: no session/turn ids at the call site -> hooks see None,
+        # exactly as before the D1 plumbing existed.
+        seen = []
+        cell = "import hermes_tools\nhermes_tools.web_search(query='q')\n"
+        with _kernel_config(), patch(
+            "model_tools.handle_function_call", new=self._recorder(seen)
+        ):
+            result = _run(cell)
+        self.assertEqual(result["status"], "success", result)
+        self.assertEqual(len(seen), 1)
+        self.assertIsNone(seen[0]["session_id"])
+        self.assertIsNone(seen[0]["turn_id"])
 
     def test_a_settled_cells_authority_refuses_dispatch(self):
         from tools.code_kernel import CellAuthority

@@ -242,3 +242,35 @@ class TestResolveToolsetMemo:
         assert get_toolset_calls["n"] == 2, (
             "generation bump must invalidate the memo and re-resolve"
         )
+
+
+class TestThinkingEnableSessionsToolset:
+    """S1.1 (TЗ thinking-enable): the thinking tools declare ``toolset="sessions"``
+    (investigation / session_fork / fork_explore / session_join). The toolset has
+    no static entry — it exists only through registry discovery, and the
+    no-discovery failure mode is `resolve_toolset("sessions") == []` (the
+    thinking surface vanishes silently, TЗ 16.11 finding). The platform surface
+    (`platform_toolsets.cli|matrix`) carries the toolset by name, so a stale
+    registry view silently drops it there too."""
+
+    def test_sessions_resolves_empty_without_registry(self, monkeypatch):
+        reg = ToolRegistry()
+        monkeypatch.setattr("tools.registry.registry", reg)
+        assert resolve_toolset("sessions") == []
+
+    def test_sessions_resolves_to_registered_thinking_tools(self, monkeypatch):
+        reg = ToolRegistry()
+        for name in ("investigation", "session_fork", "fork_explore", "session_join"):
+            reg.register(name=name, toolset="sessions",
+                         schema=_make_schema(name), handler=_dummy_handler)
+        monkeypatch.setattr("tools.registry.registry", reg)
+        ts = set(resolve_toolset("sessions"))
+        assert {"investigation", "session_fork", "session_join", "fork_explore"} <= ts
+
+    def test_builtin_discovery_registers_the_thinking_surface(self):
+        """Live view: the shipped tool modules declare their `sessions` tools,
+        so a discovered registry resolves the full thinking surface."""
+        from tools.registry import discover_builtin_tools
+        discover_builtin_tools()
+        ts = set(resolve_toolset("sessions"))
+        assert {"investigation", "session_fork", "session_join", "fork_explore"} <= ts, ts

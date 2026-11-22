@@ -66,10 +66,10 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
                           "to": "paused", "interrupted": True}, "stop": True}
     if status != "finished":
         model.unstick_step(conn, sid)  # release the claim: a ready->running retry must find it dispatchable
-        transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
         from . import live_ports
         err_tail = str(res.get("error") or status)
         reason_txt = err_tail
+        fa = None
         try:
             from . import failure_analysis as FA
             fa = FA.apply(conn, task_id=tid, run_id=run_id,
@@ -77,15 +77,79 @@ def _resolve_worker_outcome(conn, *, task: dict, step: dict, run_id: str, res: d
                           task_goal=str(task.get("goal") or ""),
                           step_summary=f"step {sid}",
                           error_tail=err_tail)
-            if fa:
-                reason_txt += (f"; анализ ({fa.get('strategy')}): "
-                               f"{str(fa.get('reasoning'))[:300]}")
         except Exception:  # analyzer must never block the durable failed path
             pass
+        if fa:
+            reason_txt += (f"; анализ ({fa.get('strategy')}): "
+                           f"{str(fa.get('reasoning'))[:300]}")
+            # S2.3 (TЗ thinking-enable): the strategy is a routing decision now,
+            # not decoration in a failure message. Repeat costs more than a
+            # refusal: a step reruns only on fresh basis, otherwise the task
+            # parks at needs_human with the missing knowledge named.
+            to = _route_recovery(conn, task_id=tid, step_id=sid,
+                                 run_id=run_id, fa=fa)
+            model.emit(conn, kind="failure_routed", origin="failure_analysis",
+                       task_id=tid,
+                       payload={"to": to, "strategy": fa.get("strategy")})
+            if to != "ready":
+                live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
+                                              goal=task["goal"], reason=reason_txt)
+            return {"entry": {"task": tid, "run": run_id, "to": to}, "stop": False}
+        transitions.transition(conn, tid, "failed", basis=f"run {run_id} {status}")
         live_ports.notify_task_failed(conn, task_id=tid, run_id=run_id,
                                       goal=task["goal"], reason=reason_txt)
         return {"entry": {"task": tid, "run": run_id, "to": "failed"}, "stop": False}
     return None
+
+
+def _fresh_basis(conn, *, task_id: str, run_id: str) -> str | None:
+    """S2.3: what makes a retry legitimate — something must have changed in the
+    world of knowledge since the failed run started: a prediction recorded after
+    it (the agent's own experiment said 'now it will behave differently'), or a
+    contract newer than the one the run executed under."""
+    run = conn.execute("SELECT started_at, contract_version FROM ctl_run WHERE run_id=?",
+                       (run_id,)).fetchone()
+    started = float(run["started_at"] or 0.0) if run else 0.0
+    pred = conn.execute(
+        "SELECT 1 FROM investigation_predictions WHERE created_at>? LIMIT 1",
+        (started,)).fetchone()
+    if pred:
+        return "fresh prediction recorded after the failed run started"
+    task = model.get_task(conn, task_id)
+    if run and task and task["contract_version"] != run["contract_version"]:
+        return "contract changed since the failed run"
+    return None
+
+
+def _route_recovery(conn, *, task_id: str, step_id: str, run_id: str,
+                    fa: dict) -> str:
+    """Turn the analyzer strategy into audited transitions (S2.3). Returns the
+    state the task was left in. The failed hop is recorded explicitly for the
+    retry routes (running->failed->ready) — the graph stays as transitions.py
+    defines it; nothing here invents edges."""
+    strategy = str(fa.get("strategy") or "")
+    reasoning = str(fa.get("reasoning") or "")[:200]
+    brief = str(fa.get("modified_brief") or "").strip()
+    if strategy == "revise_step_brief" and brief:
+        model.set_step_brief(conn, step_id, brief)
+        transitions.transition(conn, task_id, "failed",
+                               basis="run failed; analyzer revised the brief")
+        transitions.transition(conn, task_id, "ready",
+                               basis="retry with corrected step brief (fresh basis: revised text)")
+        return "ready"
+    if strategy == "retry_same_step":
+        basis = _fresh_basis(conn, task_id=task_id, run_id=run_id)
+        if basis:
+            transitions.transition(conn, task_id, "failed", basis="run failed")
+            transitions.transition(conn, task_id, "ready", basis=f"retry: {basis}")
+            return "ready"
+        transitions.transition(conn, task_id, "needs_human",
+                               basis="repeat refused: no fresh prediction and contract "
+                                     f"unchanged; missing: {reasoning}")
+        return "needs_human"
+    transitions.transition(conn, task_id, "needs_human",
+                           basis=f"analyzer parked ({strategy or 'no-strategy'}): {reasoning}")
+    return "needs_human"
 
 
 def _release_orphan_claims(conn, task_id: str) -> bool:
@@ -207,7 +271,8 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
             verdict = review_fn({"run_id": run_id}, step, res.get("artifacts", []))
             model.add_review(conn, step["step_id"], run_id, ah,
                              verdict.get("verdict", "revise"), "controller-loop",
-                             verdict.get("detail", ""))
+                             verdict.get("detail", ""),
+                             criteria_covered=verdict.get("criteria_covered"))
         if verdict.get("verdict") == "pass":
             model.finish_step(conn, step["step_id"])
             log.append({"task": task["task_id"], "run": run_id,
@@ -263,7 +328,8 @@ def _backfill_missing_reviews(conn, task_id: str, review_fn) -> int:
         v = review_fn({"status": "finished", "artifacts": items}, dict(s), items)
         model.add_review(conn, step_id=s["step_id"], run_id=run["run_id"], artifact_hash=ah,
                          verdict=v.get("verdict", "needs_human"),
-                         detail=str(v.get("detail", ""))[:4000], reviewer="review-backfill")
+                         detail=str(v.get("detail", ""))[:4000], reviewer="review-backfill",
+                         criteria_covered=v.get("criteria_covered"))
         n += 1
     return n
 
@@ -289,7 +355,32 @@ def finish_verifying(conn, task_id: str, review_fn=None) -> str:
                 conn, task_id, "needs_human",
                 basis="verify: missing reviews (no runnable artifact to backfill)")
             outcome = "needs_human"
+    if outcome == "validation-failed":
+        # S1.3 (TЗ thinking-enable): the machine predicate refused completion —
+        # REVISE, not park: re-open the finished checkpoint step and re-enter
+        # running so the loop re-runs it (the step budget bounds the attempts).
+        # No re-openable step (empty plan) is the needs_human fallback.
+        reopened = _revalidate_step(conn, task_id)
+        if reopened:
+            transitions.transition(conn, task_id, "ready",
+                                   basis="validate: validation_cmd failed — re-run step (S1.3)")
+            outcome = "revalidate"
+        else:
+            transitions.transition(conn, task_id, "needs_human",
+                                   basis="validate: validation_cmd failed, no step to re-open")
+            outcome = "needs_human"
     return outcome
+
+
+def _revalidate_step(conn, task_id: str) -> bool:
+    """The newest finished checkpoint step goes back to pending (done->pending
+    CAS). False when there is no finished checkpoint step to re-open."""
+    row = conn.execute(
+        "SELECT step_id FROM ctl_step WHERE task_id=? AND status='done'"
+        " AND checkpoint IS NOT 0 ORDER BY rowid DESC LIMIT 1", (task_id,)).fetchone()
+    if row is None:
+        return False
+    return bool(model.reopen_step(conn, row["step_id"]).get("ok"))
 
 
 def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
@@ -306,6 +397,10 @@ def _finish_verifying_once(conn, task_id: str, *, allow_retry: bool) -> str:
             # allow_retry=False: caller may remediate via review backfill before
             # parking (finish_verifying handles it); parking stays the fallback.
             return "needs_human-backfill"
+        if "validation_cmd" in msg:
+            # S1.3: the machine predicate refused — finish_verifying re-opens the
+            # finished checkpoint step and re-enters running (revise, not park).
+            return "validation-failed"
         if "review" in msg:
             transitions.transition(conn, task_id, "needs_human", basis=f"verify: {msg}")
             return "needs_human"

@@ -136,6 +136,21 @@ def render_gates_snapshot(conn) -> dict:
         st = conn.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()
         if st and st[0] in ("ready", "draft"):
             gates[tid] = f"contract MATERIAL not agreed (state={st[0]})"
+    # S1.4 (TЗ thinking-enable): a budget-blocked task is a human gate too —
+    # the stop happened, the next move is a decision (raise the limit or
+    # proceed manually), and the existing ticker alert channel announces it.
+    for r in conn.execute(
+            "SELECT task_id, payload FROM ctl_event WHERE kind='budget-blocked'"
+            " ORDER BY ts DESC"):
+        tid = r["task_id"]
+        if tid in gates:
+            continue
+        st = conn.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()
+        if not st or st[0] != "blocked":
+            continue
+        p = json.loads(r["payload"] or "{}")
+        gates[tid] = (f"budget {p.get('metric', '?')} exhausted"
+                      f" ({p.get('used')}/{p.get('limit')}) — limit or manual resume needed")
     return gates
 
 

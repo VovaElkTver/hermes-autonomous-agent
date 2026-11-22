@@ -261,16 +261,80 @@ def make_worker(conn, *, timeout_s: float | None = None,
     return worker_fn
 
 
+def _consequences(conn, task, *, window_s: float = 14 * 86400, cap: int = 8,
+                  max_chars: int = 1200) -> str:
+    """S2.4 (ТЗ thinking-enable): consequences into the brief — the machine
+    version of cautionary §7. Walks the causal subgraph `about`/`causes` around
+    the task (writer: model.emit) and appends the last reviews' detail, so a
+    worker sees WHAT HAPPENED AROUND this task ("мой стоп породил вторую
+    аварию", "внешний агент снял interim-патч") instead of only the contract.
+    Hard caps keep this O(recent-window), never O(store); silent on empty."""
+    tid = task["task_id"]
+    lines: list[str] = []
+    rows = conn.execute(
+        "SELECT e.event_id, e.kind, e.ts, e.payload FROM ctl_causal_link cl"
+        " JOIN ctl_event e ON e.event_id = substr(cl.to_event, 5)"
+        " WHERE cl.from_event = ? AND cl.kind IN ('about','causes')"
+        "   AND cl.ts > ? ORDER BY cl.ts DESC LIMIT ?",
+        (f"task:{tid}", time.time() - window_s, cap)).fetchall()
+    from collections import Counter
+    per_kind: dict[str, tuple] = {}
+    counts: Counter[str] = Counter()
+    for _eid, kind, ts, payload in rows:
+        counts[kind] += 1
+        if kind not in per_kind:  # rows are ts-DESC: first per kind is the freshest
+            summ = ""
+            try:
+                p = json.loads(payload) if payload else {}
+                summ = str(p.get("reason") or p.get("detail") or p.get("note")
+                           or p.get("basis") or "")[:110]
+            except (ValueError, TypeError):
+                pass
+            per_kind[kind] = (ts, summ)
+    for kind, (ts, summ) in sorted(per_kind.items(),
+                                   key=lambda kv: -kv[1][0]):
+        age_h = max(0.0, (time.time() - ts)) / 3600.0
+        n = counts[kind]
+        lines.append(f"- {age_h:.0f}h назад: {kind}" + (f" x{n}" if n > 1 else "")
+                     + (f" — {summ}" if summ else ""))
+    revs = conn.execute(
+        "SELECT r.verdict, r.detail, s.title FROM ctl_review r"
+        " JOIN ctl_step s ON s.step_id = r.step_id"
+        " WHERE s.task_id = ? ORDER BY r.created_at DESC LIMIT 3",
+        (tid,)).fetchall()
+    for verdict, detail, title in revs:
+        lines.append(f"- review «{(title or '')[:40]}»: {verdict}"
+                     + (f" — {str(detail or '')[:140]}" if detail else ""))
+    if not lines:
+        return ""
+    return "\n".join(lines)[:max_chars]
+
+
 def _brief(conn, task, step) -> str:
     from controller import model
     c = model.current_contract(conn, task["task_id"])
     lines = [
-        f"# Controlled step ({step['kind']}): {step['title']}",
+        f"# Controlled step ({step['kind']}): "
+        f"{(dict(step).get('brief') or '').strip() or step['title']}",
         f"Task: {task['goal']}",
         "",
         "Acceptance criteria:", *[f"- {a}" for a in c.get("acceptance", []) or ["(none listed)"]],
+    ]
+    # S1.3 (TЗ thinking-enable): the machine predicate is part of the brief —
+    # the worker sees WHAT must hold, not only the prose criteria.
+    pred = contract_validation_cmd(conn, task["task_id"])
+    if pred:
+        lines.append(f"Machine predicate (must pass in the workdir before completion): {pred}")
+    lines += [
         "Confirmed facts:", *[f"- {a}" for a in (c.get("facts") or [])[:20]],
         "Restrictions:", *[f"- {a}" for a in (c.get("restrictions") or [])[:20]],
+    ]
+    # S2.4: what happened around this task (causal graph + last reviews), before
+    # the worker starts touching things. Empty ledger adds nothing.
+    cons = _consequences(conn, task)
+    if cons:
+        lines += ["", "Recent consequences around this task (causal graph):", cons]
+    lines += [
         "",
         "Work ONLY on this step. When done, state exactly how each acceptance",
         "criterion is verified (command output). This run is checkpointed.",
@@ -291,6 +355,23 @@ def _brief(conn, task, step) -> str:
     return "\n".join(lines)
 
 
+def _diffstat(workdir: str, max_chars: int = 1500) -> str:
+    """What the run actually changed (S2.5): working-tree diffstat + file list.
+    Empty string on any problem (not a repo, no git, dirty index) — the judge
+    then grades on what it has, it never crashes on missing evidence."""
+    import subprocess
+    try:
+        st = subprocess.run(["git", "-C", workdir, "diff", "--stat"],
+                            capture_output=True, text=True, timeout=20, check=False)
+        un = subprocess.run(["git", "-C", workdir, "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=20, check=False)
+        out = ((st.stdout or "") + ("\nUNTRACKED/CHANGED:\n" + un.stdout
+                                    if (un.stdout or "").strip() else ""))
+        return out.strip()[:max_chars]
+    except Exception:
+        return ""
+
+
 def make_review(conn, *, judge_cfg: dict | None = None):
     from controller import model
     def review_fn(run, step, artifacts):
@@ -301,9 +382,32 @@ def make_review(conn, *, judge_cfg: dict | None = None):
             return {"verdict": "needs_human", "detail": "judge not configured"}
         try:
             from plugins.supervisor.judge import review as _j
-            hist = [{"tool": "worker", "status": str(artifacts[0].get("returncode")),
-                     "args": step.get("title", ""), "result": tail[:8000]}] if artifacts else []
-            v = _j(judge_cfg, step.get("title", "step"), hist)
+            # S2.5 (ТЗ thinking-enable): the judge sees meaning, not the tail.
+            # The population it grades against is the contract's acceptance
+            # criteria (fixed, owner-declared — src/claims shape); the run
+            # only reports which criteria its evidence covers.
+            tid = str(step.get("task_id") or "")
+            c = model.current_contract(conn, tid) if tid else {}
+            criteria = [str(a) for a in (c.get("acceptance") or []) if isinstance(a, str)]
+            facts = [str(f)[:160] for f in (c.get("facts") or [])[:10]]
+            workdir = ""
+            if tid:
+                trow = model.get_task(conn, tid)
+                workdir = str(dict(trow).get("workdir") or "") if trow else ""
+            evidence = tail
+            stat = _diffstat(workdir) if workdir else ""
+            if stat:
+                evidence = f"DIFFSTAT (working tree):\n{stat}\n\nSTDOUT:\n{tail}"
+            hist = ([{"tool": "worker", "status": str(artifacts[0].get("returncode")),
+                       "args": step.get("title", ""), "result": evidence[:8000]}]
+                    if artifacts else [])
+            if facts:
+                hist = hist + [{"tool": "contract-facts", "status": "given",
+                                "args": "confirmed before this run",
+                                "result": "\n".join(facts)}]
+            v = _j(judge_cfg, step.get("title", "step"), hist,
+                   criteria=criteria or None)
+            covered = v.get("covered")
             verdict = v.get("verdict", "revise")
             # judge.review is fail-OPEN by design (advisory checkpoint); completion needs
             # fail-closed. degraded is judge.py's machine flag (HTTP down, unparsable/empty
@@ -318,17 +422,39 @@ def make_review(conn, *, judge_cfg: dict | None = None):
             # code-side gate: worker must have exited clean for a pass
             if verdict == "pass" and artifacts and artifacts[0].get("returncode") not in (0, None):
                 return {"verdict": "revise", "detail": "judge pass but worker exit != 0"}
-            return {"verdict": verdict, "detail": v.get("reason", "")}
+            # S2.5 counterexample gate (ТЗ): a pass that cannot name a single
+            # acceptance criterion its evidence verifies is exactly the vacuous
+            # shape the machine predicate passed but the meaning did not. The
+            # predicate being green does NOT excuse empty coverage.
+            if verdict == "pass" and criteria and not covered:
+                return {"verdict": "revise",
+                        "detail": "judge pass with zero acceptance-criteria "
+                                  "coverage — name the criteria the evidence verifies",
+                        "criteria_covered": []}
+            return {"verdict": verdict, "detail": v.get("reason", ""),
+                    "criteria_covered": covered}
         except Exception as exc:  # FAIL CLOSED unlike checkpoint judge
             return {"verdict": "needs_human", "detail": f"judge unavailable: {exc}"}
     return review_fn
 
 
-def run_validation(conn, task_id: str, workdir: str) -> tuple[bool, str]:
-    """Optional contract-level gate: acceptance.validation_cmd must pass (code, not prose)."""
+def contract_validation_cmd(conn, task_id: str) -> str:
+    """The contract's machine predicate (S1.3, TЗ thinking-enable).
+
+    Canonical shape: top-level ``validation_cmd`` (``acceptance`` stays the list
+    of acceptance criteria). Legacy dict-shaped ``acceptance`` carrying the
+    command is honoured, so persisted contracts in that shape keep working."""
     from controller import model
     c = model.current_contract(conn, task_id)
-    cmd = (c.get("acceptance") or {}).get("validation_cmd") if isinstance(c.get("acceptance"), dict) else None
+    cmd = c.get("validation_cmd")
+    if not cmd and isinstance(c.get("acceptance"), dict):
+        cmd = c["acceptance"].get("validation_cmd")
+    return str(cmd or "")
+
+
+def run_validation(conn, task_id: str, workdir: str) -> tuple[bool, str]:
+    """Contract-level gate: acceptance.validation_cmd must pass (code, not prose)."""
+    cmd = contract_validation_cmd(conn, task_id)
     if not cmd:
         return True, "no validation_cmd in contract"
     p = subprocess.run(cmd, shell=True, cwd=workdir, capture_output=True, text=True,

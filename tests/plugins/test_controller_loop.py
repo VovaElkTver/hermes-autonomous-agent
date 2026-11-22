@@ -556,3 +556,86 @@ def test_budget_blocked_does_not_starve_the_scope(env):
     states = dict(c.execute("SELECT task_id, state FROM ctl_task").fetchall())
     assert states[a] == "blocked", log
     assert states[b] != "ready", f"b starved by the old return: {log}"
+
+
+class TestS13MachinePredicate:
+    """S1.3 (TЗ thinking-enable): the machine acceptance predicate.
+    run_validation precedes the completion verdict in verifying: a judge `pass`
+    on a FAILED validation_cmd is not a completion (the finished checkpoint step
+    re-opens -> revise), and a draft contract without validation_cmd does not
+    go to ready."""
+
+    @staticmethod
+    def _set_contract(c, tid, **fields):
+        import json
+        row = c.execute(
+            "SELECT fields FROM ctl_contract_revision WHERE task_id=? AND version=("
+            "SELECT MAX(version) FROM ctl_contract_revision WHERE task_id=?)",
+            (tid, tid)).fetchone()
+        f = json.loads(row["fields"])
+        f.update(fields)
+        c.execute("UPDATE ctl_contract_revision SET fields=? WHERE task_id=?",
+                  (json.dumps(f, ensure_ascii=False), tid))
+        c.commit()
+
+    @staticmethod
+    def _with_artifact(c, tid, rid):
+        """The backfill path reviews against the run's LATEST artifact revision —
+        an absent one makes the backfilled review 'stale' (hash mismatch)."""
+        import hashlib
+        import json
+        items = [{"file": "do", "v": 1}]
+        ah = hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()
+        model.add_artifact(c, tid, rid, "step_output", {"hash": ah, "items": items})
+
+    def test_judge_pass_on_failed_validation_cmd_revalidates(self, env, monkeypatch):
+        c, _wd, tid, sid, rid = _mk_verifying(env)
+        self._with_artifact(c, tid, rid)
+        self._set_contract(c, tid, validation_cmd="exit 1")
+        monkeypatch.setattr(loop.time, "sleep", lambda s: None)
+        outcome = loop.finish_verifying(c, tid, review_fn=pass_review)
+        assert outcome == "revalidate"
+        state = c.execute("SELECT state FROM ctl_task WHERE task_id=?", (tid,)).fetchone()["state"]
+        step = c.execute("SELECT status FROM ctl_step WHERE step_id=?", (sid,)).fetchone()["status"]
+        assert state == "ready" and step == "pending", (state, step)
+
+    def test_passing_validation_cmd_completes(self, env, monkeypatch):
+        c, _wd, tid, _sid, rid = _mk_verifying(env)
+        self._with_artifact(c, tid, rid)
+        self._set_contract(c, tid, validation_cmd="true")
+        monkeypatch.setattr(loop.time, "sleep", lambda s: None)
+        assert loop.finish_verifying(c, tid, review_fn=pass_review) == "completed"
+
+    def test_no_validation_cmd_keeps_legacy_behavior(self, env, monkeypatch):
+        c, _wd, tid, _sid, rid = _mk_verifying(env)
+        self._with_artifact(c, tid, rid)
+        monkeypatch.setattr(loop.time, "sleep", lambda s: None)
+        assert loop.finish_verifying(c, tid, review_fn=pass_review) == "completed"
+
+    def test_draft_gate_inactive_until_decision_4(self, env):
+        """The draft->ready gate is DEFINED but not active (decision #4, Вл):
+        today a draft without a predicate still goes to ready (legacy behavior,
+        follow-ups/agent-tools depend on it); the guard function itself is
+        machine-verified so activating it is a one-line switch."""
+        from controller import transitions
+        c, wd = env
+        tid = model.create_task(c, owner="o", workdir=wd, goal="draft")
+        assert model.get_task(c, tid)["state"] == "draft"
+        model.agree_contract(c, tid)
+        model.set_permission(c, wd, enabled=True, granted_via="user-command")
+        transitions.transition(c, tid, "ready", basis="test")  # legacy: passes
+        assert model.get_task(c, tid)["state"] == "ready"
+        # the guard itself: refuses only when the predicate is absent
+        tid2 = model.create_task(c, owner="o", workdir=wd, goal="draft2")
+        t2 = model.get_task(c, tid2)
+        assert transitions._draft_has_predicate(c, t2) == "draft contract without validation_cmd"
+        self._set_contract(c, tid2, validation_cmd="true")
+        t2 = model.get_task(c, tid2)
+        assert transitions._draft_has_predicate(c, t2) is None
+
+    def test_legacy_dict_acceptance_shape_honoured(self, env, monkeypatch):
+        c, _wd, tid, _sid, rid = _mk_verifying(env)
+        self._with_artifact(c, tid, rid)
+        self._set_contract(c, tid, acceptance={"validation_cmd": "exit 1"})
+        monkeypatch.setattr(loop.time, "sleep", lambda s: None)
+        assert loop.finish_verifying(c, tid, review_fn=pass_review) == "revalidate"

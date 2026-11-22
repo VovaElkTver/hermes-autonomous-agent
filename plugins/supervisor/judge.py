@@ -36,7 +36,8 @@ def _clip(value: Any, n: int) -> str:
     return s if len(s) <= n else s[: n // 2] + f"\n...[{len(s) - n} chars cut]...\n" + s[-n // 2 :]
 
 
-def build_messages(goal: str, history: list[dict[str, Any]], max_chars: int) -> list[dict[str, str]]:
+def build_messages(goal: str, history: list[dict[str, Any]], max_chars: int,
+                   criteria: list[str] | None = None) -> list[dict[str, str]]:
     per_call = max(400, max_chars // max(1, len(history)))
     lines = []
     for i, h in enumerate(history, 1):
@@ -46,17 +47,36 @@ def build_messages(goal: str, history: list[dict[str, Any]], max_chars: int) -> 
             f"result: {_clip(h.get('result'), per_call)}"
         )
     user = f"GOAL:\n{goal}\n\nRECENT TOOL CALLS (oldest first):\n" + "\n\n".join(lines)
+    if criteria:
+        # S2.5 (ТЗ thinking-enable): the judge is graded on coverage of the
+        # acceptance criteria, not on vibes about the prose. Shape follows
+        # src/claims: the population (criteria) is fixed and owned by the
+        # contract; the candidate (this run) only reports which items its
+        # trace actually verified — declaring the population is not its job.
+        numbered = "\n".join(f"{i}. {c}" for i, c in enumerate(criteria, 1))
+        user += (
+            "\n\nACCEPTANCE CRITERIA (the population you grade against):\n"
+            + numbered
+            + "\n\nAdditionally to your JSON, field \"covered\": the 1-based"
+              " indices of criteria the EVIDENCE ABOVE actually verifies."
+              " A criterion is covered only if you can point at the tool call"
+              " or output that demonstrates it; a pass with \"covered\": []"
+              " will be rejected as zero-coverage."
+        )
     return [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": user}]
 
 
-def review(cfg: dict, goal: str, history: list[dict[str, Any]]) -> dict[str, Any]:
+def review(cfg: dict, goal: str, history: list[dict[str, Any]],
+           criteria: list[str] | None = None) -> dict[str, Any]:
     """Blocking HTTP call; run inside an executor. Fails open to 'pass' on any error."""
     try:
         url = cfg.get("base_url", "http://127.0.0.1:8000/v1").rstrip("/") + "/chat/completions"
         key = os.environ.get(cfg.get("api_key_env", "SUPERVISOR_JUDGE_API_KEY"), "EMPTY")
         body = {
             "model": cfg.get("model", "judge"),
-            "messages": build_messages(goal, history, int(cfg.get("max_context_chars", 12000))),
+            "messages": build_messages(goal, history,
+                                       int(cfg.get("max_context_chars", 12000)),
+                                       criteria=criteria),
             "temperature": 0,
             # reasoning-model judges spend max_tokens on hidden reasoning BEFORE the
             # JSON answer lands in content; 300 truncated to content='' (finish=length)
@@ -84,10 +104,27 @@ def review(cfg: dict, goal: str, history: list[dict[str, Any]]) -> dict[str, Any
         verdict = json.loads(m.group(0)) if m else {}
         v = str(verdict.get("verdict", "pass")).lower()
         whitelisted = v in ("pass", "revise", "halt")
+        covered = None
+        if criteria is not None:
+            # claim must be a subset of the population the contract owns —
+            # indices outside 1..len(criteria) are hallucinated criteria (claims
+            # "extra" bucket) and never count toward coverage.
+            raw = verdict.get("covered")
+            idx = []
+            if isinstance(raw, list):
+                for x in raw:
+                    try:
+                        xi = int(x)
+                    except (TypeError, ValueError):
+                        continue
+                    if 1 <= xi <= len(criteria):
+                        idx.append(xi)
+            covered = sorted(set(idx))
         return {
             "verdict": v if whitelisted else "pass",
             "reason": str(verdict.get("reason", ""))[:500],
             "instruction": str(verdict.get("instruction", ""))[:800],
+            "covered": covered,
             # machine-readable degradation flag (wording in `reason` is NOT a contract):
             # unparsable/empty completion, missing verdict field, or a verdict the model
             # put outside the whitelist. Advisory checkpoint callers may ignore it;
@@ -97,4 +134,4 @@ def review(cfg: dict, goal: str, history: list[dict[str, Any]]) -> dict[str, Any
         }
     except Exception as exc:  # fail open: the judge is advisory, rule triggers are the hard gate
         return {"verdict": "pass", "reason": f"judge unavailable: {type(exc).__name__}",
-                "instruction": "", "degraded": True}
+                "instruction": "", "degraded": True, "covered": None}

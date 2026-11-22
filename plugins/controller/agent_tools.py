@@ -143,13 +143,21 @@ def ctl_step_done(args: dict, **_: Any) -> str:
     concurrent session having already moved the step."""
     step_id = str(args.get("step_id") or "").strip()
     status = str(args.get("status") or "done").strip()
+    reason = str(args.get("reason") or "").strip()
     expected = str(args.get("expected_status") or "pending").strip()
     if not step_id:
         return _err("'step_id' is required")
-    if status not in ("done", "blocked"):
-        return _err("status must be 'done' or 'blocked'")
-    if expected not in ("pending", "done", "blocked", "failed"):
-        return _err("expected_status must be one of: pending, done, blocked, failed")
+    if status not in ("done", "blocked", "noop"):
+        return _err("status must be 'done', 'blocked' or 'noop'")
+    if status == "noop" and not reason:
+        # S2.2/decision-2 (Вл 21.11): noop is a judgment, not a log — the reason
+        # is mandatory and lands in the ledger with a same-reason counter
+        # (parametric state; escalation policy reads the counter, no graph arc).
+        return _err("noop requires a reason ('осмотрелся и осознанно ничего "
+                    "не сделал, потому что...')")
+    if expected not in ("pending", "done", "blocked", "failed", "in_progress"):
+        return _err("expected_status must be one of: pending, done, blocked, "
+                    "failed, in_progress")
     with _lock, _conn() as conn:
         from controller import model
         # Write transaction opened BEFORE the check: the SELECT-then-update pair
@@ -172,6 +180,20 @@ def ctl_step_done(args: dict, **_: Any) -> str:
         if actual != status:
             return _out(ok=False, step_id=step_id, requested=status, stored=actual,
                         error="finish_step did not stick — read-back mismatch")
+        if status == "noop":
+            like = reason.replace("%", r"\%").replace("_", r"\_")
+            prior = conn.execute(
+                "SELECT COUNT(*) FROM ctl_event WHERE task_id=? AND kind='step_noop'"
+                " AND payload LIKE ?", (row["task_id"], f"%{like}%")).fetchone()[0]
+            model.emit(conn, kind="step_noop", origin="agent", task_id=row["task_id"],
+                       payload={"reason": reason, "step_id": step_id,
+                                "same_reason_count": prior + 1})
+            return _out(ok=True, step_id=step_id, status=actual,
+                        task_id=row["task_id"], same_reason_count=prior + 1,
+                        note="noop is a closed step (success class). Repeating the "
+                             "same reason is visible in the ledger: at 3+ identical "
+                             "noops the honest move is a needs_human question or a "
+                             "changed basis, not another sitting.")
         return _out(ok=True, step_id=step_id, status=actual, task_id=row["task_id"])
 
 
@@ -195,6 +217,128 @@ def ctl_block(args: dict, **_: Any) -> str:
         model.emit(conn, kind="agent_block", origin="agent", task_id=task_id,
                    payload={"reason": reason})
         return _out(ok=True, **res)
+
+
+def _ctl_todo(args: dict, **kw: Any) -> str:
+    """Intent notes on the ledger (S2.2): add/list/drop. Never pump-selected —
+    only a human materializes a todo into a real contract."""
+    op = str(args.get("op") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import model
+        if op == "add":
+            text = str(args.get("text") or "").strip()
+            if not text:
+                return _err("add requires text")
+            owner = str(args.get("owner") or kw.get("session_id") or "agent")
+            tid = model.todo_add(conn, owner=owner, text=text,
+                                 origin_ref=args.get("origin_ref"),
+                                 deadline_hint=args.get("deadline_hint"))
+            return _out(ok=True, todo_id=tid, status="open")
+        if op == "list":
+            rows = model.todo_list(conn, owner=args.get("owner") or None,
+                                   status=args.get("status") or None,
+                                   include_text=True)
+            return _out(ok=True, todos=rows, count=len(rows),
+                        note="the pump never selects from ctl_todo; only a human "
+                             "materializes a todo into a contracted task")
+        if op == "drop":
+            todo_id = str(args.get("todo_id") or "").strip()
+            if not todo_id:
+                return _err("drop requires todo_id")
+            try:
+                model.todo_drop(conn, todo_id)
+            except LookupError as exc:
+                return _err(str(exc))
+            except ValueError as exc:
+                return _err(str(exc))
+            return _out(ok=True, todo_id=todo_id, status="dropped")
+        return _err(f"unknown op {op!r} (use add/list/drop)")
+
+
+def _ctl_decision(args: dict, **kw: Any) -> str:
+    """S2.6 wake-turn outcome (ТЗ thinking-enable): the closed answer menu.
+    draft lives in ctl_enqueue; here only reprioritize and noop are asserted,
+    both land in the event ledger — a decision that leaves no trace is not a
+    decision."""
+    kind = str(args.get("kind") or "").strip().lower()
+    reason = str(args.get("reason") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import model
+        if kind == "noop":
+            if not reason:
+                return _err("decision noop is an asserted success — reason "
+                            "required (что рассмотрено и почему без действий)")
+            like = reason.replace("%", r"\%").replace("_", r"\_")
+            prior = conn.execute(
+                "SELECT COUNT(*) FROM ctl_event WHERE kind='decision_noop'"
+                " AND payload LIKE ?", (f"%{like}%",)).fetchone()[0]
+            model.emit(conn, kind="decision_noop", origin="agent",
+                       payload={"reason": reason, "same_reason_count": prior + 1})
+            return _out(ok=True, kind="noop", same_reason_count=prior + 1,
+                        note="the decide scan reads this counter with the same "
+                             "threshold as step noops — sittings are surveilled, "
+                             "not punished")
+        if kind == "reprioritize":
+            task_id = str(args.get("task_id") or "").strip()
+            if not task_id:
+                return _err("reprioritize requires task_id")
+            head = args.get("head")
+            head = True if head is None else bool(head)
+            try:
+                model.set_priority(conn, task_id, head=head)
+            except LookupError as exc:
+                return _err(str(exc))
+            except ValueError as exc:
+                return _err(str(exc))
+            conn.commit()
+            model.emit(conn, kind="decision_reprioritize", origin="agent",
+                       task_id=task_id,
+                       payload={"head": head, "reason": reason or "(none)"})
+            from controller import wake as _wake
+            _wake.notify()  # queue order changed: the pump may pick differently now
+            return _out(ok=True, kind="reprioritize", task_id=task_id, head=head)
+        if kind == "draft":
+            return _err("draft is said with ctl_enqueue (a contract, not a "
+                        "sentence); ctl_decision takes noop|reprioritize")
+        return _err("unknown kind (noop|reprioritize; draft -> ctl_enqueue)")
+
+
+def _ctl_followup(args: dict, **kw: Any) -> str:
+    """Due-date wake notes (S2.2): the ticker delivers them as events — an agent
+    cannot wake itself with model text, only register a due row here."""
+    import os
+    op = str(args.get("op") or "").strip()
+    with _lock, _conn() as conn:
+        from controller import followups
+        if op == "add":
+            text = str(args.get("text") or "").strip()
+            kind = str(args.get("kind") or "").strip()
+            if not (text and kind):
+                return _err("add requires kind and text")
+            scope_task = str(args.get("scope_task") or "").strip() \
+                or os.environ.get("HERMES_CONTROLLER_TASK_ID", "") \
+                or "session:" + str(kw.get("session_id") or "unknown")
+            try:
+                fid = followups.add(conn, kind=kind, scope_task=scope_task,
+                                    text=text,
+                                    due_at=args.get("due_at"),
+                                    period_s=args.get("period_s"),
+                                    rrule=args.get("rrule"),
+                                    recipient=str(args.get("recipient") or "agent"),
+                                    created_by="agent-tool")
+            except ValueError as exc:
+                return _err(str(exc))
+            return _out(ok=True, followup_id=fid, scope_task=scope_task)
+        if op == "list":
+            rows = followups.list_open(conn, scope_task=args.get("scope_task") or None)
+            return _out(ok=True, followups=rows, count=len(rows))
+        if op == "cancel":
+            fid = str(args.get("followup_id") or "").strip()
+            if not fid:
+                return _err("cancel requires followup_id")
+            done = followups.cancel(conn, fid, str(args.get("reason") or ""))
+            return _out(ok=done, followup_id=fid, cancelled=done)
+        return _err(f"unknown op {op!r} (use add/list/cancel)")
 
 
 # ------------------------------------------------------------------ schema ----
@@ -240,15 +384,22 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                                   "description": "Queue position among live tasks (default tail)"}},
                     ["goal", "workdir"]),
     "ctl_step_done": (ctl_step_done,
-                      "Close one of your controller steps (done or blocked) and VERIFY it "
-                      "landed: the reply reports the status actually stored. Use it only "
-                      "for steps of the task you are executing. It does not review, approve "
-                      "or complete the task — a passing review is still separate. If the "
-                      "step is not in expected_status (default pending), nothing is "
-                      "written: re-read with ctl_status instead of blind-retrying.",
+                      "Close one of your controller steps (done / blocked / noop) and "
+                      "VERIFY it landed: the reply reports the status actually stored. "
+                      "noop(reason) is the deliberate 'looked around, consciously did "
+                      "nothing' outcome — a SUCCESS, not a failure, but the reason is "
+                      "mandatory and repeats of the same reason are counted in the "
+                      "ledger (3 identical noops = ask or change basis, don't sit). "
+                      "Use it only for steps of the task you are executing. It does "
+                      "not review, approve or complete the task — a passing review is "
+                      "still separate. If the step is not in expected_status (default "
+                      "pending), nothing is written: re-read with ctl_status instead "
+                      "of blind-retrying.",
                       {"step_id": _str("Step id to finish"),
-                       "status": {"type": "string", "enum": ["done", "blocked"],
+                       "status": {"type": "string", "enum": ["done", "blocked", "noop"],
                                   "description": "Default: done"},
+                       "reason": _str("Required for noop: what you assessed and why "
+                                      "inaction is the right call"),
                        "expected_status": {"type": "string",
                                            "description": "Precondition; default 'pending'."}},
                       ["step_id"]),
@@ -261,6 +412,61 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                   {"task_id": _str("Task to block"),
                    "reason": _str("Why it cannot proceed")},
                   ["task_id", "reason"]),
+    "ctl_todo": (_ctl_todo,
+                 "Intent notes on your own ledger (cognitive class: allowed even while "
+                 "autonomy is paused). add: a thing you intend to do later, with optional "
+                 "deadline_hint (free text) and origin_ref; list: your open notes; drop: "
+                 "abandon one (soft delete, audit kept). The queue pump NEVER selects "
+                 "from these — only a human materializes a todo into a contracted task, "
+                 "so writing one is recording, not committing. A todo is a durable "
+                 "intention; an intention you never write down is not durable.",
+                 {"op": {"type": "string", "enum": ["add", "list", "drop"]},
+                  "text": _str("The intention, one line (add)"),
+                  "deadline_hint": _str("Optional free-text when it matters (e.g. 'before S2 acceptance')"),
+                  "origin_ref": _str("Optional pointer to what prompted it (event/journal path)"),
+                  "todo_id": _str("Target for drop"),
+                  "owner": _str("Optional owner filter/label (default: this session)"),
+                  "status": {"type": "string", "enum": ["open", "materialized", "dropped"],
+                             "description": "list filter (default: all)"}},
+                 ["op"]),
+    "ctl_followup": (_ctl_followup,
+                     "Register a due-date wake note (cognitive class): the ticker "
+                     "delivers it as an event when it comes due — you cannot wake "
+                     "yourself with model text, only with a row like this. kind='reminder' "
+                     "needs due_at (epoch seconds); kind='review' needs period_s or rrule "
+                     "(periodic re-check). Fires at most max_repeats times, then sleeps. "
+                     "list shows open rows with next_due; cancel retires one. Text goes "
+                     "through the scheduled-prompt tripwire at INSERT (a command you "
+                     "would not execute verbatim, do not register verbatim).",
+                     {"op": {"type": "string", "enum": ["add", "list", "cancel"]},
+                      "kind": {"type": "string", "enum": ["reminder", "review"]},
+                      "text": _str("What to do when it fires, one line (add)"),
+                      "due_at": {"type": "number", "description": "Epoch seconds (reminder)"},
+                      "period_s": {"type": "integer", "description": "Review period seconds"},
+                      "rrule": _str("Optional RFC-style recurrence for review kind"),
+                      "scope_task": _str("Task the wake belongs to (default: running task or session)"),
+                      "recipient": {"type": "string", "enum": ["agent", "user"],
+                                    "description": "Default agent (self-wake); user pings the owner in chat"},
+                      "followup_id": _str("Target for cancel"),
+                      "reason": _str("Why cancelling (cancel)")},
+                     ["op"]),
+    "ctl_decision": (_ctl_decision,
+                     "The OUTCOME of a DECIDE wake-turn (S2.6). The wake message "
+                     "lists decision material; your answer is exactly one of: "
+                     "draft (say it with ctl_enqueue — a real contract, not here), "
+                     "reprioritize (move a draft/ready task head or tail of its "
+                     "scope queue), or noop (asserted success: you looked, nothing "
+                     "to do, reason mandatory). A noop carries the same-reason "
+                     "counter as step noops — repeated identical sittings surface "
+                     "in the next digest, they do not hide.",
+                     {"kind": {"type": "string", "enum": ["noop", "reprioritize"]},
+                      "reason": _str("What was considered and why no action (noop) "
+                                     "or why this order (reprioritize)"),
+                      "task_id": _str("Target for reprioritize"),
+                      "head": {"type": "boolean",
+                               "description": "reprioritize: true = front of queue "
+                                              "(default), false = back"}},
+                     ["kind"]),
 }
 
 # Tool classification in the spirit of MCP annotations (borrowed from NVIDIA's
@@ -271,6 +477,12 @@ TOOL_META: dict[str, dict[str, bool]] = {
     "ctl_enqueue": {"readOnlyHint": False, "destructiveHint": False},
     "ctl_step_done": {"readOnlyHint": False, "destructiveHint": False},
     "ctl_block": {"readOnlyHint": False, "destructiveHint": False},
+    # S2.2: ledger-writing cognitive tools — mutability lives in the cognitive
+    # ledger, not the world; dispatch admission comes from barrier.COGNITIVE_ACTIONS,
+    # not from readOnlyHint (only ctl_status keeps the read-only survival path).
+    "ctl_todo": {"readOnlyHint": False, "destructiveHint": False},
+    "ctl_followup": {"readOnlyHint": False, "destructiveHint": False},
+    "ctl_decision": {"readOnlyHint": False, "destructiveHint": False},
 }
 
 
