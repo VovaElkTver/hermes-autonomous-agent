@@ -838,7 +838,10 @@ def _execute_tool(function_name: str, function_args: dict[str, Any], original_ar
     """Run the registry handler (through tool-execution middleware unless skipped)
     with the approval observability context bound for the duration."""
     dispatch_kwargs: dict[str, Any] = {
-        "task_id": ids.task_id, "session_id": ids.session_id, "conversation_id": ids.conversation_id}
+        "task_id": ids.task_id, "session_id": ids.session_id, "conversation_id": ids.conversation_id,
+        # D1 identity fix: turn_id rides the same channel so handlers (execute_code) can
+        # propagate full call identity into sandbox-RPC dispatches.
+        "turn_id": ids.turn_id}
     if function_name == "execute_code":
         # Prefer the caller's list so subagents can't overwrite the parent's
         # tool set via the process-global.
