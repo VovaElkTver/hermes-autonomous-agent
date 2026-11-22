@@ -1,10 +1,37 @@
-"""fork-guardrails: policy hooks for Hermes fork work (manifest v2, tested on main@97a9ae8)."""
+"""fork-guardrails: policy hooks for Hermes fork work.
+
+v0.3.0 (22.11, DoFirst §3.2 D0): per-feature toggles + log-only mode.
+The 27.10 crash-loop recovery could only disable the plugin WHOLE, because
+register() wired all five hooks unconditionally and the config entry carried
+no per-feature surface — "all or nothing", so the victim of a boot loop got
+killed together with the culprit. The settings subtree fixes that:
+
+  plugins.entries.fork-guardrails.settings:
+    enabled: bool        master switch (default true)
+    log_only: bool       dry-run: verdicts computed + audited, never enforced (default false)
+    audit_log: str       JSONL verdict log path (default ~/.hermes/fork-guardrails/audit.jsonl)
+    features:           one bool per guard (all default true):
+      retry_guard        identical-call failure streak block (3x per turn)
+      delegation_gate    delegate_task only after an explicit user ask
+      force_push_block   force-push to main/master is forbidden
+      outbound_approve   git-push / gh-publish / registry-push / rm-recursive need approval
+      date_context       pre_llm_call "Current date" context injection
+
+Zero settings (or a ctx without get_config) → all features ON, enforcing,
+audit ON: byte-compatible with the 0.2.x behavior. Settings are re-read on
+every invocation (hot — a config flip needs no gateway restart).
+
+Every verdict (enforced or log-only would-be) is appended as one JSONL line
+to audit_log: that stream is the metric surface (e.g. un-sanctioned writes)
+the 22.11 critic package requires (DoFirst М.4).
+"""
 from __future__ import annotations
 
 import datetime
 import hashlib
 import json
 import logging
+import os
 import re
 import threading
 from collections import defaultdict
@@ -35,6 +62,61 @@ _lock = threading.Lock()                     # tool batches run on a thread pool
 _failures: dict[tuple[str, str], dict[str, int]] = defaultdict(lambda: defaultdict(int))
 _delegation_ok: set[str] = set()
 
+# ── v0.3.0 settings surface (plugins.entries.fork-guardrails.settings) ─────
+_ctx = None
+_FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
+             "outbound_approve", "date_context")
+DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
+
+
+def _settings() -> dict:
+    """Hot-read the settings subtree. Never raises; degrades to 0.2.x defaults."""
+    out: dict = {"enabled": True, "log_only": False, "audit_log": DEFAULT_AUDIT_LOG,
+                 "features": {f: True for f in _FEATURES}}
+    get = getattr(_ctx, "get_config", None)
+    if not callable(get):
+        return out
+    for key, fallback in (("enabled", out["enabled"]), ("log_only", out["log_only"]),
+                          ("audit_log", out["audit_log"])):
+        try:
+            value = get(key, fallback)
+        except Exception:
+            value = fallback
+        out[key] = fallback if value is None else value
+    try:
+        feats = get("features", None)
+        if isinstance(feats, dict):
+            for f in _FEATURES:
+                if f in feats:
+                    out["features"][f] = bool(feats[f])
+    except Exception:
+        pass
+    return out
+
+
+def _audit(kind: str, decision: dict, tool_name: str, args: dict, kw: dict, s: dict) -> None:
+    """One JSONL line per verdict. Audit failure degrades to a log line, never raises."""
+    try:
+        path = os.path.expanduser(str(s.get("audit_log") or DEFAULT_AUDIT_LOG))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        text = ""
+        if tool_name in SHELL_TOOLS:
+            text = str((args or {}).get("command") or (args or {}).get("code") or "")[:300]
+        rec = {
+            "ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "kind": kind,
+            "action": (decision or {}).get("action"),
+            "rule_key": (decision or {}).get("rule_key"),
+            "tool": tool_name,
+            "session_id": _sid(kw),
+            "turn_id": kw.get("turn_id") or "",
+            "text": text or None,
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        log.warning("fork-guardrails audit write failed: %s", exc)
+
 
 def _sid(kw: dict) -> str:
     return kw.get("session_id") or kw.get("task_id") or "_global"
@@ -53,55 +135,92 @@ def _shell_text(tool_name: str, args: dict) -> str:
 
 
 def pre_llm_call(**kw):
+    s = _settings()
+    if not s["enabled"]:
+        return {}
     sid, msg = _sid(kw), kw.get("user_message") or ""
-    with _lock:
-        if DELEGATION_NEG.search(msg):
-            _delegation_ok.discard(sid)
-        elif DELEGATION_ASK.search(msg):
-            _delegation_ok.add(sid)          # consumed by the next successful delegation (post_tool_call)
+    if s["features"]["delegation_gate"]:
+        with _lock:
+            if DELEGATION_NEG.search(msg):
+                _delegation_ok.discard(sid)
+            elif DELEGATION_ASK.search(msg):
+                _delegation_ok.add(sid)          # consumed by the next successful delegation (post_tool_call)
+    if not s["features"]["date_context"]:
+        return {}
     now = datetime.datetime.now().astimezone()
     return {"context": f"Current date: {now:%Y-%m-%d %H:%M %Z}. Verify post-cutoff facts with tools."}
 
 
 def _decide(tool_name: str, args: dict, kw: dict):
+    s = _settings()
+    if not s["enabled"]:
+        return None
+    log_only = bool(s["log_only"])
+
+    def _verdict(decision: dict) -> dict | None:
+        """Enforce unless log-only; both modes leave an audit line (the metric surface)."""
+        if log_only:
+            kind = "would_block" if decision["action"] == "block" else "would_approve"
+            _audit(kind, decision, tool_name, args, kw, s)
+            log.info("fork-guardrails log-only %s: %s", kind,
+                     decision.get("rule_key") or decision.get("message"))
+            return None
+        kind = "blocked" if decision["action"] == "block" else "approve"
+        _audit(kind, decision, tool_name, args, kw, s)
+        return decision
+
     sid, turn = _sid(kw), kw.get("turn_id") or ""
     with _lock:
-        if _failures[(sid, turn)][_sig(tool_name, args)] >= MAX_IDENTICAL_FAILURES:
-            return {"action": "block",
-                    "message": f"Identical {tool_name} call failed {MAX_IDENTICAL_FAILURES}x this turn; "
-                               "change approach or ask the user."}
-        if tool_name == DELEGATION_TOOL and sid not in _delegation_ok:
-            return {"action": "block", "message": "Delegation is only allowed when the user asks for subagents."}
+        if s["features"]["retry_guard"] and _failures[(sid, turn)][_sig(tool_name, args)] >= MAX_IDENTICAL_FAILURES:
+            return _verdict({"action": "block",
+                            "message": f"Identical {tool_name} call failed {MAX_IDENTICAL_FAILURES}x this turn; "
+                                       "change approach or ask the user."})
+        if s["features"]["delegation_gate"] and tool_name == DELEGATION_TOOL and sid not in _delegation_ok:
+            return _verdict({"action": "block",
+                            "message": "Delegation is only allowed when the user asks for subagents."})
     text = _shell_text(tool_name, args)
-    if not text:
-        return None
-    if FORCE_PUSH_PROTECTED.search(text):
-        return {"action": "block", "message": "Force-push to main/master is forbidden in this fork."}
-    for key, pat in OUTBOUND.items():
-        if pat.search(text):
-            return {"action": "approve", "message": f"{tool_name}: {text[:300]}",
-                    "rule_key": f"fork-guardrails:{key}"}
+    if text:
+        if s["features"]["force_push_block"] and FORCE_PUSH_PROTECTED.search(text):
+            return _verdict({"action": "block",
+                            "message": "Force-push to main/master is forbidden in this fork."})
+        if s["features"]["outbound_approve"]:
+            for key, pat in OUTBOUND.items():
+                if pat.search(text):
+                    return _verdict({"action": "approve", "message": f"{tool_name}: {text[:300]}",
+                                     "rule_key": f"fork-guardrails:{key}"})
     return None
 
 
 def pre_tool_call(tool_name: str = "", args: dict | None = None, **kw):
     try:
         return _decide(tool_name, args if isinstance(args, dict) else {}, kw)
-    except Exception as exc:                 # host fails OPEN on exceptions, so fail closed here
+    except Exception as exc:                 # host fails OPEN on exceptions
+        s = _settings()
+        if s["enabled"] and s["log_only"]:
+            # log-only must stay zero-impact: diagnose, audit, allow
+            _audit("internal_error",
+                   {"action": "block", "message": f"fork-guardrails internal error: {exc}"},
+                   tool_name, args if isinstance(args, dict) else {}, kw, s)
+            log.exception("fork-guardrails pre_tool_call failed (log-only: allowing)")
+            return None
         log.exception("fork-guardrails pre_tool_call failed")
         return {"action": "block", "message": f"fork-guardrails internal error: {exc}"}
 
 
 def post_tool_call(tool_name: str = "", args: dict | None = None, **kw):
+    s = _settings()
+    if not s["enabled"]:
+        return
     sig = _sig(tool_name, args if isinstance(args, dict) else {})
     key = (_sid(kw), kw.get("turn_id") or "")
     status = kw.get("status")
     with _lock:
-        if status == "error":
+        if status == "error" and s["features"]["retry_guard"]:
             _failures[key][sig] += 1
         elif status == "ok":
-            _failures[key].pop(sig, None)
-            if tool_name == DELEGATION_TOOL:
+            if s["features"]["retry_guard"]:
+                _failures[key].pop(sig, None)
+            if s["features"]["delegation_gate"] and tool_name == DELEGATION_TOOL:
                 # One-shot: the user's "use subagents" authorises THAT delegation, not the
                 # whole session. After a successful dispatch the flag is consumed; a new
                 # round needs a fresh ask (negation in pre_llm_call remains an early revoke).
@@ -126,6 +245,9 @@ def on_session_finalize(**kw):
 
 
 def register(ctx):
+    global _ctx
+    _ctx = ctx  # settings surface; hooks stay registered even when the master switch is off,
+    # so a config flip (enabled/log_only/features) takes effect without a gateway restart
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("pre_tool_call", pre_tool_call)
     ctx.register_hook("post_tool_call", post_tool_call)
