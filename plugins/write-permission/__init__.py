@@ -254,7 +254,13 @@ def post_tool_call(tool_name: str = "", args: dict | None = None, **kw):
     constraints = reg["constraints"] if reg else []
     changed = False
     for m in _RM_RECURSIVE_RE.finditer(text):
-        target = os.path.abspath(os.path.expanduser(m.group(1)))
+        raw = m.group(1)
+        if len(raw) > 1 and raw[0] == raw[-1] and raw[0] in "'\"":
+            raw = raw[1:-1]
+        raw = raw.rstrip(";,&|)")
+        if not raw:
+            continue
+        target = os.path.abspath(os.path.expanduser(raw))
         if not any(l["path"] == target for l in locks):
             locks.append({"path": target, "reason": "post-delete",
                           "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
