@@ -137,10 +137,15 @@ def ctl_enqueue(args: dict, **_: Any) -> str:
                     note="queued as draft; dispatch waits for human agreement ('иди')")
 
 
-def ctl_step_done(args: dict, **_: Any) -> str:
+def ctl_step_done(args: dict, **kw: Any) -> str:
     """Finish one of the caller's steps, then READ BACK the stored status —
     a step is done only when the row says so. expected_status guards against a
-    concurrent session having already moved the step."""
+    concurrent session having already moved the step.
+
+    Closing as done also files a PROPOSED verdict in the verdicts register
+    (gateway/verdict_ledger): the agent's own success grade is recorded as a
+    revocable row — issuer pinned to 'agent', confirmable only from outside,
+    overturnable from any state — and re-injected into the session from then on."""
     step_id = str(args.get("step_id") or "").strip()
     status = str(args.get("status") or "done").strip()
     reason = str(args.get("reason") or "").strip()
@@ -194,7 +199,23 @@ def ctl_step_done(args: dict, **_: Any) -> str:
                              "same reason is visible in the ledger: at 3+ identical "
                              "noops the honest move is a needs_human question or a "
                              "changed basis, not another sitting.")
-        return _out(ok=True, step_id=step_id, status=actual, task_id=row["task_id"])
+        # The noop branch returned above; reaching here means status == "done".
+        return _out(ok=True, step_id=step_id, status=actual, task_id=row["task_id"],
+                    verdict_id=_file_step_verdict(conn, kw, row, step_id, reason))
+
+
+def _file_step_verdict(conn, kw: dict, row: dict, step_id: str, reason: str) -> int:
+    """Best-effort: an agent success claim must exist as a row, not only as prose.
+    Never fails the step close; 0 = register unavailable."""
+    try:
+        from gateway.verdict_ledger import propose_c
+        return propose_c(
+            conn, str(kw.get("session_id") or row["task_id"]), f"step {step_id}",
+            reason or "closed as done",
+            basis=json.dumps({"task_id": row["task_id"], "step_id": step_id, "status": "done"}))
+    except Exception:
+        logger.debug("ctl_step_done: verdict register unavailable", exc_info=True)
+        return 0
 
 
 def ctl_block(args: dict, **_: Any) -> str:

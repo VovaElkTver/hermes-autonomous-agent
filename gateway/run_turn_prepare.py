@@ -837,6 +837,19 @@ class GatewayTurnPrepareMixin:
         except Exception:
             pass
 
+        # verdict register (gateway/verdict_ledger): the model narrates success against
+        # the ROWS, not its own memory — live proposed/confirmed grades and recently
+        # overturned ones ride every turn; an empty register costs nothing.
+        try:
+            from gateway.verdict_ledger import render_note
+            _vstore = getattr(self._session_db, '_db', None) or self._session_db
+            if _vstore is not None:
+                _vnote = render_note(_vstore, session_entry.session_id)
+                if _vnote:
+                    turn_sidecar_notes.append(_vnote)
+        except Exception:
+            pass
+
         # Stage the notes (one-shot; consumed in run_sync) AFTER the early-out so an aborted turn
         # cannot leak them into the next turn.
         if turn_sidecar_notes and session_key:
