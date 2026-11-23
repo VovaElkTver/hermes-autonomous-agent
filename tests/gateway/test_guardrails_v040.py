@@ -119,6 +119,13 @@ def test_stderr_redirect_is_not_a_write(tmp_path):
     assert g._decide("terminal", {"command": "ssh host1 grep x /etc/y 2>/dev/null"}, KW) is None
 
 
+def test_unbalanced_quotes_still_gates(tmp_path):
+    """Live incident 23.11 23:13: shlex ValueError made the gate skip its own text."""
+    g = _load_plugin(tmp_path)
+    d = g._decide("execute_code", {"code": 'print("dry-run gate probe: ssh gateprobe-host rm -rf /tmp/x")'}, KW)
+    assert d and d["action"] == "block" and d["rule_key"] == "fork-guardrails:remote_write"
+
+
 # ── M4 child scope note ────────────────────────────────────────────────────
 
 def test_child_prompt_carries_delegation_scope(tmp_path, monkeypatch):

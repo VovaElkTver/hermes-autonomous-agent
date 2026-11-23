@@ -206,7 +206,9 @@ def _remote_write_hosts(text: str) -> set[str]:
         try:
             toks = shlex.split(tail)
         except ValueError:
-            continue
+            # unbalanced quotes in the surrounding text (e.g. a print("...") probe):
+            # fall back to naive tokenization — a gate that skips on parse errors gates nothing
+            toks = tail.split()
         pos: list[str] = []
         i = 0
         while i < len(toks):
