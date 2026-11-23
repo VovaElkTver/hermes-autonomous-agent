@@ -31,6 +31,27 @@ before; md5 after lands asynchronously from a daemon thread on success).
 v0.4.1 (23.11, owner word): the allowlist BLOCK (M2) and the child scope note
 (M4) are REMOVED — nothing in this plugin may require a host allowlist. The
 ledger is pure audit: it never blocks and needs no list.
+
+v0.5.0 (23.11, incident dgx98 post-mortem — mechanism, not prompt lists):
+the intervention barrier and the remote-write mandate, at the executor:
+
+- auth_epoch: a new owner message bumps a persisted turn counter; turn-scoped
+  grants die with the turn (on_session_end) and a new message revokes them —
+  "a new message invalidates the old authority to act", mechanically.
+- mandate_gate: remote write/delete/export classes (ssh/sftp verb commands,
+  scp/rsync in destination position, export = remote source / local sink)
+  need an ACTIVE turn grant, else an approval-gate verdict with the action
+  CONTRACT (basis / target / target state / boundaries / verification /
+  uncertainty). Owner approval = one-shot permission for that call; a
+  successful call grants the same session+host+class for the REST OF THE
+  TURN only (pre-agreed-plan semantics: no card per step of one turn, but
+  the next owner message voids all of it).
+- No host allowlist anywhere (owner word 23.11 stands): grants are
+  task-scoped, owner-confirmed, epoch-bound — not a static list.
+- Op journal: ledger lines carry op_id / turn / op_class in addition to the
+  M6 before/after md5 + artifact (host/path) chain.
+- Detecting one's own error creates NO permission to fix it: the gate does
+  not special-case "repair" motives — every remote mutation needs the card.
 """
 from __future__ import annotations
 
@@ -43,6 +64,7 @@ import re
 import shlex
 import subprocess
 import threading
+import uuid
 from collections import defaultdict
 
 log = logging.getLogger(__name__)
@@ -75,8 +97,9 @@ _delegation_ok: set[str] = set()
 _ctx = None
 _FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
              "outbound_approve", "date_context",
-             "write_ledger")
+             "write_ledger", "auth_epoch", "mandate_gate")
 DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
+_TURN_STATE_FILE = "auth_state.json"
 
 
 def _settings() -> dict:
@@ -159,6 +182,16 @@ _REMOTE_EP_RE = re.compile(r"^(?:[\w.+-]+@)?(\[[0-9A-Fa-f:.]+\]|(?![A-Za-z]:)[\w
 _ABS_PATH_RE = re.compile(r"(?<![\w~$@])/[\w@.+-]+(?:/[\w@.+-]+)*")
 
 _pending_writes: dict[tuple[str, str, str], dict] = {}
+# v0.5.0: turn-scoped mandate grants (session_id -> set of (host, op_class)).
+# In-memory by design: a crash/restart loses grants (the safe side — nothing
+# resurrects). The PERSISTED half is only the turn counter (auth_state.json),
+# so op-journal numbering survives restarts.
+_turn_grants: dict[str, set[tuple[str, str]]] = {}
+# (sid, turn, sig) -> list[(host, op_class)] for calls that passed the gate
+# via an owner approval; post_tool_call(status=ok) converts them into grants.
+_gated_calls: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
+# (sid, turn, sig) -> short note for context injection (bounded per session)
+_mandate_events: dict[tuple[str, str], list[str]] = defaultdict(list)
 
 
 def _plugin_dir(s: dict) -> str:
@@ -216,6 +249,128 @@ def _remote_write_targets(text: str) -> list[str]:
     return out[:8]
 
 
+# ── v0.5.0 M-mechanism: op classes, export detection, turn state, grants ────
+_DELETE_VERB_RE = re.compile(r"\b(?:rm|rmdir|mv|truncate|dd)\b")
+_LOCAL_SINK_RE = re.compile(r"(?<![0-9&])>(?![=>])\s*\S")
+
+
+def _remote_write_classes(text: str) -> dict[str, set[str]]:
+    """host -> {"write"} / {"delete"} classes this shell text performs REMOTELY.
+
+    Reuses _remote_write_hosts' reach (transport + write-verb or bare shell) and
+    splits the class: rm/mv/truncate/rmdir/dd remotely = delete, anything else
+    write. Reads stay OUT (no verb, no redirect) — the gate fires on edits,
+    not on mentions (17.11 doctrine)."""
+    out: dict[str, set[str]] = {}
+    for host in _remote_write_hosts(text):
+        cls = {"write"}
+        m = _TRANSPORT_RE.search(text)
+        if m and _DELETE_VERB_RE.search(re.split(r"[;&|\n]", text[m.end():], maxsplit=1)[0]):
+            cls = {"delete", "write"}
+        out[host] = cls
+    return out
+
+
+def _remote_export_hosts(text: str) -> set[str]:
+    """Hosts this shell text EXPORTS data FROM (best-effort, speed bump not sandbox).
+
+    - scp/rsync with a REMOTE endpoint in SOURCE position (not last positional);
+    - sftp `get` commands;
+    - `ssh <host> <cmd>` whose tail carries a local sink redirect (`> file`) with
+      no remote write verb — the remote side only read, the data landed locally.
+    """
+    hosts: set[str] = set()
+    for m in _TRANSPORT_RE.finditer(text):
+        verb = text[m.start():m.end()]
+        tail = re.split(r"[;&|\n]", text[m.end():], maxsplit=1)[0]
+        try:
+            toks = shlex.split(tail)
+        except ValueError:
+            toks = tail.split()
+        pos: list[str] = []
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if t.startswith("-") and len(t) > 1:
+                i += 2 if (t in SSH_OPTS_WITH_VALUE and i + 1 < len(toks)) else 1
+                continue
+            pos.append(t)
+            i += 1
+        if verb in ("scp", "rsync") and len(pos) >= 2:
+            for p in pos[:-1]:  # sources: every positional except the destination
+                ep = _REMOTE_EP_RE.match(p)
+                if ep:
+                    hosts.add(ep.group(1))
+        elif verb == "sftp":
+            low = " ".join(pos[1:]).lower()
+            if re.search(r"\bget\b", low):
+                hosts.add(pos[0])
+        elif verb == "ssh" and pos:
+            rest = " ".join(pos[1:])
+            if not _WRITE_VERB_RE.search(rest) and _LOCAL_SINK_RE.search(rest):
+                hosts.add(pos[0])
+    return hosts
+
+
+def _load_turn_state(s: dict) -> dict:
+    try:
+        path = os.path.join(_plugin_dir(s), _TURN_STATE_FILE)
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict):
+            return {"turn": int(data.get("turn", 0)), "sessions": data.get("sessions") or {}}
+    except Exception:
+        pass
+    return {"turn": 0, "sessions": {}}
+
+
+def _commit_turn_state(s: dict, st: dict) -> None:
+    try:
+        path = os.path.join(_plugin_dir(s), _TURN_STATE_FILE)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(st, fh, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception as exc:
+        log.warning("fork-guardrails turn-state write failed: %s", exc)
+
+
+def _bump_on_new_message(s: dict, sid: str, kw: dict) -> int | None:
+    """v0.5.0 intervention barrier: a NEW owner message bumps the persisted turn
+    counter — old turns' grants are already dead (on_session_end cleared them);
+    the bump is the audit/revocation record. Returns the new turn or None."""
+    msg = (kw.get("user_message") or "").strip()
+    if not msg:
+        return None
+    h = hashlib.sha1(msg.encode("utf-8", "replace")).hexdigest()[:16]
+    with _lock:
+        st = _load_turn_state(s)
+        last = (st.get("sessions") or {}).get(sid) or {}
+        if last.get("msg_hash") == h:
+            return int(st.get("turn", 0))
+        st["turn"] = int(st.get("turn", 0)) + 1
+        st.setdefault("sessions", {})[sid] = {"msg_hash": h, "turn": st["turn"]}
+        _commit_turn_state(s, st)
+        _audit("epoch-bump", {"action": "epoch-bump",
+                   "message": f"new owner message — previous turn's mandates void (turn {st['turn']})"},
+                "", {}, kw, s)
+        return st["turn"]
+
+
+def _mandate_note(s: dict, sid: str, host_cls: list[tuple[str, str]], turn: int | None) -> None:
+    """One bounded context line per gate event (the model-awareness layer; the
+    verdict is the mechanism, this is not a substitute for it)."""
+    desc = ", ".join(f"{c}@{h}" for h, c in host_cls[:4])
+    note = f"- mandate-gate turn {turn}: no permission for {desc} without owner approval; " \
+           "new owner message voids the previous turn's grants"
+    with _lock:
+        ev = _mandate_events[(sid, str(turn) if turn is not None else "")]
+        if note not in ev:
+            ev.append(note)
+            del ev[:-3]
+
+
 def _ssh_md5(host: str, target: str):
     """Read-only remote md5; never raises. None when it cannot be had."""
     try:
@@ -247,8 +402,9 @@ def _ledger(s: dict, rec: dict) -> None:
 
 
 def _remote_write_record(text: str, tool_name: str, args: dict, kw: dict, s: dict) -> None:
-    """M6 ledger preflight for a remote write. Pure audit: no allowlist, no verdict, never blocks."""
-    hosts = _remote_write_hosts(text)
+    """M6 ledger preflight + v0.5.0 op-journal fields. Pure audit: no allowlist,
+    no verdict, never blocks (the mandate gate is a SEPARATE feature)."""
+    hosts = set(_remote_write_hosts(text)) | _remote_export_hosts(text)
     if not hosts:
         return
     targets = _remote_write_targets(text)
@@ -257,12 +413,19 @@ def _remote_write_record(text: str, tool_name: str, args: dict, kw: dict, s: dic
     if single:
         md5 = _ssh_md5(*single)
         note = None if md5 else "read failed"
+    sid = _sid(kw)
+    op_classes = sorted({c for cs in _remote_write_classes(text).values() for c in cs}
+                        | ({"export"} if _remote_export_hosts(text) else set()))
+    op_id = uuid.uuid4().hex[:12]
+    turn_now = int(_load_turn_state(s).get("turn", 0))
     _ledger(s, {"kind": "remote_write", "hosts": sorted(hosts), "targets": targets,
-                "cmd": text[:300], "tool": tool_name, "session_id": _sid(kw), "turn_id": kw.get("turn_id") or "",
-                "md5_before": md5, "md5_note": note})
+                "cmd": text[:300], "tool": tool_name, "session_id": sid, "turn_id": kw.get("turn_id") or "",
+                "md5_before": md5, "md5_note": note,
+                "op_id": op_id, "op_class": op_classes, "turn": turn_now})
     with _lock:
-        _pending_writes[(_sid(kw), kw.get("turn_id") or "", _sig(tool_name, args or {}))] = {
-            "hosts": sorted(hosts), "cmd": text[:300], "single": single}
+        _pending_writes[(sid, kw.get("turn_id") or "", _sig(tool_name, args or {}))] = {
+            "hosts": sorted(hosts), "cmd": text[:300], "single": single,
+            "op_id": op_id, "op_class": op_classes, "turn": turn_now}
     return
 
 
@@ -274,12 +437,15 @@ def _settle_pending_write(tool_name: str, args: dict, kw: dict, s: dict, status:
     if ctxp is None or not s["features"].get("write_ledger", True):
         return
     _ledger(s, {"kind": "remote_write_result", "status": status, "hosts": ctxp["hosts"],
-                "cmd": ctxp["cmd"], "tool": tool_name, "session_id": _sid(kw), "turn_id": kw.get("turn_id") or ""})
+                "cmd": ctxp["cmd"], "tool": tool_name, "session_id": _sid(kw), "turn_id": kw.get("turn_id") or "",
+                "op_id": ctxp.get("op_id"), "op_class": ctxp.get("op_class"), "turn": ctxp.get("turn")})
     if status == "ok" and ctxp.get("single"):
         host, target = ctxp["single"]
 
         def _after():
-            _ledger(s, {"kind": "remote_md5_after", "host": host, "target": target, "md5": _ssh_md5(host, target)})
+            _ledger(s, {"kind": "remote_md5_after", "host": host, "target": target,
+                        "md5": _ssh_md5(host, target),
+                        "op_id": ctxp.get("op_id"), "op_class": ctxp.get("op_class"), "turn": ctxp.get("turn")})
         threading.Thread(target=_after, daemon=True).start()
 
 
@@ -294,10 +460,25 @@ def pre_llm_call(**kw):
                 _delegation_ok.discard(sid)
             elif DELEGATION_ASK.search(msg):
                 _delegation_ok.add(sid)          # consumed by the next successful delegation (post_tool_call)
+    turn = None
+    if s["features"]["auth_epoch"]:
+        turn = _bump_on_new_message(s, sid, kw)   # None when the message is a repeat of the current one
     if not s["features"]["date_context"]:
         return {}
-    now = datetime.datetime.now().astimezone()
-    return {"context": f"Current date: {now:%Y-%m-%d %H:%M %Z}. Verify post-cutoff facts with tools."}
+    context = f"Current date: {datetime.datetime.now().astimezone():%Y-%m-%d %H:%M %Z}. Verify post-cutoff facts with tools."
+    mand: list[str] = []
+    if s["features"]["mandate_gate"]:
+        with _lock:
+            gr = _turn_grants.get(sid, set())
+            ev = _mandate_events.get((sid, str(turn) if turn is not None else ""), [])
+        if gr:
+            mand.append("[mandate-gate] active this turn (owner-approved): "
+                        + "; ".join(f"{c} on {h}" for h, c in sorted(gr)))
+        if ev:
+            mand.extend(ev)
+        if mand:
+            context += "\n" + "\n".join(mand[:4])
+    return {"context": context}
 
 
 def _decide(tool_name: str, args: dict, kw: dict):
@@ -339,6 +520,33 @@ def _decide(tool_name: str, args: dict, kw: dict):
                 if pat.search(text):
                     return _verdict({"action": "approve", "message": f"{tool_name}: {text[:300]}",
                                      "rule_key": f"fork-guardrails:{key}"})
+        if s["features"]["mandate_gate"]:
+            needed = [(h, c) for h, cs in _remote_write_classes(text).items() for c in cs]
+            needed += [(h, "export") for h in _remote_export_hosts(text)]
+            if needed:
+                sid = _sid(kw)
+                with _lock:
+                    grants = set(_turn_grants.get(sid, set()))
+                missing = [(h, c) for h, c in needed if (h, c) not in grants]
+                if missing:
+                    hosts_s = ", ".join(sorted({h for h, _ in missing}))
+                    cls_s = ", ".join(sorted({c for _, c in missing}))
+                    turn_now = int(_load_turn_state(s).get("turn", 0))
+                    _mandate_note(s, sid, missing, turn_now)
+                    if not log_only:
+                        with _lock:
+                            _gated_calls[(sid, kw.get("turn_id") or "", _sig(tool_name, args or {}))] = missing
+                    return _verdict({
+                        "action": "approve", "rule_key": "fork-guardrails:mandate-gate",
+                        "message": (
+                            f"[mandate-gate] no permission for {cls_s} on {hosts_s} in the current turn. "
+                            "A new owner message voids the previous turn's grants, and detecting one's "
+                            "own error creates no permission to repair it. FIRST post the contract in "
+                            "chat — basis (which owner utterance permits this; if none, ask the owner "
+                            "instead of acting), target (host + path), change, target state (if the "
+                            "resulting state is unknown, the operation is not permitted), boundaries, "
+                            "verification — then re-issue the call; the owner's approval covers THIS "
+                            "action only, for this turn.")})
     return None
 
 
@@ -379,15 +587,32 @@ def post_tool_call(tool_name: str = "", args: dict | None = None, **kw):
         # status == "blocked": a plugin veto, not a tool failure — don't count it
     if status in ("ok", "error") and s["features"]["write_ledger"]:
         _settle_pending_write(tool_name, args if isinstance(args, dict) else {}, kw, s, status)
+    if status == "ok" and s["features"]["mandate_gate"]:
+        # A successful owner-approved call grants session+host+class for the REST
+        # OF THIS TURN only (pre-agreed-plan semantics); on_session_end voids it.
+        gkey = (_sid(kw), kw.get("turn_id") or "", sig)
+        with _lock:
+            granted = _gated_calls.pop(gkey, None)
+        if granted:
+            with _lock:
+                _turn_grants.setdefault(_sid(kw), set()).update(granted)
+            _audit("mandate-grant", {"action": "grant",
+                                      "message": f"{_sid(kw)}: {[f'{c} on {h}' for h, c in granted]} for the rest of this turn"},
+                   tool_name, args if isinstance(args, dict) else {}, kw, s)
 
 
 def on_session_end(**kw):
-    """Fires after EVERY turn (despite the name): drop that turn's retry counters."""
+    """Fires after EVERY turn (despite the name): drop that turn's retry counters
+    and its mandate grants (the intervention barrier — the next owner message
+    starts with a clean slate of permissions)."""
     key = (_sid(kw), kw.get("turn_id") or "")
     with _lock:
         _failures.pop(key, None)
         for k in [k for k in _pending_writes if k[:2] == key]:
             _pending_writes.pop(k, None)
+        _turn_grants.pop(key[0], None)
+        for k in [k for k in _gated_calls if k[:2] == key]:
+            _gated_calls.pop(k, None)
 
 
 def on_session_finalize(**kw):
@@ -399,6 +624,11 @@ def on_session_finalize(**kw):
             _failures.pop(k, None)
         for k in [k for k in _pending_writes if k[0] == sid]:
             _pending_writes.pop(k, None)
+        _turn_grants.pop(sid, None)
+        for k in [k for k in _gated_calls if k[0] == sid]:
+            _gated_calls.pop(k, None)
+        for k in [k for k in _mandate_events if k[0] == sid]:
+            _mandate_events.pop(k, None)
 
 
 def register(ctx):

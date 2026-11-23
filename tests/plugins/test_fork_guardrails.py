@@ -37,14 +37,23 @@ fg = _load_plugin()
 
 
 @pytest.fixture()
-def hooks():
+def hooks(tmp_path):
     fg._failures.clear()
     fg._delegation_ok.clear()
+    fg._pending_writes.clear()
+    fg._turn_grants.clear()
+    fg._gated_calls.clear()
+    fg._mandate_events.clear()
     reg = {}
+    settings = {"audit_log": str(tmp_path / "fg-main" / "audit.jsonl")}
 
     class Ctx:
         def register_hook(self, name, cb):
             reg.setdefault(name, []).append(cb)
+
+        @staticmethod
+        def get_config(key, fallback=None):
+            return settings.get(key, fallback)
 
     fg.register(Ctx())
     return reg
