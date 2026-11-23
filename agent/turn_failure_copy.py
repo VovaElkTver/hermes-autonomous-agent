@@ -67,6 +67,22 @@ AUTOMATION_INTERRUPTED_NOTICE = (
     "An automated delivery was interrupted and was not run again. Some "
     "actions may already have run; verify their effects."
 )
+# A turn the USER stopped with /stop (or a /new /reset that latches a Stop): unlike a gateway
+# restart/shutdown (which the runner auto-continues via ``resume_pending``) this is a HARD
+# boundary — the user ended the turn and the plan it pursued is no longer to be carried. The
+# generic partial-failed-turn boundary that the runner writes for it is a ``failed_turn``
+# display_kind row, stripped from the model's history, so the model never learns the plan was
+# killed and keeps re-running it on the next message ("pre-stop context" continuation). This note
+# is the model-visible control event: it rides the NEXT turn's user message (api_content sidecar)
+# and says the plan is dead, so the next message is interpreted fresh. One-shot (see
+# ``gateway.stop_notice``).
+USER_STOP_RECOVERY_NOTE = (
+    "You stopped the previous turn. The plan that turn was pursuing is no longer active: "
+    "do not continue it automatically and do not re-execute its unfinished steps. Some of "
+    "its actions may already have run; verify their effects before acting on them. The next "
+    "message refers to the state after your stop; interpret its intent fresh, not as a "
+    "continuation of the stopped plan."
+)
 # Durable tail roles a failed turn leaves open: its accepted ``user`` row, or the ``tool`` row of a
 # call that ran before the failure. An ``assistant`` tail is already closed (a reply or a boundary).
 OPEN_TURN_TAIL_ROLES = frozenset({"user", "tool"})

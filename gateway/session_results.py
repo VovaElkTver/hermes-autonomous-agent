@@ -101,6 +101,13 @@ def finish_result(db, *, epoch, row, response, outcome, result=None, prepared=No
     notice, display_metadata = owner_stop_notice(result, outcome, row), None
     if notice is None and (refusal := gateway_refusal_boundary(result, outcome)) is not None:
         notice, display_metadata = refusal
+    # A user stop (a /stop, or a /new /reset that latched a Stop) is a hard plan boundary, the
+    # opposite of a restart/shutdown (which auto-continues): the interrupted plan is still in the
+    # transcript, but the generic partial-failed boundary is a failed_turn row the model never
+    # sees. Stage the one-shot recovery note so the NEXT turn tells the model the plan is dead.
+    from gateway.stop_notice import is_user_stop, mark_stop_note
+    if is_user_stop(result, outcome, row):
+        mark_stop_note(db, row['target_session_id'])
     write = None if notice is None else (lambda conn, _current: close_discarded_turn(
         db, conn, row, notice, replace_after=row.get('transcript_mark'), display_metadata=display_metadata))
     settled = settle_session_input(db, epoch=epoch, admission_id=row['admission_id'],
