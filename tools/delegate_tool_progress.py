@@ -177,28 +177,6 @@ _NESTED_CHILDREN_NOTE = (
     "from the nesting depth; children at the maximum depth cannot delegate further. No parameter override is available."
 )
 
-def _delegation_scope_note() -> str:
-    """M4 (mech_proposals 23.11): children inherit the parent's REMOTE-WRITE scope, never a fresh one.
-    The list is read live from the guardrails host-allowlist (owner-maintained); enforcement is the
-    fork-guardrails gate, this block only makes the child stop planning around a wall that exists."""
-    try:
-        import os
-        root = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
-        path = os.path.join(root, "fork-guardrails", "host-allowlist")
-        hosts = sorted({
-            line.split("#", 1)[0].strip().lower()
-            for line in open(path, encoding="utf-8")
-            if line.split("#", 1)[0].strip()
-        }) if os.path.exists(path) else []
-    except Exception:
-        return ""
-    return ("\n<delegation-scope>\nRemote-write gate (fork-guardrails) is active for this child.\n"
-            f"Write-allowed hosts: {', '.join(hosts) if hosts else 'NONE (allowlist empty)'}.\n"
-            "A child cannot extend the allowlist: writes to any other host are blocked by the gate (M2/M4). "
-            "A legit remote write needs the owner's authorizing message naming that host, present in the "
-            "parent conversation and passed to you in CONTEXT.\n</delegation-scope>")
-
-
 def _build_child_system_prompt(
     goal: str, context: Optional[str] = None, *, workspace_path: Optional[str] = None, role: str = "leaf",
     max_spawn_depth: int = 2, child_depth: int = 1,
@@ -231,9 +209,6 @@ def _build_child_system_prompt(
         if _ctx_files.strip():
             parts.append(_CONTEXT_FILES_INTRO + _ctx_files.strip())
     parts.append(_COMPLETION_INSTRUCTIONS)
-    _scope = _delegation_scope_note()
-    if _scope:
-        parts.append(_scope)
     if role == "orchestrator":
         child_note = _LEAF_CHILDREN_NOTE if child_depth + 1 >= max_spawn_depth else _NESTED_CHILDREN_NOTE
         parts.append(
