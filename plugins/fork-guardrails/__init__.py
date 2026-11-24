@@ -64,6 +64,7 @@ import re
 import shlex
 import subprocess
 import threading
+import time
 import uuid
 from collections import defaultdict
 
@@ -97,7 +98,7 @@ _delegation_ok: set[str] = set()
 _ctx = None
 _FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
              "outbound_approve", "date_context",
-             "write_ledger", "auth_epoch", "mandate_gate")
+             "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease")
 DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
 _TURN_STATE_FILE = "auth_state.json"
 
@@ -509,6 +510,10 @@ def _decide(tool_name: str, args: dict, kw: dict):
             return _verdict({"action": "block",
                             "message": "Delegation is only allowed when the user asks for subagents."})
     text = _shell_text(tool_name, args)
+    if s["features"].get("checkout_lease", True):
+        _lv = _checkout_gate(tool_name, args, text, kw, s, _verdict)
+        if _lv is not None:
+            return _lv
     if text:
         if s["features"]["force_push_block"] and FORCE_PUSH_PROTECTED.search(text):
             return _verdict({"action": "block",
@@ -601,6 +606,148 @@ def post_tool_call(tool_name: str = "", args: dict | None = None, **kw):
                    tool_name, args if isinstance(args, dict) else {}, kw, s)
 
 
+# ── v0.5.2 checkout lease: one checkout, one session (ToDo §4, Вл 21.11) ───
+CHECKOUT_TTL_S = 1800.0
+_GIT_MUTATING_RE = re.compile(
+    r"\bgit\b[^\n;|&]*?\b(checkout|switch|commit|add|merge|rebase|reset|stash|clean|apply|cherry-pick|restore)\b")
+_FILE_WRITE_TOOLS = {"write_file", "patch"}
+_REPO_CACHE: dict[str, str] = {}
+
+
+def _git_target_dir(text: str) -> str:
+    """Best-effort target dir of a git mutation: `-C <path>` wins, else the
+    last `cd <path>` before the verb. Constructed-command bypasses remain
+    possible (cooperative wall, visible in audit)."""
+    m = re.search(r"git\b[^\n;|&]*?\s-C\s+([^\s;|&]+)", text)
+    if m:
+        return os.path.expanduser(m.group(1))
+    cd = [x for x in re.findall(r"(?:^|[;&|]|&&)\s*cd\s+([^\s;&|]+)", text)]
+    return os.path.expanduser(cd[-1]) if cd else ""
+
+
+def _repo_root_for(path: str) -> str:
+    """realpath of the git toplevel containing ``path``; "" when not in a repo."""
+    path = os.path.expanduser(str(path or ""))
+    probe = path if os.path.isdir(path) else (os.path.dirname(path) or ".")
+    key = os.path.abspath(probe)
+    hit = _REPO_CACHE.get(key)
+    if hit is not None:
+        return hit
+    root = ""
+    try:
+        r = subprocess.run(["git", "-C", key, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=5, check=False)
+        root = os.path.realpath(r.stdout.strip()) if r.returncode == 0 else ""
+    except Exception:
+        root = ""
+    _REPO_CACHE[key] = root
+    return root
+
+
+def _lease_file(s: dict, repo: str) -> str:
+    import hashlib
+    digest = hashlib.sha1(os.path.realpath(repo).encode()).hexdigest()[:16]
+    return os.path.join(_plugin_dir(s), "leases", digest + ".json")
+
+
+def _read_lease(path: str) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.loads(fh.read())
+        return data if isinstance(data, dict) and data.get("session_id") else None
+    except Exception:
+        return None
+
+
+def _git_out(repo: str, *argv: str) -> str:
+    try:
+        r = subprocess.run(["git", "-C", repo, *argv], capture_output=True, text=True,
+                           timeout=10, check=False)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _checkout_gate(tool_name: str, args: dict, text: str, kw: dict, s: dict, _verdict):
+    """Lease enforcement at the executor (prompt rules were already proven
+    insufficient — this is the layer where the mixing actually happened).
+
+    log-only mode computes the verdict but writes NO lease state (shadow period
+    must not mint fake owners). Delegated children with their own session ids
+    will hit the parent's lease — during shadow that is visible, then either a
+    family-key or worktrees-by-default settles it."""
+    sid = _sid(kw)
+    if not sid or sid == "unknown":
+        return None
+    repo = ""
+    if tool_name in _FILE_WRITE_TOOLS:
+        repo = _repo_root_for(str((args or {}).get("path") or ""))
+    elif tool_name in ("terminal", "execute_code", "search_files", "task_queue"):
+        if text and _GIT_MUTATING_RE.search(text):
+            probe = _git_target_dir(text) or str((args or {}).get("cwd") or os.getcwd())
+            repo = _repo_root_for(probe)
+    if not repo:
+        return None
+    lf = _lease_file(s, repo)
+    lease = _read_lease(lf)
+    now = time.time()
+    holder = str((lease or {}).get("session_id") or "")
+    if lease and holder == sid:
+        if not s["log_only"]:
+            lease["ts"] = now
+            try:
+                with open(lf, "w", encoding="utf-8") as fh:
+                    json.dump(lease, fh)
+            except Exception:
+                pass
+        return None
+    if lease and (now - float(lease.get("ts") or 0)) < CHECKOUT_TTL_S:
+        return _verdict({"action": "block", "rule_key": "fork-guardrails:checkout-lease",
+                         "message": f"checkout {repo} is leased to session {holder!r} "
+                                    f"(branch {lease.get('branch')!r}, active "
+                                    f"{int(now - float(lease['ts']))}s ago). Do not write into another "
+                                    "session's checkout: create your own `git worktree add` branch or "
+                                    "return findings; two sessions on one index mix commit histories."})
+    if lease:  # stale lease
+        dirty = [l[3:] for l in _git_out(repo, "status", "--porcelain=v1").splitlines() if l.strip()][:20]
+        if dirty:
+            return _verdict({"action": "block", "rule_key": "fork-guardrails:checkout-dirty",
+                             "message": f"checkout {repo}: stale lease of {holder!r}, but the tree is "
+                                        f"dirty ({len(dirty)} paths, e.g. {', '.join(dirty[:4])}). The old "
+                                        "owner must commit/clean its work first; stealing a dirty tree is "
+                                        "exactly how histories got mixed 23.11/24.11."})
+    if s["log_only"]:
+        return None
+    os.makedirs(os.path.dirname(lf), exist_ok=True)
+    rec = {"session_id": sid, "repo": repo, "branch": _git_out(repo, "rev-parse", "--abbrev-ref", "HEAD").strip() or "?",
+           "ts": now, "took_over_from": holder or None, "tool": tool_name}
+    try:
+        with open(lf, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+    except Exception:
+        return None
+    _audit("lease_acquire", {"action": "allow", "rule_key": "fork-guardrails:checkout-lease",
+                             "message": f"{sid} -> {repo}@{rec['branch']}"}, tool_name, args, kw, s)
+    return None
+
+
+def _release_leases(sid: str, s: dict) -> None:
+    """Real session teardown: drop every lease this session owns."""
+    d = os.path.join(_plugin_dir(s), "leases")
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(d, name)
+        lease = _read_lease(path)
+        if lease and lease.get("session_id") == sid:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
 def on_session_end(**kw):
     """Fires after EVERY turn (despite the name): drop that turn's retry counters
     and its mandate grants (the intervention barrier — the next owner message
@@ -629,6 +776,8 @@ def on_session_finalize(**kw):
             _gated_calls.pop(k, None)
         for k in [k for k in _mandate_events if k[0] == sid]:
             _mandate_events.pop(k, None)
+    if _settings()["features"].get("checkout_lease", True):
+        _release_leases(sid, _settings())
 
 
 def register(ctx):

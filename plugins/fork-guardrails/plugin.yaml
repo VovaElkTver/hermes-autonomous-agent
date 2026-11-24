@@ -1,5 +1,5 @@
 name: fork-guardrails
-version: "0.5.0"
+version: "0.5.2"
 description: Confirmation, retry, and delegation guards for fork work (per-feature toggles + log-only mode; v0.5.0 intervention barrier + remote-write mandate gate)
 manifest_version: 2
 provides_hooks: [pre_llm_call, pre_tool_call, post_tool_call, on_session_end, on_session_finalize]
