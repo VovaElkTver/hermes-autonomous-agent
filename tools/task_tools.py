@@ -29,7 +29,7 @@ QUEUE_SCHEMA = {
         "machine validity command: at every delivery the kernel runs it and "
         "a non-zero exit converts the wake-up into a rework order instead "
         "of a reportable result)."),
-    "input_schema": {
+    "parameters": {
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": [
@@ -81,8 +81,15 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
     chat_id = args.get("chat_id") or ""
     try:
         if action == "create_batch":
+            raw_items = args.get("items") or []
+            if isinstance(raw_items, str):
+                # bridge double-encoding: nested list arrives as a JSON string
+                try:
+                    raw_items = json.loads(raw_items)
+                except ValueError:
+                    raw_items = []
             items = [{"title": it.get("title", ""), "body": it.get("body", "")}
-                     for it in (args.get("items") or []) if isinstance(it, dict)]
+                     for it in raw_items if isinstance(it, dict)]
             if not chat_id or not items:
                 return {"ok": False, "error": "create_batch needs chat_id and items"}
             # Deferred prompts run unattended later — the donor's cron runtime

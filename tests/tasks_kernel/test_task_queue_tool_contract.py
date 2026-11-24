@@ -17,6 +17,16 @@ def _handler():
     return entry["handler"] if isinstance(entry, dict) else entry.handler
 
 
+def test_schema_reaches_registry_as_parameters():
+    # registry.py converts schema["parameters"]; a foreign key ("input_schema")
+    # yields empty properties and the runtime strips even 'action' from calls.
+    entry = registry.get_entry("task_queue")
+    schema = getattr(entry, "schema", None) or {}
+    params = schema.get("parameters") or {}
+    assert "action" in (params.get("properties") or {}), "properties must survive registration"
+    assert params.get("required") == ["action"]
+
+
 def test_dispatch_shape_is_json_string():
     h = _handler()
     out = h({"action": "no-such-action"}, session_id="s")
