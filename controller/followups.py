@@ -218,9 +218,43 @@ def _dispatch_task(conn: sqlite3.Connection, row: dict) -> str:
     return tid
 
 
+def _fire_session_row(conn: sqlite3.Connection, row: dict, deliver, now: float) -> str | None:
+    """Session-scope agent follow-up (wake-note class): the consequence is a
+    wake INTO the live agent's chat — a headless ctl_task has no owner lane to
+    inherit from a session id. Defect class closed 24.11: before this branch
+    every auto-scoped ('session:<id>') row died in the LookupError->done
+    closure having never fired (since 21.11 all tool-registered wakes silently
+    died exactly this way).
+
+    Reminder: fires once, closes on an accepted send (the wake text is
+    self-contained; there is no dispatched task to await an ack from).
+    Review: each accepted send advances the period window; the row closes at
+    ``max_repeats`` cycles. A refused send still restarts the window (a broken
+    transport must not be hammered every scan) but keeps the row pending.
+    """
+    rid = row["followup_id"]
+    text = f"[controller] {row['kind']} {rid}: {row['text']}"
+    ok = _deliver_one({"text": text}, deliver)
+    cycles = row["retries"] + (1 if ok and row["kind"] == "review" else 0)
+    exhausted = (row["kind"] == "review"
+                 and cycles >= (row["max_repeats"] or DEFAULT_MAX_REPEATS))
+    with conn:
+        if ok and (row["kind"] == "reminder" or exhausted):
+            conn.execute(
+                "UPDATE ctl_followup SET state='done', last_fired_at=?, retries=?,"
+                " dispatch_ref='chat' WHERE followup_id=?", (now, cycles, rid))
+        else:
+            conn.execute(
+                "UPDATE ctl_followup SET last_fired_at=?, retries=?"
+                " WHERE followup_id=?", (now, cycles, rid))
+    return rid if ok else None
+
+
 def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) -> str | None:
     """Agent-recipient fire: dispatch a task, mind the previous one. Returns rid if fired."""
     rid = row["followup_id"]
+    if str(row["scope_task"] or "").startswith("session:"):
+        return _fire_session_row(conn, row, deliver, now)
     prev = row["dispatch_ref"]
     status = _task_status(conn, prev) if prev else "no-dispatch-yet"
     in_flight = status in _OPEN_TASK_STATES

@@ -182,3 +182,48 @@ def test_schema_in_canonical_sql(tmp_path):
     cols = {r[1] for r in c.execute("PRAGMA table_info(ctl_followup)")}
     assert {"recipient", "dispatch_ref"} <= cols
     c.close()
+
+
+# ---- session-scope agent rows: wake-note class (24.11 defect fix) ----
+
+def test_session_review_wakes_chat_and_cycles(conn):
+    """A review auto-scoped to a session must deliver wakes to chat each period
+    (pre-fix: closed silently via LookupError, never fired)."""
+    fid = followups.add(conn, kind="review", scope_task="session:abc",
+                        text="проверить лог", period_s=60, max_repeats=2,
+                        now=1000.0)
+    d = _Deliver()
+    fired = followups.scan(conn, d, now=1059.0)
+    assert fired == [] and d.sent == []          # not due yet
+    fired = followups.scan(conn, d, now=1060.0)
+    assert fired == [fid] and len(d.sent) == 1
+    assert "проверить лог" in d.sent[0]
+    r = _row(conn, fid)
+    assert r["state"] == "pending" and r["last_fired_at"] == 1060.0
+    assert _dispatched_tasks(conn) == []          # no phantom headless task
+    followups.scan(conn, d, now=1120.0)           # second cycle -> exhausted
+    r = _row(conn, fid)
+    assert r["state"] == "done" and r["dispatch_ref"] == "chat"
+
+
+def test_session_reminder_fires_once_and_closes(conn):
+    fid = followups.add(conn, kind="reminder", scope_task="session:abc",
+                        text="одноразовый пуш", due_at=1000.0, now=900.0)
+    d = _Deliver()
+    followups.scan(conn, d, now=1001.0)
+    assert len(d.sent) == 1
+    r = _row(conn, fid)
+    assert r["state"] == "done" and r["dispatch_ref"] == "chat"
+
+
+def test_session_row_survives_transport_refusal(conn):
+    fid = followups.add(conn, kind="review", scope_task="session:abc",
+                        text="пережить сбой", period_s=60, max_repeats=5,
+                        now=1000.0)
+    d = _Deliver(fail_first=1)
+    fired = followups.scan(conn, d, now=1060.0)
+    assert fired == []
+    r = _row(conn, fid)
+    assert r["state"] == "pending" and r["last_fired_at"] == 1060.0  # window restarts
+    fired = followups.scan(conn, d, now=1120.0)
+    assert fired == [fid]
