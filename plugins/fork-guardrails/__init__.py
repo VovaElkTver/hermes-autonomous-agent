@@ -672,6 +672,16 @@ def _git_target_dir(text: str) -> str:
     return os.path.expanduser(cd[-1]) if cd else ""
 
 
+_SYSTEM_ROOTS = ("/dev", "/proc", "/sys", "/etc", "/usr", "/bin", "/sbin",
+                 "/lib", "/lib64", "/run", "/boot")
+
+
+def _is_system_path(resource: str) -> bool:
+    """System drawers are nobody's project — `2>/dev/null` must not lease /dev
+    to a session (24.11 probe leak: /etc and /dev got exactly that)."""
+    return any(resource == r or resource.startswith(r + "/") for r in _SYSTEM_ROOTS)
+
+
 def _excluded_dirs(s: dict) -> set[str]:
     import tempfile
     out = {os.path.realpath(tempfile.gettempdir()), _plugin_dir(s)}
@@ -693,7 +703,7 @@ def _resource_for(path: str, s: dict) -> str:
         full = os.path.realpath(path)
         resource = full if os.path.isdir(full) else os.path.dirname(full)
     excl = _excluded_dirs(s)
-    if not resource or resource in excl:
+    if not resource or resource in excl or _is_system_path(resource):
         return ""
     td = os.environ.get("TMPDIR")
     if td and resource.startswith(os.path.realpath(td) + os.sep):

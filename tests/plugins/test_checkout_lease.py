@@ -167,6 +167,17 @@ def test_log_only_inert(plugin_logonly, repo, home):
     assert not any("checkout" in l or "lease" in l for l in lines)  # shadow mode minted nothing
 
 
+def test_system_roots_never_lease(plugin):
+    # `2>/dev/null` must not mint a /dev lease (24.11 probe leak)
+    s = plugin._settings()
+    assert plugin._resource_for("/dev/null", s) == ""
+    assert plugin._resource_for("/etc/y", s) == ""
+    assert _decide(plugin, "terminal", {"command": "ssh h grep x /etc/y 2>/dev/null"},
+                   "sess-A") is None
+    import glob, os
+    assert glob.glob(os.path.join(plugin._plugin_dir(s), "leases", "*.json")) == []
+
+
 def test_scratch_tree_excluded(plugin, repo, tmp_path):
     scratch = Path(__import__("os").environ["TMPDIR"]) / "kernel"
     scratch.mkdir(parents=True)
