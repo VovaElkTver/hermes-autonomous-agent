@@ -570,7 +570,17 @@ class Ticker:
         from . import live_ports
         deliver = live_ports.default_deliver(self.alert_target,
                                              deliver_fn=self.deliver_fn)
-        decide.decide_tick(conn, deliver_fn=deliver, now=self._now())
+        def _wake(msg: str) -> bool:
+            # decide_tick's deliver_fn contract is message(str)->truthy (tests
+            # test_s26_decide); default_deliver takes receipt dicts. Wiring the
+            # bare adapter made every non-dry decide tick die with
+            # "string indices must be integers" (24.11 incident: the wake loop
+            # was silently broken while follow-ups piled up unnoticed).
+            try:
+                return deliver({"text": msg}) == "sent"
+            except Exception:
+                return False
+        decide.decide_tick(conn, deliver_fn=_wake, now=self._now())
 
     def _worker_cfg(self) -> tuple:
         """Fresh config read per drain (the periodic tick did the same); a failed
