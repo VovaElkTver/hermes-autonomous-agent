@@ -167,6 +167,8 @@ registry.register(
     toolset="tasks",
     schema=QUEUE_SCHEMA,
     check_fn=lambda *_a, **_kw: True,  # tasks toolset: static availability (queue builtins always resolvable)
-    handler=lambda args, **kw: task_queue(args or {}, **kw),
+    # registry contract (tool_result_contract v2): handlers hand the dispatcher a
+    # JSON string; the dict-returning kernel keeps its shape for direct callers.
+    handler=lambda args, **kw: json.dumps(task_queue(args or {}, **kw), ensure_ascii=False, default=str),
     emoji="🧾")
 
