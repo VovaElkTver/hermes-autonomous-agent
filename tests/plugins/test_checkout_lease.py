@@ -40,6 +40,8 @@ def home(tmp_path, monkeypatch) -> Path:
     h = tmp_path / "hermes"
     h.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(h))
+    # scratch tree exclusion must not swallow pytest basetemp (/tmp/...):
+    monkeypatch.setenv("TMPDIR", str(h / "scratch"))
     return h
 
 
@@ -163,6 +165,35 @@ def test_log_only_inert(plugin_logonly, repo, home):
     audit = Path(home / "fork-guardrails/audit.jsonl")
     lines = audit.read_text().splitlines() if audit.exists() else []
     assert not any("checkout" in l or "lease" in l for l in lines)  # shadow mode minted nothing
+
+
+def test_scratch_tree_excluded(plugin, repo, tmp_path):
+    scratch = Path(__import__("os").environ["TMPDIR"]) / "kernel"
+    scratch.mkdir(parents=True)
+    _touch_clean(plugin, repo, "sess-A")
+    f = scratch / "job.py"
+    f.write_text("")
+    assert _decide(plugin, "write_file", {"path": str(f), "content": "x"}, "sess-B") is None
+    assert _decide(plugin, "terminal", {"command": f"mkdir -p {tmp_path}/plain && touch {tmp_path}/plain/x"},
+                   "sess-B") is None  # non-git dir outside scratch: B leases it, A unaffected
+
+
+def test_non_git_directory_contended(plugin, tmp_path):
+    data = tmp_path / "dataset"
+    data.mkdir()
+    victim = str(data / "rows.jsonl")
+    assert _decide(plugin, "write_file", {"path": victim, "content": "a\n"}, "sess-A") is None
+    out = _decide(plugin, "write_file", {"path": victim, "content": "b\n"}, "sess-B")
+    assert out["action"] == "block" and "sess-A" in out["message"]
+    assert _decide(plugin, "write_file", {"path": victim, "content": "a2\n"}, "sess-A") is None
+
+
+def test_shell_verb_leases_plain_dir(plugin, tmp_path):
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    assert _decide(plugin, "terminal", {"command": f"touch {out_dir}/x.csv"}, "sess-A") is None
+    out = _decide(plugin, "terminal", {"command": f"rm {out_dir}/x.csv"}, "sess-B")
+    assert out["action"] == "block"
 
 
 def test_finalize_releases(plugin, repo):
