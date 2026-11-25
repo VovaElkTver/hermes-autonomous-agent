@@ -800,6 +800,14 @@ class GatewayTurnPrepareMixin:
 
         await self._hmwa_first_contact_notes(source, history, turn_sidecar_notes, internal=event.internal)
 
+        # dialogue-watcher: cross-session intersection observations staged by the background
+        # contour (data-shaped provenance note; consumed once — this turn).
+        try:
+            from gateway.dialogue_watcher import pop_pending_notes
+            turn_sidecar_notes.extend(pop_pending_notes(session_entry.session_id))
+        except Exception:
+            pass
+
         # Voice channel state rides the user message ONLY when changed (in the system prompt it
         # forced a rebuild + prompt-cache re-key per message).
         _vc_note = self._voice_channel_sidecar_note(event, source, session_key)
@@ -817,6 +825,30 @@ class GatewayTurnPrepareMixin:
         message_text, persist_user_message, persist_user_timestamp = (
             self._hmwa_apply_message_timestamp(event, message_text)
         )
+
+        # user-stop recovery: pop the one-shot note staged by the previous user /stop, so the model
+        # is told the interrupted plan is no longer active. Consumed once; placed after the early-
+        # outs (above) so a refused/aborted turn cannot lose the note by popping-and-discarding it.
+        try:
+            from gateway.stop_notice import pop_stop_note
+            _stop_store = getattr(self._session_db, '_db', None) or self._session_db
+            if _stop_store is not None:
+                turn_sidecar_notes.extend(pop_stop_note(_stop_store, session_entry.session_id))
+        except Exception:
+            pass
+
+        # verdict register (gateway/verdict_ledger): the model narrates success against
+        # the ROWS, not its own memory — live proposed/confirmed grades and recently
+        # overturned ones ride every turn; an empty register costs nothing.
+        try:
+            from gateway.verdict_ledger import render_note
+            _vstore = getattr(self._session_db, '_db', None) or self._session_db
+            if _vstore is not None:
+                _vnote = render_note(_vstore, session_entry.session_id)
+                if _vnote:
+                    turn_sidecar_notes.append(_vnote)
+        except Exception:
+            pass
 
         # Stage the notes (one-shot; consumed in run_sync) AFTER the early-out so an aborted turn
         # cannot leak them into the next turn.

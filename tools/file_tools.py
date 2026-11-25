@@ -34,7 +34,8 @@ from tools.file_tools_paths import (
 from tools.file_tools_write_guards import (
     _READ_DEDUP_STATUS_MESSAGE, _check_approval_required_write, _check_binary_document_write,
     _check_cross_profile_path, _check_protected_instruction_write, _check_sensitive_path,
-    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal)
+    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal,
+    build_change_preview)
 from tools.file_tools_read_tracking import (
     _bump_consecutive, _cap_read_tracker_data, _carry_full_write_baselines, _check_file_staleness,
     _check_not_found_cache, _known_full_content_sha256,
@@ -769,7 +770,7 @@ def _resolve_or_none(filepath: str, task_id: str, *, entry: bool = False) -> str
 
 
 def _write_precheck_error(paths: list[str], content_paths: list[str], task_id: str,
-                          cross_profile: bool) -> str | None:
+                          cross_profile: bool, preview: str = "") -> str | None:
     """Run the shared write/patch guards in order; return the first error string.
 
     Order matters: hard denies (sensitive path, mirror) and the corruption
@@ -785,7 +786,7 @@ def _write_precheck_error(paths: list[str], content_paths: list[str], task_id: s
         err = _check_binary_document_write(p, task_id)
         if err:
             return err
-    return (_check_protected_instruction_write(paths, task_id)
+    return (_check_protected_instruction_write(paths, task_id, preview=preview)
             or _check_approval_required_write(paths, task_id))
 
 
@@ -872,7 +873,9 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
     # write_file checks the binary-document guard before the mirror guard.
     err = (_check_sensitive_path(path, task_id)
            or _check_binary_document_write(path, task_id)
-           or _check_protected_instruction_write([path], task_id)
+           or _check_protected_instruction_write(
+               [path], task_id,
+               preview=build_change_preview("write", path=path, content=content, task_id=task_id))
            or _check_approval_required_write([path], task_id)
            or (None if cross_profile else _check_cross_profile_path(path, task_id)))
     if not err and _is_internal_file_tool_content(content):
@@ -975,7 +978,13 @@ def patch_tool(mode: str = "replace", path: str | None = None, old_string: str |
         _paths_to_check += collected[0]
         _content_write_paths += collected[1]
         _entry_paths = collected[2]
-    precheck_err = _write_precheck_error(_paths_to_check, _content_write_paths, task_id, cross_profile)
+    _preview = ""
+    if mode == "patch" and patch:
+        _preview = build_change_preview("patch-v4a", patch_text=patch)
+    elif mode == "replace" and old_string is not None and new_string is not None:
+        _preview = build_change_preview("patch-replace", old_string=old_string, new_string=new_string)
+    precheck_err = _write_precheck_error(_paths_to_check, _content_write_paths, task_id, cross_profile,
+                                         preview=_preview)
     if precheck_err:
         return tool_error(precheck_err)
     try:

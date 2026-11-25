@@ -234,7 +234,10 @@ class TestNextDue:
                                    period_s=60, now=0.0)
         fid_rem = followups.add(conn, kind="reminder", scope_task=scope_task, text="rem",
                                 due_at=FRI, now=0.0)
-        listing = {r["followup_id"]: r for r in followups.list_open(conn, scope_task)}
+        # now=0.0: the row was created at now=0.0 — next_due must be the first
+        # series occurrence after the INJECTION point. The old real-time read
+        # made this green only while the wall clock was before Nov 23.
+        listing = {r["followup_id"]: r for r in followups.list_open(conn, scope_task, now=0.0)}
         assert listing[fid_rrule]["next_due"] == MON_1
         assert listing[fid_period]["next_due"] == 60.0
         assert listing[fid_rem]["next_due"] == FRI
@@ -306,3 +309,26 @@ def _row_ids(conn, fid):
 def _dispatched(conn):
     return conn.execute(
         "SELECT * FROM ctl_task WHERE goal LIKE '[followup %' ORDER BY created_at").fetchall()
+
+
+class TestAnchorClamp:
+    """The series never offers an occurrence before its anchor (24.11)."""
+
+    def test_weekly_byday_before_anchor_not_returned(self):
+        # anchor = Fri 2026-11-20; from_ts = epoch 0. The previous Monday
+        # (Nov 16) is NOT an occurrence of this series; the first is Nov 23.
+        assert next_due_at("FREQ=WEEKLY;BYDAY=MO", 0.0, anchor_ts=FRI) == MON_1
+
+    def test_daily_before_anchor_clamped(self):
+        assert next_due_at("FREQ=DAILY", 0.0, anchor_ts=FRI) == FRI
+
+    def test_monthly_before_anchor_clamped(self):
+        assert next_due_at("FREQ=MONTHLY", 0.0, anchor_ts=FRI) == FRI
+
+    def test_anchor_itself_counts_as_first_occurrence(self):
+        # weekly Friday row: the anchor (a Friday) is the first fire,
+        # not the next one
+        assert next_due_at("FREQ=WEEKLY;BYDAY=FR", 0.0, anchor_ts=FRI) == FRI
+
+    def test_after_anchor_strictly_next(self):
+        assert next_due_at("FREQ=WEEKLY;BYDAY=MO", MON_1, anchor_ts=FRI) == MON_2

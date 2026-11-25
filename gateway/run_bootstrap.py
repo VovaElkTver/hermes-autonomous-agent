@@ -902,6 +902,12 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             publish_gateway_runtime_ready(runner)
             runner._start_systemd_watchdog()
 
+            # dialogue-watcher: one daemon thread per gateway process; reads this home's
+            # state.db only. HERMES_DW_DISABLE=1 turns the contour off.
+            with contextlib.suppress(Exception):
+                from gateway.dialogue_watcher import ensure_started as _dw_ensure_started
+                _dw_ensure_started()
+
             async def _sweep_planning_forks() -> None:
                 with contextlib.suppress(Exception):
                     await runner.sweep_orphaned_planning_forks()

@@ -260,18 +260,63 @@ _APPROVAL_UNAVAILABLE = "requires approval but the approval subsystem is unavail
 _NO_HUMAN = "requires approval but no interactive user or gateway is present to approve it."
 
 
-def _request_protected_instruction_approval(reasons: list[str], task_id: str = "default") -> str | None:
+def build_change_preview(kind: str, *, path: str = "", content: str = "",
+                         old_string: str = "", new_string: str = "",
+                         patch_text: str = "", task_id: str = "default") -> str:
+    """Bounded human-readable preview of what a write/patch would change (lesson 21.11:
+    an owner cannot approve what they have not seen). Best-effort: any read failure
+    yields '' and the approval flow proceeds exactly as before."""
+    cap = 1200
+    try:
+        if kind == "patch-replace":
+            body = (f"- {old_string[:cap]}\n+ {new_string[:cap]}")
+            return body + (" …" if len(old_string) + len(new_string) > 2 * cap else "")
+        if kind == "patch-v4a":
+            return patch_text[:cap] + (" …" if len(patch_text) > cap else "")
+        if kind == "write":
+            old = None
+            resolved = _resolved_or_raw(path, task_id)
+            try:
+                with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
+                    old = fh.read(400_001)
+            except OSError:
+                old = None
+            if old is None:
+                return "[new file]\n" + content[:cap] + (" …" if len(content) > cap else "")
+            if len(old) > 400_000:
+                old = old[:400_000]
+            import difflib
+            ol, nl = old.splitlines(), content.splitlines()
+            changed = [d for d in difflib.unified_diff(ol, nl, n=0, lineterm="")
+                       if d[:1] in "+-" and d[:3] not in ("---", "+++")]
+            if not changed:
+                return "[no textual change]"
+            return (f"[{len(changed)} line(s) changed]\n"
+                    + "\n".join(changed[:40])[:cap] + (" …" if len(changed) > 40 else ""))
+    except Exception:
+        return ""
+    return ""
+
+
+def _request_protected_instruction_approval(reasons: list[str], task_id: str = "default",
+                                            preview: str = "") -> str | None:
     """Ask the human to approve a write to protected instruction file(s); ``None`` when approved.
 
     Deliberately NOT routed through ``_run_approval_gate`` (honors --yolo and
     allowlists): this gate is one-operation approval EVERY time, no persisted
     scope, fail-closed without a human channel.
+
+    ``preview`` carries the ACTUAL change text (removed/inserted lines) — lesson
+    21.11: agents asked to approve protected files repeatedly showing only the
+    target name; an owner cannot approve what they have not seen.
     """
     targets = ", ".join(dict.fromkeys(reasons))
     description = (
         f"Write to protected agent-instruction file(s): {targets}. "
         "These files steer future agent behavior; approval is always "
         "required (not bypassed by auto-approve).")
+    if preview:
+        description += f"\n\nProposed change:\n{preview}"
     display = f"<write to {targets}>"
     blocked = (
         f"BLOCKED: write to protected agent-instruction file(s) ({targets}) "
@@ -346,7 +391,8 @@ def _request_protected_instruction_approval(reasons: list[str], task_id: str = "
     return timed_out if timed else denied
 
 
-def _check_protected_instruction_write(paths: list[str], task_id: str = "default") -> str | None:
+def _check_protected_instruction_write(paths: list[str], task_id: str = "default",
+                                       preview: str = "") -> str | None:
     """Gate a write/patch touching protected instruction files. ONE protected file gates
     the ENTIRE multi-file patch (one prompt, all-or-nothing)."""
     enabled, extra = _protected_instruction_config()
@@ -356,7 +402,7 @@ def _check_protected_instruction_write(paths: list[str], task_id: str = "default
                            for p in paths) if r]
     if not reasons:
         return None
-    return _request_protected_instruction_approval(reasons, task_id)
+    return _request_protected_instruction_approval(reasons, task_id, preview=preview)
 
 
 def _check_approval_required_write(paths: list[str], task_id: str = "default") -> str | None:
