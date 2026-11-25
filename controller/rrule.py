@@ -96,7 +96,8 @@ def _anchor_day_and_tod(anchor: float) -> tuple[float, float]:
 
 
 def next_due_at(rrule: str, from_ts: float, anchor_ts: float | None = None) -> float:
-    """The first occurrence strictly after *from_ts* (epoch seconds).
+    """The first occurrence strictly after *from_ts* (epoch seconds), never
+    before the series anchor.
 
     The occurrences keep the anchor's UTC time-of-day; *anchor_ts* is the
     reference the series counts from (the row's first ``due_at`` at
@@ -106,15 +107,19 @@ def next_due_at(rrule: str, from_ts: float, anchor_ts: float | None = None) -> f
     """
     spec = parse_rrule(rrule)
     anchor = anchor_ts if anchor_ts is not None else from_ts
+    # The series starts at its anchor: an occurrence before anchor_ts does not
+    # exist yet (24.11: a future-due row listed with now < anchor printed the
+    # PREVIOUS week's BYDAY). The anchor itself is the first valid occurrence.
+    from_eff = max(from_ts, anchor - 0.001)
     freq, interval, byday = spec["freq"], spec["interval"], spec["byday"]
     day, tod = _anchor_day_and_tod(anchor)
 
     if freq == "DAILY":
         step = _DAY_SECONDS * interval
         base = day * _DAY_SECONDS + tod
-        k = math.ceil((from_ts - base) / step)
+        k = math.ceil((from_eff - base) / step)
         cand = base + k * step
-        if cand <= from_ts:
+        if cand <= from_eff:
             cand += step
         return cand
 
@@ -126,7 +131,7 @@ def next_due_at(rrule: str, from_ts: float, anchor_ts: float | None = None) -> f
         for k in range(_MAX_CYCLES):
             for off in offsets:
                 cand = (monday + off + 7 * interval * k) * _DAY_SECONDS + tod
-                if cand > from_ts and (best is None or cand < best):
+                if cand > from_eff and (best is None or cand < best):
                     best = cand
         if best is None:
             raise RRuleError("no occurrence within the search window; the series is stale")
@@ -143,6 +148,6 @@ def next_due_at(rrule: str, from_ts: float, anchor_ts: float | None = None) -> f
             yy += 1
         if dom <= calendar.monthrange(yy, mm)[1]:
             cand = calendar.timegm((yy, mm, dom, 0, 0, 0, 0, 0)) + tod
-            if cand > from_ts:
+            if cand > from_eff:
                 return cand
     raise RRuleError("no occurrence within the search window; the series is stale")

@@ -159,13 +159,14 @@ def _row_next_due(row: dict, now: float) -> float | None:
     return row["due_at"]
 
 
-def list_open(conn: sqlite3.Connection, scope_task: str | None = None) -> list[dict]:
+def list_open(conn: sqlite3.Connection, scope_task: str | None = None,
+              now: float | None = None) -> list[dict]:
     sql = "SELECT * FROM ctl_followup WHERE state IN ('pending','awaiting_ack')"
     params: tuple = ()
     if scope_task:
         sql += " AND scope_task=?"
         params = (scope_task,)
-    now = time.time()
+    now = now if now is not None else time.time()
     rows = [dict(r) for r in conn.execute(sql + " ORDER BY due_at", params)]
     for r in rows:
         r["next_due"] = _row_next_due(r, now)

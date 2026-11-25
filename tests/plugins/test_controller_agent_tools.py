@@ -110,7 +110,8 @@ def test_tool_defs_shape():
     import plugins.controller.agent_tools as at
     defs = at.tool_defs()
     assert {name for name, _s, _h in defs} == {
-        "ctl_status", "ctl_enqueue", "ctl_step_done", "ctl_block"}
+        "ctl_status", "ctl_enqueue", "ctl_step_done", "ctl_block",
+        "ctl_followup", "ctl_todo", "ctl_decision"}
     for name, schema, handler in defs:
         assert schema["name"] == name and callable(handler)
         assert schema["parameters"]["type"] == "object"
