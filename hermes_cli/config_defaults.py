@@ -86,6 +86,13 @@ DEFAULT_CONFIG = {
     # (open row with same scope+kind+text); self-remove is already the carrier's
     # max_repeats exhaustion. Env override: HERMES_AGENT_PERIODIC_BOUNDS.
     "agent_periodic_bounds": {"enabled": False},
+    # L3 (TZ-memdoor-5090-v2): expand bare roster aliases (@hermes) to full MXIDs
+    # in outbound Matrix text so the peer bot's m.mentions wake fires — from this
+    # roster, never from display-name guessing. Env override: HERMES_BOT_RELAY_MENTIONS.
+    "bot_relay_mentions": {"enabled": False, "roster": {
+        "rtx5090": "@rtx5090:mx.elk.mobi",
+        "hermes": "@hermes:mx.elk.mobi",
+    }},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the

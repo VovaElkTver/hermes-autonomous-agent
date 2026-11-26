@@ -86,6 +86,7 @@ from gateway.platforms.helpers import ThreadParticipationTracker
 from plugins.platforms.matrix.session_proxy import matrix_redaction_proxy
 from plugins.platforms.matrix.voice_mention import ParkedVoices, VoiceGate, has_voice_marker, is_voice_event
 from plugins.platforms.matrix.message_shadow import note_message, observe_dropped
+from plugins.platforms.matrix import bot_roster
 
 logger = logging.getLogger(__name__)
 
@@ -3133,6 +3134,8 @@ class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatform
 
     def _build_text_message_content(self, text: str, msgtype: str = "m.text") -> dict[str, Any]:
         """Build Matrix text content with HTML and outbound mention metadata."""
+        # L3 (TZ-memdoor-5090-v2): roster aliases -> full MXIDs (flag-off no-op).
+        text = bot_roster.maybe_expand(text)
         msg_content: dict[str, Any] = {"msgtype": msgtype, "body": text}
         mention_user_ids = self._extract_outbound_mentions(text)
         if mention_user_ids:
