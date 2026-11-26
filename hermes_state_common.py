@@ -1025,7 +1025,8 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   dispatch_ref TEXT,
   last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
   repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
-  created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT
+  created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT,
+  dup_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
 CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);

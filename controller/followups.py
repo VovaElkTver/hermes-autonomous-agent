@@ -43,6 +43,28 @@ _OPEN_TASK_STATES = ("draft", "ready", "running", "blocked", "paused",
                      "needs_human", "verifying", "failed")
 _TERMINAL_TASK_STATES = ("completed", "cancelled")
 
+#: A4 semantics (openhuman memory-v2 §jobs): merge-дедупликация идентичных pending-эвентов и «отказ аккаунта — не попытка» (ресурс недоступен не сжигает retry-бюджет). ВЫКЛЮЧЕНО по умолчанию: при OFF поведение побайтово как до A4.
+_a4_enabled = False
+
+
+def set_a4_enabled(flag: bool) -> None:
+    """Enable A4 semantics (merge-dedup + resource-unavailable no-consume)."""
+    global _a4_enabled
+    _a4_enabled = bool(flag)
+
+
+def a4_enabled() -> bool:
+    """Whether A4 semantics are active (OFF = byte-for-byte pre-A4 behavior)."""
+    return _a4_enabled
+
+
+class ResourceUnavailable(Exception):
+    """Account-wide / resource refusal: endpoint down (503), credential rejected
+    (401/403), no credits (402), engine unreachable. A failure class that does NOT
+    count as a retry attempt — the job waits for the resource, it is not dropped
+    (donor: openhuman memory-v2 §Background jobs, «account-wide refusal does not
+    count as an attempt»)."""
+
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create ctl_followup when absent (additive, canonical SCHEMA_SQL keeps the
@@ -68,7 +90,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           max_repeats INTEGER NOT NULL DEFAULT 3,
           created_by TEXT NOT NULL,
           created_at REAL NOT NULL,
-          provenance_json TEXT
+          provenance_json TEXT,
+          dup_count INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
         CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);
@@ -105,6 +128,22 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         raise ValueError(f"invalid recipient {recipient!r}")
     now = now if now is not None else time.time()
     ensure_schema(conn)
+    if a4_enabled():
+        # A4 merge-дедупликация: identical open event (same kind+scope_task+text)
+        # collapses into one row with a counter — no duplicate jobs in the queue.
+        dup_row = conn.execute(
+            "SELECT followup_id FROM ctl_followup "
+            "WHERE kind=? AND scope_task=? AND text=? "
+            "AND state IN ('pending','awaiting_ack')",
+            (kind, scope_task, text)).fetchone()
+        if dup_row is not None:
+            with conn:
+                conn.execute(
+                    "UPDATE ctl_followup SET dup_count=dup_count+1 WHERE followup_id=?",
+                    (dup_row["followup_id"],))
+            from . import wake
+            wake.notify()
+            return dup_row["followup_id"]
     fid = _new_id(conn, "fup")
     with conn:
         conn.execute(
@@ -139,15 +178,27 @@ def list_open(conn: sqlite3.Connection, scope_task: str | None = None) -> list[d
     return [dict(r) for r in conn.execute(sql + " ORDER BY due_at", params)]
 
 
-def _deliver_one(receipt: dict, deliver) -> bool:
+def _deliver_one(receipt: dict, deliver) -> str:
     """One send attempt with a ``{"text": ...}`` receipt (live_ports contract:
     default_deliver unwraps the receipt itself; gateway deliver_fn gets text).
-    True = transport accepted; False/exception = retryable."""
+
+    Returns a classification, not a bool:
+    - ``"ok"``      transport accepted (fired).
+    - ``"wait"``    resource-unavailable refusal (endpoint down, credential
+                    rejected, no credits, engine unreachable): the account is
+                    down, not our bug — A4 treats it as *not an attempt*.
+    - ``"refused"`` any other failure (transient or real): counts as an attempt.
+    """
     try:
-        return bool(deliver(receipt))
+        if deliver(receipt):
+            return "ok"
+        return "refused"
+    except ResourceUnavailable as exc:
+        logger.debug("followup delivery wait (resource unavailable): %s", exc)
+        return "wait"
     except Exception as exc:
         logger.debug("followup delivery refused: %s", exc)
-        return False
+        return "refused"
 
 
 def _task_status(conn: sqlite3.Connection, task_id: str) -> str | None:
@@ -203,6 +254,19 @@ def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) ->
         _deliver_one({"text": note}, deliver)
         with conn:
             conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
+        return None
+    except ResourceUnavailable as exc:
+        # A4: resource unavailable — the account/endpoint is down, not our bug.
+        if a4_enabled():
+            logger.debug("followup %s dispatch wait (resource unavailable): %s", rid, exc)
+            with conn:
+                conn.execute("UPDATE ctl_followup SET last_fired_at=? WHERE followup_id=?",
+                             (now, rid))
+        else:                                   # pre-A4: any failure consumed the budget
+            logger.debug("followup %s dispatch deferred: %s", rid, exc)
+            with conn:
+                conn.execute("UPDATE ctl_followup SET last_fired_at=?, retries=retries+1 WHERE followup_id=?",
+                             (now, rid))
         return None
     except Exception as exc:                  # transient queue trouble → retry window
         logger.debug("followup %s dispatch deferred: %s", rid, exc)
@@ -274,7 +338,15 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
             with conn:
                 conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
             continue
-        ok = _deliver_one({"text": row["text"]}, deliver)
+        res = _deliver_one({"text": row["text"]}, deliver)
+        if res == "wait" and a4_enabled():
+            # A4: resource unavailable — the account/endpoint is down, not our
+            # bug. Wait for the next beat, do not burn the retry budget.
+            with conn:
+                conn.execute("UPDATE ctl_followup SET last_fired_at=? WHERE followup_id=?",
+                             (now, rid))
+            continue
+        ok = (res == "ok")
         # Success: pending→awaiting_ack (reminder) or stays pending (review).
         # Refused send: row keeps its state, but the window restarts — a broken
         # transport must not be hammered every scan, nor lose the row.
