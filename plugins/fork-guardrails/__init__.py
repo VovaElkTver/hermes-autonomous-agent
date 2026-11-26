@@ -74,6 +74,11 @@ v0.6.1 (26.11, ToDo «Про́риоцепция» §1, Вл 21.11): service lea
 (status/show/journalctl) не минтят. Регрессия на 21.11: чужой stop serving
 :8006 без арбитража = 45 минут простоя. Арбитраж в write-пути ядра, не в
 промпте.
+v0.6.2 (26.11, ToDo «Про́риоцепция» §4, Вл 21.11): один проект = один
+семафор: ``_repo_root_for`` резолвит linked worktree к ГЛАВНОМУ checkout
+(git worktree list --porcelain, первый запись) — две сессии в разных checkout
+одного проекта теперь блокируются друг другом, как и в подкаталогах.
+Регрессия 21.11: main+worktree одного репо писали одновременно.
 """
 from __future__ import annotations
 
@@ -713,6 +718,18 @@ def _repo_root_for(path: str) -> str:
         root = os.path.realpath(r.stdout.strip()) if r.returncode == 0 else ""
     except Exception:
         root = ""
+    if root:
+        # One project = one semaphore (proprioception §4, 21.11): a linked
+        # worktree is the SAME project as its main checkout — resolve there.
+        try:
+            w = subprocess.run(["git", "-C", key, "worktree", "list", "--porcelain"],
+                               capture_output=True, text=True, timeout=5, check=False)
+            first = next((l[len("worktree "):] for l in w.stdout.splitlines()
+                          if l.startswith("worktree ")), "")
+            if first and w.returncode == 0:
+                root = os.path.realpath(first)
+        except Exception:
+            pass
     _REPO_CACHE[key] = root
     return root
 
