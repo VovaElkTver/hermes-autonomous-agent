@@ -78,15 +78,27 @@ def _persist(runs_dir: str, session_key: str, st: dict, *, depth: int) -> None:
     save_state(runs_dir, session_key, {**st, "depth": depth})
 
 
-def route_with_state(message: str, runs_dir: str, session_key: str) -> tuple[str, str]:
+def route_with_state(
+    message: str,
+    runs_dir: str,
+    session_key: str,
+    *,
+    triage_classifier=None,
+    on_defer=None,
+) -> tuple[str, str]:
     """Admission entry: combine cached conversation state + this message's text signals.
 
     Returns ``(route, reason)`` where route is ``direct`` | ``plan`` | ``continue``.
     Hysteresis: depth rises only on fresh explicit work signals from THIS message;
     it falls conservatively (one level at a time) when chatter persists.
+
+    A1 (openhuman triage borrow): optional ``triage_classifier`` / ``on_defer``
+    forward to ``classify_route`` for the grey-zone classifier. Both default to
+    ``None`` (flag OFF) which keeps the deterministic router byte-for-byte.
     """
     st = load_state(runs_dir, session_key)
-    route, reason, _confidence = classify_route(message)
+    route, reason, _confidence = classify_route(
+        message, triage_classifier=triage_classifier, on_defer=on_defer)
 
     if reason == "explicit_plan_request":
         return "plan", reason  # owner override: /plan-like wording always plans

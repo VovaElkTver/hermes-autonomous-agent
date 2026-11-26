@@ -345,7 +345,10 @@ def maybe_prepare_plan(agent: Any, ctx: Any) -> None:
                 ctx.message = done_note + "\n\n" + message
             from agent.conversation_state import route_with_state
 
-            route, reason = route_with_state(message, state_runs, session_key)
+            _tri_clf, _on_defer = _triage_args(cfg, state_runs, session_key)
+            route, reason = route_with_state(
+                message, state_runs, session_key,
+                triage_classifier=_tri_clf, on_defer=_on_defer)
             if route == "direct":
                 _journal(journal, {"event": "planning.skipped_router", "reason": reason,
                                    "session_key": session_key})
@@ -429,6 +432,41 @@ def _build_planner_for(agent: Any, cfg: dict):
     return build_planner(agent, cfg)
 
 
+def _triage_args(cfg: dict[str, Any], runs_dir: str, session_key: str):
+    """A1 (openhuman triage borrow): build the grey-zone classifier args.
+
+    ``cfg`` is the planning config section. Returns ``(None, None)`` when the
+    ``planning.triage`` flag is OFF/absent — the deterministic router then runs
+    byte-for-byte unchanged. When ON, returns ``(classifier, on_defer)`` where
+    ``on_defer`` is the reference host policy: when the session has an active
+    task scope, retry the deferred decision later via a ``ctl_followup``
+    review instead of parking it; otherwise the deferral stays observable via
+    the ``triage:deferred`` reason and journal.
+    """
+    from agent.planning_router import (
+        schedule_triage_review,
+        triage_classifier_from_config,
+    )
+
+    classifier = triage_classifier_from_config(cfg)
+    if classifier is None:
+        return None, None
+
+    def on_defer(text: str) -> None:
+        try:
+            from agent.conversation_state import load_state
+
+            st = load_state(runs_dir, session_key)
+            scope = str(st.get("active_plan_ref") or "")
+        except Exception:
+            scope = ""
+        if not scope:
+            return  # no live task scope: observable deferral, no scheduled review
+        schedule_triage_review(text, scope_task=scope)
+
+    return classifier, on_defer
+
+
 def _default_runs_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".hermes", WORK_DIRNAME)
 
@@ -472,7 +510,10 @@ def maybe_prepare_fork(agent: Any, ctx: Any, spawn) -> None:
             message = ctx.message
         from agent.conversation_state import route_with_state
 
-        route, reason = route_with_state(message, state_runs, session_key)
+        _tri_clf, _on_defer = _triage_args(cfg, state_runs, session_key)
+        route, reason = route_with_state(
+            message, state_runs, session_key,
+            triage_classifier=_tri_clf, on_defer=_on_defer)
         if route != "plan":
             _journal(journal, {"event": "planning.skipped_router", "reason": f"{reason}:{route}",
                                "session_key": session_key})
