@@ -67,6 +67,13 @@ carries the session's human-readable name — audit lines, write-ledger records,
 lease mint records and foreign-block messages resolve sid → pinned
 ``sessions.title`` from state.db (read-only, TTL-cached, degrades to the sid).
 «Имя сессии — имя, а не хэш», проверяемо в write-пути, не в промпте.
+v0.6.1 (26.11, ToDo «Про́риоцепция» §1, Вл 21.11): service lease — мутирующие
+операции над systemd-юнитами/docker-контейнерами (start/stop/restart/kill/…)
+минтят lease на ресурс ``unit:<name>``; чужая сессия блокируется с именем
+владельца; stop владельцем освобождает юнит следующему в очереди; read-only
+(status/show/journalctl) не минтят. Регрессия на 21.11: чужой stop serving
+:8006 без арбитража = 45 минут простоя. Арбитраж в write-пути ядра, не в
+промпте.
 """
 from __future__ import annotations
 
@@ -114,7 +121,7 @@ _ctx = None
 _FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
              "outbound_approve", "date_context",
              "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease",
-             "session_names")
+             "session_names", "service_lease")
 DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
 DEFAULT_STATE_DB = "~/.hermes/state.db"
 _TURN_STATE_FILE = "auth_state.json"
@@ -569,6 +576,10 @@ def _decide(tool_name: str, args: dict, kw: dict):
         _lv = _checkout_gate(tool_name, args, text, kw, s, _verdict)
         if _lv is not None:
             return _lv
+    if s["features"].get("service_lease", True):
+        _sv = _service_gate(tool_name, text, kw, s, _verdict)
+        if _sv is not None:
+            return _sv
     if text:
         if s["features"]["force_push_block"] and FORCE_PUSH_PROTECTED.search(text):
             return _verdict({"action": "block",
@@ -860,6 +871,99 @@ def _checkout_gate(tool_name: str, args: dict, text: str, kw: dict, s: dict, _ve
         out = _lease_decide(r, sid, tool_name, args, kw, s, _verdict)
         if out is not None:
             return out
+    return None
+
+
+# ── v0.6.1 service lease (proprioception §1, 21.11 incident: foreign stop of
+#    :8006 serving left it down 45 min). Mutating ops on systemd units / docker
+#    containers mint a lease; a foreign session is blocked with the holder NAME;
+#    owner stop releases the unit for the next arrival in the queue.
+_SERVICE_MUTATIONS = {"start", "stop", "restart", "reload", "try-restart",
+                      "reload-or-restart", "kill", "enable", "disable",
+                      "mask", "unmask"}
+_SERVICE_SEGMENT_SPLIT = re.compile(r"[;&|]{1,2}|\$\(")
+
+
+def _service_ops(text: str):
+    """Yield (resource, verb) for mutating service ops mentioned in a command."""
+    out = []
+    for seg in _SERVICE_SEGMENT_SPLIT.split(text or ""):
+        toks = seg.split()
+        if "systemctl" in toks:
+            i = toks.index("systemctl")
+            rest = [t for t in toks[i + 1:] if not t.startswith("-")]
+            if not rest or rest[0] not in _SERVICE_MUTATIONS:
+                continue  # status/show/is-active/list-* are read-only: no mint
+            verb, units = rest[0], rest[1:]
+            for u in units:
+                if re.fullmatch(r"[A-Za-z0-9@:._-]+(\.service|\.socket|\.timer|\.mount)?", u):
+                    out.append((f"unit:{u}", verb))
+        elif "docker" in toks and len(toks) > 1 and toks[toks.index("docker") + 1] in ("stop", "restart", "kill"):
+            verb = toks[toks.index("docker") + 1]
+            for u in [t for t in toks[toks.index("docker") + 2:] if not t.startswith("-")]:
+                out.append((f"docker:{u}", verb))
+    return out
+
+
+def _service_gate(tool_name: str, text: str, kw: dict, s: dict, _verdict):
+    """Arbitration for services: owner+queue, enforced in the kernel write path."""
+    if tool_name not in ("terminal", "execute_code") or not text:
+        return None
+    ops = _service_ops(text)
+    if not ops:
+        return None
+    sid = _sid(kw)
+    if not sid or sid == "unknown":
+        return None
+    args = {"command": text[:200]}
+    now = time.time()
+    for resource, verb in ops:
+        lf = _lease_file(s, resource)
+        lease = _read_lease(lf)
+        holder = str((lease or {}).get("session_id") or "")
+        if lease and holder == sid:
+            if verb in ("stop", "kill"):
+                try:
+                    os.unlink(lf)
+                except OSError:
+                    pass
+                _audit("service_lease_release", {"action": "allow",
+                        "rule_key": "fork-guardrails:service-lease",
+                        "message": f"{sid} released {resource}"},
+                        tool_name, args, kw, s)
+            else:
+                if not s["log_only"]:
+                    lease["ts"] = now
+                    try:
+                        with open(lf, "w", encoding="utf-8") as fh:
+                            json.dump(lease, fh)
+                    except Exception:
+                        pass
+            continue
+        if lease and (now - float(lease.get("ts") or 0)) < CHECKOUT_TTL_S:
+            if s["log_only"]:
+                continue
+            holder_name = _session_name(s, holder)
+            return _verdict({"action": "block", "rule_key": "fork-guardrails:service-lease",
+                             "message": f"{resource} is leased to {holder_name!r} (service lease, "
+                                        f"active {int(now - float(lease['ts']))}s ago). Stopping another "
+                                        "session's service without arbitration is the 21.11 :8006 outage: "
+                                        "coordinate with the holder or win the queue; the lease goes stale "
+                                        f"after {CHECKOUT_TTL_S}s of holder silence."})
+        if s["log_only"]:
+            continue
+        os.makedirs(os.path.dirname(lf), exist_ok=True)
+        rec = {"session_id": sid, "name": _session_name(s, sid), "resource": resource,
+               "tool": tool_name, "branch": "service", "verb": verb, "ts": now,
+               "took_over_from": holder or None}
+        try:
+            with open(lf, "w", encoding="utf-8") as fh:
+                json.dump(rec, fh)
+        except Exception:
+            return None
+        _audit("service_lease_acquire", {"action": "allow",
+                "rule_key": "fork-guardrails:service-lease",
+                "message": f"{sid} -> {resource} ({verb})"}, tool_name, args, kw, s)
     return None
 
 
