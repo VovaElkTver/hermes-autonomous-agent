@@ -125,7 +125,18 @@ def _truncate_with_footer(content: str, url: str, char_limit: int) -> tuple[str,
         )
     footer_lines.append("─" * 29)
     model_text = head + "\n\n[... middle omitted — see footer ...]\n\n" + tail
-    return model_text + "\n" + "\n".join(footer_lines), True
+    result_text = model_text + "\n" + "\n".join(footer_lines)
+    # S2: the omitted middle never entered context — record it (no-op when the
+    # savings ledger is OFF; a write failure must not break web_extract).
+    try:
+        from tools import savings_ledger
+        savings_ledger.record("web_extract",
+                              raw_b=len(content.encode("utf-8", "replace")),
+                              kept_b=len(result_text.encode("utf-8", "replace")),
+                              event="page")
+    except Exception:
+        pass
+    return result_text, True
 
 
 def _effective_char_limit(char_limit: Optional[int]) -> int:

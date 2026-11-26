@@ -77,6 +77,13 @@ def _truncate_stdout_text(stdout_text: str) -> tuple[str, dict[str, Any]]:
         metadata["warning"] = ("execute_code stdout was truncated (head/tail shown); the "
                                f"script did run. FULL output saved to {spill_path} — page it "
                                f'with read_file(path="{spill_path}", offset=...) instead of re-running.')
+    # S2: the omitted bytes never entered context — record them (no-op when the
+    # savings ledger is OFF; a write failure must not break the tool).
+    try:
+        from tools import savings_ledger
+        savings_ledger.record("execute_code", raw_b=total, kept_b=captured, event="stdout")
+    except Exception:
+        pass
     return text, metadata
 
 

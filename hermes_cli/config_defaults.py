@@ -43,6 +43,11 @@ DEFAULT_CONFIG = {
     # "Recap: unverified: …". OFF by default; when off the turn result is byte-for-byte the
     # pre-S1 one. Env override: HERMES_TURN_RECEIPTS.
     "turn_receipts": {"enabled": False},
+    # S2 (TZ-memdoor-5090): savings ledger. When enabled, the existing truncations
+    # (execute_code stdout, web_extract pages) append one JSONL line each to
+    # ~/.hermes/savings.jsonl recording what did NOT enter context. OFF by default:
+    # record() is a no-op and the file is never created. Env override: HERMES_SAVINGS_LEDGER.
+    "savings_ledger": {"enabled": False},
     # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
     "max_concurrent_sessions": None,
     # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the

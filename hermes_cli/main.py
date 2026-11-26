@@ -3263,6 +3263,12 @@ def _build_cli_parser():
     build_sessions_parser(subparsers, cmd_sessions=cmd_sessions_lazy)
     build_insights_parser(subparsers, cmd_insights=cmd_insights)
     build_usage_parser(subparsers)
+    # S2: savings-ledger summary (registration failure must not break the CLI).
+    try:
+        from hermes_cli.savings_cmd import build_parser as _build_savings_parser
+        _build_savings_parser(subparsers)
+    except Exception as _savings_err:
+        logger.debug("savings CLI registration failed: %s", _savings_err)
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)
     build_vault_parser(subparsers)
     build_update_parser(subparsers, cmd_update=cmd_update)
