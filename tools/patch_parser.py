@@ -7,6 +7,7 @@ import contextlib
 import difflib
 import inspect
 import ntpath
+import os
 import posixpath
 import re
 from dataclasses import dataclass, field
@@ -312,13 +313,72 @@ def _validate_operations(operations: list[PatchOperation], file_ops: Any) -> lis
 class ApplyResult(NamedTuple):
     """Outcome of one ``_apply_*`` handler. ``write`` is the PatchResult._writes entry of a file
     write (None for Delete/Move and failures); ``notes`` tell the caller how the edit was matched
-    (escape-drift corrections, hunks located approximately)."""
+    (escape-drift corrections, hunks located approximately); ``anchors`` is the S5 fresh-anchors
+    block (per changed region, the new lines ±3, numbered) appended to the diff when enabled."""
     ok: bool
     payload: str  # the diff on success, the error text on failure
     lsp: Optional[str] = None
     lint: Optional[dict] = None
     write: Optional[tuple] = None
     notes: tuple[str, ...] = ()
+    anchors: str = ""
+
+
+# ---------------------------------------------------------------------------
+# S5 (TZ-memdoor-5090-v2): fresh anchors after an edit.
+#
+# Donor: HASHLINE.md §6 — after an edit, hand back "[path] and, per changed
+# region, the new lines ±3, numbered: fresh anchors for the next edit without a
+# read." Their bench (§7) showed the hashline *format* is worse than a patch,
+# so we take the numbered windows, not the format. The windows are computed from
+# the new content after the hunks applied; OFF by default the diff payload is
+# byte-for-byte unchanged.
+_DIFF_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
+_config_cache: bool | None = None
+
+
+def _clear_cache() -> None:
+    global _config_cache
+    _config_cache = None
+
+
+def fresh_anchors_enabled() -> bool:
+    """``fresh_anchors.enabled`` (default **False**) / ``HERMES_FRESH_ANCHORS``."""
+    global _config_cache
+    env = os.environ.get("HERMES_FRESH_ANCHORS")
+    if env is not None:
+        return env.strip().lower() not in {"0", "false", "no", "off"}
+    if _config_cache is not None:
+        return _config_cache
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+    except Exception:
+        _config_cache = False
+        return False
+    val = (cfg.get("fresh_anchors") or {}).get("enabled")
+    _config_cache = bool(val) if val is not None else False
+    return _config_cache
+
+
+def _fresh_anchors_block(path: str, new_content: str, diff: str) -> str:
+    """Per changed region (each ``@@ +c,d @@`` of the diff), the new-side lines of that hunk,
+    numbered. difflib's unified diff carries 3 context lines on each side of the change, so the
+    hunk's new-side range is exactly the changed region ±3 — the fresh anchors for the next edit."""
+    new_lines = new_content.split("\n")
+    total = len(new_lines)
+    out: list[str] = []
+    for m in _DIFF_HUNK_RE.finditer(diff):
+        c = int(m.group(1))
+        d = int(m.group(2)) if m.group(2) else 1
+        lo = max(1, c)
+        hi = min(total, c + d - 1)
+        out.append(f"[{path}] new lines L{lo}..L{hi}:")
+        for ln in range(lo, hi + 1):
+            if 1 <= ln <= total:
+                out.append(f"{ln:6d}| {new_lines[ln - 1]}")
+    return "\n".join(out)
 
 
 def _fail(error: str) -> ApplyResult:
@@ -363,9 +423,9 @@ def apply_v4a_operations(operations: list[PatchOperation], file_ops: Any) -> Pat
     for op in operations:
         handler, verb, bucket = _APPLY_DISPATCH[op.operation]
         try:
-            ok, payload, lsp, lint, write, op_notes = handler(op, file_ops)
+            ok, payload, lsp, lint, write, op_notes, _op_anchors = handler(op, file_ops)
         except Exception as e:
-            ok, payload = None, str(e)
+            ok, payload, lsp, lint, write, op_notes, _op_anchors = None, str(e), None, None, None, (), ""
         if not ok:
             prefix = f"Failed to {verb}" if ok is False else "Error processing"
             errors.append(f"{prefix} {op.file_path}: {payload}")
@@ -512,6 +572,12 @@ def _apply_update(op: PatchOperation, file_ops: Any) -> ApplyResult:
     # A hunk found by a similarity strategy may have landed a line off; say so, per file.
     if note := boundary_note(strategies, "the hunk's", f" in {op.file_path}"):
         notes.append(note)
+    # S5: fresh anchors per changed region (flag-gated; OFF leaves the payload
+    # byte-for-byte the current diff).
+    if fresh_anchors_enabled():
+        block = _fresh_anchors_block(op.file_path, new_content or "", result.payload)
+        if block:
+            result = result._replace(payload=result.payload + "\n" + block, anchors=block)
     return result._replace(notes=tuple(notes))
 
 

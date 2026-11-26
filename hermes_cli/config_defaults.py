@@ -54,6 +54,12 @@ DEFAULT_CONFIG = {
     # instruction to read/run/check first; a repeated identical question passes. OFF by
     # default: clarify behaves byte-for-byte as before. Env override: HERMES_ASK_GATE.
     "ask_gate": {"enabled": False},
+    # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
+    # diff is extended with per changed-region windows of the new lines ±3, numbered
+    # (fresh anchors for the next edit without a re-read; the numbered windows, not the
+    # hashline format the donor's own bench rejected). OFF by default: the diff payload
+    # is byte-for-byte the current one. Env override: HERMES_FRESH_ANCHORS.
+    "fresh_anchors": {"enabled": False},
     # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
     "max_concurrent_sessions": None,
     # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the
