@@ -413,6 +413,12 @@ def _finalize_child_results(
     """Apply host-owned summary, memory, hook, and cost contracts once."""
     with _parent_finalization_lock(parent_agent):
         child_by_index = {index: child for index, _task, child in children}
+        # M2 (TZ-memdoor-5090-v2): judge each child result BEFORE the announce
+        # pipeline; a first unfinished result buys exactly one handback into the
+        # same child session, the second is announced with the verdict attached.
+        # Flag-off: apply_acceptance returns immediately, entries untouched.
+        from tools.result_acceptance import apply_acceptance
+        apply_acceptance(results, task_list, child_by_index, parent_agent)
         for entry in results:
             schema = getattr(child_by_index.get(entry.get("task_index")), "_delegate_output_schema", None)
             # Fork the forced, structure-preserving projection from the COMPLETE output before the parent budget

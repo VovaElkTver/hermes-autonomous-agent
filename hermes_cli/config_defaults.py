@@ -61,6 +61,13 @@ DEFAULT_CONFIG = {
     # OFF by default: no evaluation, no snapshot, finish_step byte-for-byte as
     # before (accept columns written-but-unread). Env: HERMES_TARGET_ACCEPT.
     "target_accept": {"enabled": False},
+    # M2 (TZ-memdoor-5090-v2): subagent result-acceptance — a completed-but-
+    # unfinished child result (plan / question / bare claim / empty) is handed
+    # back to the SAME child session once; the second result is announced with
+    # acceptance='unfinished' so the parent never reports a lie unknowingly.
+    # Deterministic markers until L1 lands. OFF: no judgement, no extra keys.
+    # Env override: HERMES_RESULT_ACCEPTANCE.
+    "result_acceptance": {"enabled": False},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the
