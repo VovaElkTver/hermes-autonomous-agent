@@ -919,7 +919,9 @@ CREATE TABLE IF NOT EXISTS ctl_step (
   step_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', checkpoint INT NOT NULL DEFAULT 1,
   brief TEXT,
-  depends_on TEXT NOT NULL DEFAULT '[]'
+  depends_on TEXT NOT NULL DEFAULT '[]',
+  -- M1 (TZ-memdoor-5090): step-level machine target {command|file}; NULL = as before.
+  accept TEXT
 );
 CREATE TABLE IF NOT EXISTS ctl_run (
   run_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, step_id TEXT NOT NULL,
@@ -927,7 +929,9 @@ CREATE TABLE IF NOT EXISTS ctl_run (
   execution_epoch INTEGER NOT NULL, input_artifacts TEXT NOT NULL DEFAULT '[]',
   authority TEXT NOT NULL DEFAULT '[]', run_status TEXT NOT NULL DEFAULT 'starting',
   worker_pid INTEGER, worker_pgid INTEGER,
-  started_at REAL, ended_at REAL
+  started_at REAL, ended_at REAL,
+  -- M1 (TZ-memdoor-5090): receipt of the step's accept evaluation for this run.
+  accept_result TEXT
 );
 CREATE TABLE IF NOT EXISTS ctl_artifact_revision (
   artifact_rev_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT, kind TEXT NOT NULL,

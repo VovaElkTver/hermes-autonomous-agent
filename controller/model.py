@@ -337,21 +337,53 @@ def block_on_budget_exhausted(conn, task_id: str, metric: str,
 # ---- steps / artifacts / reviews --------------------------------------------
 
 def add_step(conn, task_id: str, kind: str, title: str, *, checkpoint: bool = True,
-             depends_on: list | None = None) -> str:
+             depends_on: list | None = None, accept: dict | None = None) -> str:
     sid = new_id("step")
     # Named columns: the positional INSERT broke the day ctl_step gained `brief`
     # (S2.3) — a schema reconcile must not depend on column ORDER of the VALUES.
+    # M1 (TZ-memdoor-5090): `accept` is a validated target spec or NULL; the
+    # column stays NULL-and-unread for every legacy caller (flag-off identity).
     conn.execute("INSERT INTO ctl_step (step_id, task_id, kind, title, status,"
-                 " checkpoint, depends_on) VALUES (?,?,?,?,?,?,?)",
+                 " checkpoint, depends_on, accept) VALUES (?,?,?,?,?,?,?,?)",
                  (sid, task_id, kind, title, "pending", 1 if checkpoint else 0,
-                  json.dumps(depends_on or [])))
+                  json.dumps(depends_on or []),
+                  json.dumps(accept) if accept else None))
     conn.commit()
     return sid
 
 
-def finish_step(conn, step_id: str, status: str = "done") -> None:
+def finish_step(conn, step_id: str, status: str = "done") -> dict | None:
+    """Close a step. Returns None for the plain transition (every legacy call
+    site — byte-identical behavior). With M1 ON and the step carrying an
+    accept target, a done-close routes through the target guard: the step only
+    sticks as done when its own check passes; a failing target reopens it as
+    pending and returns {"ok": False, ...evidence}."""
+    if status == "done":
+        from controller.target_accept import target_accept_enabled
+        if target_accept_enabled():
+            row = conn.execute(
+                "SELECT s.accept, s.task_id, t.workdir FROM ctl_step s"
+                " JOIN ctl_task t ON t.task_id = s.task_id"
+                " WHERE s.step_id=?", (step_id,)).fetchone()
+            if row is not None and row["accept"]:
+                from controller import target_accept
+                verdict = target_accept.try_close(
+                    conn, step_id=step_id, task_id=row["task_id"],
+                    workdir=row["workdir"] or ".", accept_raw=row["accept"],
+                    origin="finish_step")
+                if not verdict["ok"]:
+                    conn.execute("UPDATE ctl_step SET status='pending'"
+                                 " WHERE step_id=?", (step_id,))
+                    conn.commit()
+                    verdict["stored"] = "pending"
+                    return verdict
+                conn.execute("UPDATE ctl_step SET status=? WHERE step_id=?",
+                             (status, step_id))
+                conn.commit()
+                return verdict
     conn.execute("UPDATE ctl_step SET status=? WHERE step_id=?", (status, step_id))
     conn.commit()
+    return None
 
 
 def set_step_brief(conn, step_id: str, brief: str) -> None:

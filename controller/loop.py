@@ -16,7 +16,7 @@ import hashlib
 import json
 import time
 
-from . import barrier, model, queue as Q, transitions
+from . import barrier, model, queue as Q, target_accept, transitions
 
 
 def _artifact_hash(payloads: list) -> str:
@@ -232,6 +232,22 @@ def run_cycle(conn, *, scope: str, worker_fn, review_fn, max_steps: int = 50) ->
                                    basis=f"loop barrier: {why}")
             log.append({"task": task["task_id"], "to": "paused", "reason": why})
             return log
+        # M1 (TZ-memdoor-5090) pre-check: a step whose machine target ALREADY
+        # holds is closed without a run — "done because the receipt exists",
+        # the step-level resume skip the donor promises. Flag-off: no read, no
+        # write, no snapshot file — the block is inert.
+        if step.get("accept") and target_accept.target_accept_enabled():
+            if target_accept.try_close(
+                    conn, step_id=step["step_id"], task_id=task["task_id"],
+                    workdir=task.get("workdir") or ".", accept_raw=step["accept"],
+                    origin="autonomous").get("ok"):
+                log.append({"task": task["task_id"],
+                            "step_accept_skipped": step["step_id"]})
+                continue
+            target_accept.snapshot_step(step["step_id"],
+                                        target_accept.parse_accept(
+                                            json.loads(step["accept"])) or {},
+                                        task.get("workdir") or ".")
         run_id = model.start_run(conn, task_id=task["task_id"], step_id=step["step_id"],
                                  contract_version=task["contract_version"],
                                  execution_epoch=perm["execution_epoch"],

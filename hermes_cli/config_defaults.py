@@ -54,6 +54,13 @@ DEFAULT_CONFIG = {
     # instruction to read/run/check first; a repeated identical question passes. OFF by
     # default: clarify behaves byte-for-byte as before. Env override: HERMES_ASK_GATE.
     "ask_gate": {"enabled": False},
+    # M1 (TZ-memdoor-5090-v2): target-based step acceptance (mario mechanics).
+    # A step may carry accept {command|file}: done sticks only when its own
+    # machine check passes; an already-held target skips dispatch entirely; the
+    # check's program files are snapshot/restored around the agent's turn.
+    # OFF by default: no evaluation, no snapshot, finish_step byte-for-byte as
+    # before (accept columns written-but-unread). Env: HERMES_TARGET_ACCEPT.
+    "target_accept": {"enabled": False},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the

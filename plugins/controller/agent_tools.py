@@ -138,8 +138,14 @@ def ctl_enqueue(args: dict, **_: Any) -> str:
         for s in steps:
             if not isinstance(s, dict) or not s.get("title"):
                 return _err(f"each step needs a 'title' (got {s!r})")
+            try:
+                # M1 (TZ-memdoor-5090): optional machine target {command|file}.
+                from controller.target_accept import parse_accept
+                spec = parse_accept(s.get("accept"))
+            except ValueError as exc:
+                return _err(f"step {s['title']!r}: {exc}")
             step_ids.append(model.add_step(conn, tid, str(s.get("kind") or "generic"),
-                                           str(s["title"])))
+                                           str(s["title"]), accept=spec))
         return _out(ok=True, task_id=tid, state="draft", steps=step_ids,
                     note="queued as draft; dispatch waits for human agreement ('иди')")
 
@@ -185,7 +191,15 @@ def ctl_step_done(args: dict, **kw: Any) -> str:
                         error=f"precondition failed: stored={row['status']!r} != "
                               f"expected={expected!r} — re-read with ctl_status; pass "
                               f"expected_status={row['status']!r} only if re-closing is intended")
-        model.finish_step(conn, step_id, status)
+        close = model.finish_step(conn, step_id, status)
+        if isinstance(close, dict) and not close["ok"]:
+            # M1 target guard: the step's own machine check vetoed the close —
+            # reopened as pending, evidence of what the checker said comes back.
+            return _out(ok=False, step_id=step_id, status="pending",
+                        task_id=row["task_id"], rc=close.get("rc"),
+                        error=close.get("error", "target not held"),
+                        evidence=close.get("evidence", ""),
+                        tampered=close.get("tampered") or [])
         after = conn.execute("SELECT status FROM ctl_step WHERE step_id=?",
                              (step_id,)).fetchone()
         actual = after["status"] if after else "?"
