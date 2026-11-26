@@ -48,6 +48,12 @@ DEFAULT_CONFIG = {
     # ~/.hermes/savings.jsonl recording what did NOT enter context. OFF by default:
     # record() is a no-op and the file is never created. Env override: HERMES_SAVINGS_LEDGER.
     "savings_ledger": {"enabled": False},
+    # S4 (TZ-memdoor-5090-v2): the deterministic half of the ask-gate. When enabled, a
+    # clarify question the agent could answer itself (names a path/URL/command, no
+    # design/preference wording, no read/exec yet this turn) is refused with an
+    # instruction to read/run/check first; a repeated identical question passes. OFF by
+    # default: clarify behaves byte-for-byte as before. Env override: HERMES_ASK_GATE.
+    "ask_gate": {"enabled": False},
     # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
     "max_concurrent_sessions": None,
     # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the

@@ -1093,6 +1093,12 @@ class ToolRegistry:
             if isinstance(decision, tool_contract.Deny):
                 tool_contract.record_call_observation(spec, decision, repeat=repeat)
                 return tool_contract.denial_result(name, spec, decision, repeat=repeat)
+        # S4: mark the turn's read/exec state for the ask-gate (no-op when the flag is OFF).
+        try:
+            from tools import ask_gate
+            ask_gate.note_tool_call(name)
+        except Exception:
+            pass
         try:
             # Plugin contract (plugins/AGENTS.md): optional context kwargs (task_id, session_id, user_task,
             # parent_agent, ...) are signature-inspected like hook payloads, so a narrow ``handle(args)``

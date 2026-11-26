@@ -323,6 +323,12 @@ def note_turn_start(agent, turn_id: str):
     (on another agent object) has not finished its persist. Does not prevent the overlap; it
     names both turn ids so the dispatch route that bypassed the busy guard is findable in logs.
     Returns the previous in-flight turn_id on overlap, else None; takes the slot either way."""
+    # S4: a fresh turn resets the ask-gate's per-turn read/exec + asked state.
+    try:
+        from tools import ask_gate
+        ask_gate.set_current_turn(turn_id)
+    except Exception:
+        pass
     prev = getattr(agent, "_inflight_turn_id", None)
     prev_started = getattr(agent, "_inflight_turn_started", 0.0)
     agent._inflight_turn_id = turn_id

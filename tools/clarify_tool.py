@@ -120,6 +120,18 @@ def clarify_tool(questions, callback: Optional[Callable] = None) -> str:
         return tool_error(error)
     if callback is None:
         return tool_error(_UNAVAILABLE)
+    # S4: the deterministic half of the ask-gate — refuse a question the agent could
+    # answer itself (flag-gated, OFF by default → byte-for-byte pre-S4).
+    try:
+        from tools import ask_gate
+        if ask_gate.ask_gate_enabled():
+            tk = ask_gate.current_turn_key()
+            refusals = [r for r in (ask_gate.gate(tk, q["question"]) for q in normalized) if r]
+            if refusals:
+                return json.dumps({"outcome": "ask_gate_refused", "instruction": refusals[0],
+                                   "refused_questions": len(refusals)}, ensure_ascii=False)
+    except Exception:
+        pass                       # the gate must never break clarify
     from agent.redact import redact_approval_display
     from tools.human_input_hooks import human_input_request
 
