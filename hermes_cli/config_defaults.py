@@ -38,6 +38,11 @@ DEFAULT_CONFIG = {
     },
     # Server-process fd soft limit (clamped to the hard limit) + glibc arena cap; 0/false/null = off.
     "runtime": {"nofile_soft_limit": 4096, "malloc_arena_max": 4},
+    # S1 (TZ-memdoor-5090): turn receipts. When enabled, a receipt line (what was actually
+    # checked after the last change) is attached to each turn's result: "✓ checked: …" or
+    # "Recap: unverified: …". OFF by default; when off the turn result is byte-for-byte the
+    # pre-S1 one. Env override: HERMES_TURN_RECEIPTS.
+    "turn_receipts": {"enabled": False},
     # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
     "max_concurrent_sessions": None,
     # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the

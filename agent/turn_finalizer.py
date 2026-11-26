@@ -836,4 +836,15 @@ def finalize_turn(
 
     agent._turn_preflight_display_snapshot = None
     agent._turn_received_provider_response = False
+    # S1 (TZ-memdoor-5090): turn receipts — «done» is a receipt, not the model's words.
+    # OFF by default; when on, attach the receipt line to the final result so it is visible
+    # in the feed and in the turn-stop logs. OFF leaves the result byte-for-byte unchanged.
+    from agent.turn_receipts import turn_receipts_enabled, turn_receipts_line
+    if turn_receipts_enabled():
+        _receipt = turn_receipts_line(messages)
+        if _receipt:
+            _base = result.get("final_response") or ""
+            result["final_response"] = f"{_base}\n\n{_receipt}" if _base else _receipt
+            result["turn_receipts"] = _receipt
+            logger.info("turn receipts: %s", _receipt)
     return result
