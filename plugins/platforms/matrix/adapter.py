@@ -85,6 +85,7 @@ from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 from gateway.platforms.helpers import ThreadParticipationTracker
 from plugins.platforms.matrix.session_proxy import matrix_redaction_proxy
 from plugins.platforms.matrix.voice_mention import ParkedVoices, VoiceGate, has_voice_marker, is_voice_event
+from plugins.platforms.matrix.message_shadow import note_message, observe_dropped
 
 logger = logging.getLogger(__name__)
 
@@ -2121,6 +2122,8 @@ class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatform
         chat_type = "dm" if is_dm else "group"
         thread_id = _thread_root(relates_to)
         is_mentioned = mention_claimed or self._content_mentions_bot(body, source_content)
+        # M4 (TZ-memdoor-5090-v2): shadow-gate context window (flag-gated no-op).
+        note_message(room_id, sender, body)
         if not is_mentioned and self._react_to_room_mentions:
             # An @room ping is a command only when a human operator leads the message with
             # @room/@all; the structured m.mentions.room flag is a transport artifact and is
@@ -2143,6 +2146,8 @@ class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatform
                     logger.debug(
                         "Matrix: ignoring message %s in %s — no @mention "
                         "(set MATRIX_REQUIRE_MENTION=false to disable)", event_id, room_id)
+                    # M4 shadow: ask the judge what WOULD have happened; wake unchanged.
+                    observe_dropped(self, room_id, event_id, sender, body)
                     return None
             # thread_require_mention: even inside a bot thread require @mention — prevents
             # infinite reply loops when several bots share one thread.
@@ -2150,6 +2155,7 @@ class MatrixAdapter(SyncTokenStoreMixin, TransportObservationMixin, BasePlatform
                 logger.debug(
                     "Matrix: ignoring message %s in thread %s — no @mention (thread_require_mention=true)",
                     event_id, thread_id)
+                observe_dropped(self, room_id, event_id, sender, body)
                 return None
         if is_mentioned and self._require_mention:
             # Strip the mention from the reply text only: the quote block carries the

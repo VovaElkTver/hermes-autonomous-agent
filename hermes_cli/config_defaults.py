@@ -74,6 +74,13 @@ DEFAULT_CONFIG = {
     # score crosses FIRE (off until the journal is calibrated). Env overrides:
     # HERMES_TURN_SHADOW / HERMES_TURN_WRAPUP.
     "turn_shadow": {"enabled": False, "wrap_up_enabled": False},
+    # M4 (TZ-memdoor-5090-v2): shadow message-gate — mention-gated Matrix rooms
+    # that DROP a non-mention message ask a yes/no judge anyway and journal
+    # {msg_id, p_reply, would} to ~/.hermes/logs/message_shadow.jsonl. The wake
+    # decision never changes; an unavailable judge is recorded as null, never
+    # as a negative. Env override: HERMES_MESSAGE_SHADOW.
+    "message_shadow": {"enabled": False,
+                       "judge_url": "http://192.168.9.100:8012/v1/chat/completions"},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the
