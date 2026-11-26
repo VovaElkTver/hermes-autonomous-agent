@@ -91,12 +91,28 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
           created_by TEXT NOT NULL,
           created_at REAL NOT NULL,
           provenance_json TEXT,
-          dup_count INTEGER NOT NULL DEFAULT 1
+           dup_count INTEGER NOT NULL DEFAULT 1,
+           expires_at REAL,
+           close_reason TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
         CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);
         """
     )
+    _ensure_columns(conn)
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add the A2 columns to a pre-existing ctl_followup table (idempotent).
+
+    The canonical SCHEMA_SQL carries them for fresh DBs; this only fires for a
+    state.db created before the columns existed. No-op when already present."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(ctl_followup)")}
+    with conn:
+        if "expires_at" not in cols:
+            conn.execute("ALTER TABLE ctl_followup ADD COLUMN expires_at REAL")
+        if "close_reason" not in cols:
+            conn.execute("ALTER TABLE ctl_followup ADD COLUMN close_reason TEXT")
 
 
 def _new_id(conn: sqlite3.Connection, prefix: str) -> str:
@@ -114,10 +130,17 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         scope_project: str | None = None, recipient: str = "agent",
         repeat_beats: int = DEFAULT_REPEAT_BEATS,
         max_repeats: int = DEFAULT_MAX_REPEATS, created_by: str = "agent-proposal",
-        provenance: dict | None = None, now: float | None = None) -> str:
+        provenance: dict | None = None, now: float | None = None,
+        decision_ttl_s: int | None = None) -> str:
     """Register one follow-up. Reminder needs ``due_at``; review needs ``period_s``.
     Rings the ticker wake seam (go Вл 09.11): a reminder set for the next beat
-    is counted off on the next beat, not at the next followups deadline."""
+    is counted off on the next beat, not at the next followups deadline.
+
+    A2 (plan_review TTL borrow): an optional ``decision_ttl_s`` puts a deadline
+    on the pending decision (``expires_at = now + ttl``). When that deadline
+    passes with no decision the row closes as ``close_reason='expired'`` rather
+    than waiting forever. ``decision_ttl_s=None`` (the default) leaves no
+    deadline — the legacy unbounded-wait behaviour (the OFF path)."""
     if kind == "reminder" and due_at is None:
         raise ValueError("reminder requires due_at")
     if kind == "review" and not period_s:
@@ -126,7 +149,10 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
         raise ValueError(f"invalid followup kind {kind!r}")
     if recipient not in RECIPIENTS:
         raise ValueError(f"invalid recipient {recipient!r}")
+    if decision_ttl_s is not None and decision_ttl_s <= 0:
+        raise ValueError("decision_ttl_s must be a positive second count or None")
     now = now if now is not None else time.time()
+    expires_at = (now + float(decision_ttl_s)) if decision_ttl_s is not None else None
     ensure_schema(conn)
     if a4_enabled():
         # A4 merge-дедупликация: identical open event (same kind+scope_task+text)
@@ -150,11 +176,12 @@ def add(conn: sqlite3.Connection, *, kind: str, scope_task: str, text: str,
             """INSERT INTO ctl_followup
                (followup_id, kind, scope_task, scope_project, text, due_at,
                 period_s, state, recipient, repeat_beats, max_repeats,
-                created_by, created_at, provenance_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                created_by, created_at, provenance_json, expires_at, close_reason)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (fid, kind, scope_task, scope_project, text, due_at, period_s,
              "pending", recipient, repeat_beats, max_repeats, created_by, now,
-             json.dumps(provenance, ensure_ascii=False) if provenance else None))
+             json.dumps(provenance, ensure_ascii=False) if provenance else None,
+             expires_at, None))
     from . import wake
     wake.notify()
     return fid
@@ -164,8 +191,11 @@ def cancel(conn: sqlite3.Connection, followup_id: str, reason: str = "") -> bool
     ensure_schema(conn)
     with conn:
         cur = conn.execute(
-            "UPDATE ctl_followup SET state='cancelled' WHERE followup_id=? AND state IN ('pending','awaiting_ack')",
+            "UPDATE ctl_followup SET state='cancelled', close_reason='cancelled' "
+            "WHERE followup_id=? AND state IN ('pending','awaiting_ack')",
             (followup_id,))
+    if cur.rowcount:
+        logger.info("followup %s closed: cancelled (%s)", followup_id, reason or "explicit")
     return bool(cur.rowcount)
 
 
@@ -239,7 +269,10 @@ def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) ->
             # a human stopped it, or its own lifecycle cleaned it up. Either way
             # the reminder has nothing left to wait for.
             with conn:
-                conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
+                conn.execute(
+                    "UPDATE ctl_followup SET state='done', close_reason='decided' "
+                    "WHERE followup_id=?", (rid,))
+            logger.info("followup %s closed: decided (dispatched task terminal)", rid)
             return None
         if in_flight:
             return None                   # reviews never pile up
@@ -282,6 +315,23 @@ def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) ->
     return rid
 
 
+def _expire_row(conn: sqlite3.Connection, row: dict, deliver, now: float) -> None:
+    """A2: close a pending decision whose TTL has elapsed with no decision.
+
+    Terminal ``state='done'`` + ``close_reason='expired'`` (distinct from
+    ``'cancelled'`` and ``'decided'``). Host policy is to escalate with a single
+    notice rather than park the decision forever."""
+    rid = row["followup_id"]
+    note = (f"[controller] review decision {rid} expired without a decision "
+            f"(TTL elapsed): {row['text'][:100]}")
+    logger.warning("followup %s expired without a decision (TTL elapsed)", rid)
+    _deliver_one({"text": note}, deliver)
+    with conn:
+        conn.execute(
+            "UPDATE ctl_followup SET state='done', close_reason='expired', "
+            "last_fired_at=? WHERE followup_id=?", (now, rid))
+
+
 def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
          beat_s: float = 1.0) -> list[str]:
     """Find due follow-ups, act on them, advance state. Returns fired ids.
@@ -292,6 +342,7 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
     """
     now = now if now is not None else time.time()
     fired: list[str] = []
+    ensure_schema(conn)   # self-heal: the A2 columns exist even on a migrated DB
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM ctl_followup WHERE state IN ('pending','awaiting_ack') "
         "ORDER BY COALESCE(due_at, last_fired_at, created_at)")]
@@ -299,6 +350,14 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
         rid = row["followup_id"]
         last = row["last_fired_at"]
         base = row["created_at"] if last is None else last   # review period counts from creation
+
+        # A2: a pending decision whose deadline has passed closes as 'expired'
+        # (distinct from 'cancelled'/'decided') and is escalated once, instead
+        # of parking forever. Only rows that carry a deadline (expires_at set)
+        # are affected; a NULL deadline keeps the legacy unbounded wait (OFF).
+        if row["expires_at"] is not None and now >= row["expires_at"]:
+            _expire_row(conn, row, deliver, now)
+            continue
 
         if row["recipient"] == "agent":
             due_now = (

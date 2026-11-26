@@ -1026,7 +1026,14 @@ CREATE TABLE IF NOT EXISTS ctl_followup (
   last_fired_at REAL, retries INTEGER NOT NULL DEFAULT 0,
   repeat_beats INTEGER NOT NULL DEFAULT 300, max_repeats INTEGER NOT NULL DEFAULT 3,
   created_by TEXT NOT NULL, created_at REAL NOT NULL, provenance_json TEXT,
-  dup_count INTEGER NOT NULL DEFAULT 1
+   dup_count INTEGER NOT NULL DEFAULT 1,
+   -- A2 (openhuman plan_review TTL borrow): a pending decision carries a deadline.
+  -- expires_at NULL = no TTL (legacy unbounded wait, the OFF behaviour); a set
+  -- deadline that passes with no decision closes the row as 'expired'.
+  -- close_reason records the terminal cause: 'decided' | 'cancelled' | 'expired'
+  -- (NULL while open) so the journal distinguishes the three.
+  expires_at REAL,
+  close_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_followup_open ON ctl_followup(state, due_at);
 CREATE INDEX IF NOT EXISTS idx_followup_review ON ctl_followup(state, last_fired_at);
