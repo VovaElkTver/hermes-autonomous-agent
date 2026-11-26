@@ -26,7 +26,9 @@ from agent.context_compressor import ContextCompressor
 from agent.agent_init_fallback import _fallback_entries, _init_fallback_chain, recompute_init_fallback_api_mode
 from agent.agent_init_params import _CALLBACK_PARAMS, _GATEWAY_IDENTITY_PARAMS, _PASSTHROUGH_PARAMS
 from agent.agent_runtime_helpers import _ra
-from agent.iteration_budget import IterationBudget, normalize_budget_warning_ratio
+from agent.iteration_budget import (
+    IterationBudget, normalize_budget_warning_ratio, normalize_budget_notice_thresholds,
+)
 from agent.memory_context import StreamingContextScrubber
 from agent.memory_provider import is_core_memory_provider
 from agent.session_activity import ActivityProvenance
@@ -1242,6 +1244,11 @@ def _apply_agent_section(agent, _agent_cfg):
     _agent_section = _cfg_dict(_agent_cfg, "agent")
     agent.budget_warning_ratio = normalize_budget_warning_ratio(
         _agent_section.get("budget_warning_ratio")
+    )
+    # Stepped iteration-budget checkpoint notices (empty list = off, the
+    # one-shot behaviour above is kept byte-for-byte).
+    agent.budget_notice_thresholds = normalize_budget_notice_thresholds(
+        _agent_section.get("budget_notice_thresholds")
     )
     # Both: "auto" (model-list match), true, false, or list of model substrings; independent
     # of each other (gates in agent/system_prompt.py).

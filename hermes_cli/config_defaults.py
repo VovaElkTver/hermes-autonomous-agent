@@ -75,6 +75,12 @@ DEFAULT_CONFIG = {
         # Optional one-time model-visible checkpoint warning before a finite turn cap is exhausted.
         # null = off; set a ratio strictly between 0 and 1 (for example, 0.75).
         "budget_warning_ratio": None,
+        # Optional STEPPED checkpoint notices before a finite turn cap is exhausted. Empty list =
+        # off (the one-shot budget_warning_ratio behaviour above stays byte-for-byte). A non-empty
+        # list of ratios strictly between 0 and 1 fires a progress-check notice at the first
+        # threshold crossed and a wrap-up notice at each later threshold, each at most once,
+        # rearming each conversation turn. Example: [0.5, 0.8].
+        "budget_notice_thresholds": [],
         # Wall-clock budget (seconds) per run. null = off. When set: one-time wrap-up notice at 80%
         # elapsed; implicit provider stale timeouts capped to remaining budget. CLI equivalent:
         # `hermes chat --run-budget N`.

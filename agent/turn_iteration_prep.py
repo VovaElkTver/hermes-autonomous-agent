@@ -44,9 +44,29 @@ ITERATION_BUDGET_WARNING_TEMPLATE = (
     "solely because of this warning."
 )
 
+ITERATION_BUDGET_WRAPUP_TEMPLATE = (
+    "[SYSTEM NOTICE — iteration budget wrap-up] You have used {used} of {maximum} "
+    "iterations and the hard iteration cap is near. Begin wrapping up now: persist "
+    "durable progress, close or hand off open work, and produce a usable result "
+    "before the cap is reached. Do not start new long work."
+)
+
 
 def _maybe_inject_iteration_budget_warning(agent: Any, messages: Any) -> bool:
-    """Append the opt-in one-shot warning to the newest tool result."""
+    """Append the iteration-budget checkpoint notice to the newest tool result.
+
+    OFF (``agent.budget_notice_thresholds`` empty/absent): the opt-in one-shot
+    warning keyed by ``budget_warning_ratio``. ON (a non-empty threshold list):
+    a stepped sequence — a progress-check at the first threshold crossed and a
+    wrap-up at each later one, each fired at most once.
+    """
+    # Stepped mode (A3): a non-empty threshold list switches to the stepped
+    # notice sequence; an empty/absent list keeps the one-shot path below
+    # byte-for-byte.
+    thresholds = list(getattr(agent, "budget_notice_thresholds", None) or [])
+    if thresholds:
+        return _maybe_inject_stepwise_budget_notices(agent, messages, thresholds)
+
     import os
     from agent.delegation_context import is_dispatcher_owned_worker_context
 
@@ -97,6 +117,62 @@ def _maybe_inject_iteration_budget_warning(agent: Any, messages: Any) -> bool:
         return False
     agent._iteration_budget_warning_injected = True
     return True
+
+
+def _maybe_inject_stepwise_budget_notices(agent: Any, messages: Any,
+                                          thresholds: list) -> bool:
+    """ON (A3): stepped budget notices.
+
+    For each threshold in the (ascending) list that is crossed this call and
+    not yet fired, append one notice to the newest non-persisted tool-result
+    tail: the progress-check template at the first threshold, the wrap-up
+    template at each later one. Returns True when a notice was injected.
+    """
+    import os
+    from agent.delegation_context import is_dispatcher_owned_worker_context
+    from agent.context_compressor import _DB_PERSISTED_MARKER
+
+    budget = getattr(agent, "iteration_budget", None)
+    if (budget is None or budget.max_total <= 1
+            or budget.max_total >= sys.maxsize):
+        return False
+    # Only the current, non-persisted tool-result tail is mutable.
+    if (not messages or messages[-1].get("role") != "tool"
+            or messages[-1].get(_DB_PERSISTED_MARKER)):
+        return False
+    kanban_worker = (
+        bool(os.environ.get("HERMES_KANBAN_TASK"))
+        and is_dispatcher_owned_worker_context()
+        and "kanban_complete" in getattr(agent, "valid_tool_names", ())
+    )
+    message = messages[-1]
+    fired = set(getattr(agent, "_budget_notice_fired", None) or ())
+    injected_any = False
+    for i, th in enumerate(sorted(thresholds)):
+        if th in fired or budget.used < min(th * budget.max_total, budget.max_total - 1):
+            continue
+        notice = (
+            ITERATION_BUDGET_WARNING_TEMPLATE if i == 0
+            else ITERATION_BUDGET_WRAPUP_TEMPLATE
+        ).format(used=budget.used, maximum=budget.max_total)
+        if kanban_worker:
+            notice += (
+                " While tools are still available, call kanban_complete only if all task "
+                "requirements are verified, or kanban_request_review if it is ready for "
+                "review; otherwise persist a kanban_comment handoff and "
+                "continue. A diff or commit alone is not completion evidence."
+            )
+        content = message.get("content", "")
+        if isinstance(content, str):
+            message["content"] = content + f"\n\n{notice}"
+        elif isinstance(content, list) or content is None:
+            message["content"] = [*(content or []), {"type": "text", "text": notice}]
+        else:
+            break
+        fired.add(th)
+        injected_any = True
+    agent._budget_notice_fired = fired
+    return injected_any
 
 
 @dataclass
