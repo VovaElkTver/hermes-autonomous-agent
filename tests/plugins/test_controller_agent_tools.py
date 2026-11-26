@@ -21,11 +21,19 @@ def _call(fn, **args):
     return json.loads(fn(args))
 
 
+def _pred(model, conn, tid, cmd='test -n "$HERMES_TASK_ID"'):
+    f = model.current_contract(conn, tid)
+    f["validation_cmd"] = cmd
+    model.revise_contract(conn, tid, f, "MATERIAL")
+    return tid
+
+
 def test_enqueue_lands_as_unagreed_draft(tools):
     at, conn, _model, wd = tools
     res = _call(at.ctl_enqueue, goal="ship X", workdir=str(wd),
                 steps=[{"kind": "implementation", "title": "code"}, {"title": "test"}],
-                acceptance=["tests green"], dependencies=[])
+                acceptance=["tests green"], dependencies=[],
+                validation_cmd="pytest -q")
     assert res["ok"] and res["state"] == "draft"
     row = conn.execute("SELECT state FROM ctl_task WHERE task_id=?",
                        (res["task_id"],)).fetchone()
@@ -38,15 +46,27 @@ def test_enqueue_lands_as_unagreed_draft(tools):
         "SELECT fields FROM ctl_contract_revision WHERE task_id=? ORDER BY version DESC"
         " LIMIT 1", (res["task_id"],)).fetchone()
     assert json.loads(contract["fields"])["acceptance"] == ["tests green"]
+    assert json.loads(contract["fields"])["validation_cmd"] == "pytest -q"
     assert conn.execute("SELECT COUNT(*) c FROM ctl_step WHERE task_id=?",
                         (res["task_id"],)).fetchone()["c"] == 2
+
+
+def test_enqueue_requires_validation_cmd(tools):
+    """S2 decision А (Вл 26.11): enqueue without a machine predicate is a
+    refusal with instructions, and leaves no orphan task behind."""
+    at, conn, _model, wd = tools
+    before = conn.execute("SELECT COUNT(*) c FROM ctl_task").fetchone()["c"]
+    res = _call(at.ctl_enqueue, goal="x", workdir=str(wd))
+    assert not res["ok"] and "validation_cmd is required" in res["error"]
+    after = conn.execute("SELECT COUNT(*) c FROM ctl_task").fetchone()["c"]
+    assert after == before
 
 
 def test_enqueue_rejects_unknown_dependency_without_orphan(tools):
     at, conn, _model, wd = tools
     before = conn.execute("SELECT COUNT(*) c FROM ctl_task").fetchone()["c"]
     res = _call(at.ctl_enqueue, goal="x", workdir=str(wd),
-                dependencies=["task_nope"])
+                dependencies=["task_nope"], validation_cmd="true")
     assert not res["ok"] and "task_nope" in res["error"]
     after = conn.execute("SELECT COUNT(*) c FROM ctl_task").fetchone()["c"]
     assert after == before
@@ -61,7 +81,8 @@ def test_enqueue_requires_existing_workdir(tools):
 def test_status_lists_and_drills(tools):
     at, _conn, _model, wd = tools
     tid = _call(at.ctl_enqueue, goal="g", workdir=str(wd),
-                steps=[{"title": "s1"}])["task_id"]
+                steps=[{"title": "s1"}],
+                validation_cmd="true")["task_id"]
     lst = _call(at.ctl_status)
     assert lst["ok"] and any(t["task_id"] == tid for t in lst["tasks"])
     one = _call(at.ctl_status, task_id=tid)
@@ -86,7 +107,7 @@ def test_step_done_read_back(tools):
 
 def test_block_uses_audited_transition(tools):
     at, conn, model, wd = tools
-    tid = model.create_task(conn, owner="v", workdir=str(wd), goal="g")
+    tid = _pred(model, conn, model.create_task(conn, owner="v", workdir=str(wd), goal="g"))
     model.agree_contract(conn, tid)
     transitions_to_ready = _call(at.ctl_block, task_id=tid, reason="no docs")
     assert not transitions_to_ready["ok"]  # draft -> blocked is illegal
@@ -116,13 +137,14 @@ def test_tool_defs_shape():
         assert schema["name"] == name and callable(handler)
         assert schema["parameters"]["type"] == "object"
         if name == "ctl_enqueue":
-            assert set(schema["parameters"]["required"]) == {"goal", "workdir"}
+            assert set(schema["parameters"]["required"]) == {"goal", "workdir",
+                                                             "validation_cmd"}
 
 
 def test_status_snapshot_truncation_and_as_of(tools):
     at, _conn, _model, wd = tools
     for i in range(52):
-        _call(at.ctl_enqueue, goal=f"g{i}", workdir=str(wd))
+        _call(at.ctl_enqueue, goal=f"g{i}", workdir=str(wd), validation_cmd="true")
     snap = _call(at.ctl_status)
     assert snap["ok"] and len(snap["tasks"]) == 50 and snap["has_more"] is True
     assert snap["as_of"].endswith("Z")

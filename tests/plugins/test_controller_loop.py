@@ -612,26 +612,22 @@ class TestS13MachinePredicate:
         monkeypatch.setattr(loop.time, "sleep", lambda s: None)
         assert loop.finish_verifying(c, tid, review_fn=pass_review) == "completed"
 
-    def test_draft_gate_inactive_until_decision_4(self, env):
-        """The draft->ready gate is DEFINED but not active (decision #4, Вл):
-        today a draft without a predicate still goes to ready (legacy behavior,
-        follow-ups/agent-tools depend on it); the guard function itself is
-        machine-verified so activating it is a one-line switch."""
+    def test_draft_gate_active_after_decision_4(self, env):
+        """Decision А (Вл 26.11): the strict draft gate is ACTIVE - a contract
+        without validation_cmd refuses draft->ready; with a predicate it passes.
+        Producers (ctl_enqueue, /for, followups) carry real predicates since this
+        flip; the legacy-passthrough expectation is replaced, not deleted."""
         from controller import transitions
         c, wd = env
         tid = model.create_task(c, owner="o", workdir=wd, goal="draft")
-        assert model.get_task(c, tid)["state"] == "draft"
         model.agree_contract(c, tid)
         model.set_permission(c, wd, enabled=True, granted_via="user-command")
-        transitions.transition(c, tid, "ready", basis="test")  # legacy: passes
+        with pytest.raises(ValueError, match="draft contract without validation_cmd"):
+            transitions.transition(c, tid, "ready", basis="test")
+        assert model.get_task(c, tid)["state"] == "draft"
+        self._set_contract(c, tid, validation_cmd="true")
+        transitions.transition(c, tid, "ready", basis="test")
         assert model.get_task(c, tid)["state"] == "ready"
-        # the guard itself: refuses only when the predicate is absent
-        tid2 = model.create_task(c, owner="o", workdir=wd, goal="draft2")
-        t2 = model.get_task(c, tid2)
-        assert transitions._draft_has_predicate(c, t2) == "draft contract without validation_cmd"
-        self._set_contract(c, tid2, validation_cmd="true")
-        t2 = model.get_task(c, tid2)
-        assert transitions._draft_has_predicate(c, t2) is None
 
     def test_legacy_dict_acceptance_shape_honoured(self, env, monkeypatch):
         c, _wd, tid, _sid, rid = _mk_verifying(env)

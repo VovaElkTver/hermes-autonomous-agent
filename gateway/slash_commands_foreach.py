@@ -36,6 +36,13 @@ class GatewayForEachCommandsMixin:
                                         goal=plan.goal)
             fields = ctl_model.current_contract(conn, tid)
             fields["acceptance"] = plan.acceptance
+            # S2 strict draft gate (decision А, Вл 26.11): every batch item must
+            # end in a terminal step state - the /for doctrine "nothing skipped
+            # silently" as code.
+            fields["validation_cmd"] = (
+                'sqlite3 "$HOME/.hermes/state.db" "SELECT COUNT(*) FROM ctl_step WHERE '
+                f"task_id='{tid}' AND status NOT IN ('done','blocked','noop')"
+                '" | grep -qx 0')
             ctl_model.revise_contract(conn, tid, fields, "MATERIAL")
             for step in plan.steps:
                 ctl_model.add_step(conn, tid, step["kind"], step["title"])

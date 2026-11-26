@@ -112,13 +112,13 @@ def _machine_validation(conn, t, **kw) -> str | None:
 
 
 def _draft_has_predicate(conn, t, **kw) -> str | None:
-    """Decision #4 (TЗ thinking-enable §5, Вл) — NOT ACTIVE in S1.
+    """Decision #4 (TЗ thinking-enable §5) — ACTIVE since 26.11 (Вл: А/А/А).
 
-    The one-line activation when the decision lands:
-        GUARDS.setdefault(("draft", "ready"), []).append(_draft_has_predicate)
-    (kept defined so the decision is a config-level switch, not a re-implementation;
-    the strict form gates every draft contract, plan-generated or not — S1 only
-    owns the machine predicate in verifying, which is decision-free)."""
+    The strict form gates every draft contract, plan-generated or not: a draft
+    without a machine predicate cannot enter ready. Producers were fixed in the
+    same commit that flipped the guard (ctl_enqueue requires the arg, /for and
+    followups carry derived predicates) — the gate never fires on a live path
+    without a mechanical alternative."""
     from . import workers
     return None if workers.contract_validation_cmd(conn, t["task_id"]) \
         else "draft contract without validation_cmd"
@@ -128,6 +128,7 @@ for _edge in ((s, "ready") for s in OPEN_TASK_STATES_FOR_RESUME):
     GUARDS.setdefault(_edge, []).append(_mandate_still_valid)
 
 GUARDS[("verifying", "completed")].append(_machine_validation)
+GUARDS.setdefault(("draft", "ready"), []).append(_draft_has_predicate)  # А/А/А (Вл 26.11)
 
 
 def transition(conn, task_id: str, to_state: str, *, basis: str,

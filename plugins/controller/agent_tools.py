@@ -107,6 +107,11 @@ def ctl_enqueue(args: dict, **_: Any) -> str:
     position = "head" if str(args.get("priority") or "").lower() == "head" else "tail"
     acceptance = args.get("acceptance") or []
     dependencies = args.get("dependencies") or []
+    vcmd = str(args.get("validation_cmd") or "").strip()
+    if not vcmd:
+        return _err("validation_cmd is required (S2 decision А, Вл 26.11): a machine "
+                    "command run in workdir at verifying - exit 0 is what 'done' means. "
+                    "Write the acceptance criterion as code, not prose.")
     steps = args.get("steps") or []
     if not isinstance(acceptance, list) or not isinstance(steps, list):
         return _err("'acceptance' and 'steps' must be arrays")
@@ -120,10 +125,12 @@ def ctl_enqueue(args: dict, **_: Any) -> str:
             return _err(f"unknown dependency task_id(s): {unknown}")
         tid = model.create_task(conn, owner=owner, workdir=workdir, goal=goal,
                                 position=position)
-        if acceptance or deps:
+        if acceptance or deps or vcmd:
             fields = model.current_contract(conn, tid)
             if acceptance:
                 fields["acceptance"] = [str(a) for a in acceptance]
+            if vcmd:
+                fields["validation_cmd"] = vcmd
             if deps:
                 fields["dependencies"] = deps
             model.revise_contract(conn, tid, fields, "MATERIAL")
@@ -399,11 +406,16 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                                "description": "Optional plan: ordered checklist steps"},
                      "acceptance": {"type": "array", "items": {"type": "string"},
                                     "description": "Verifiable acceptance criteria"},
+                     "validation_cmd": _str("REQUIRED machine predicate: shell command run "
+                                            "in workdir when the task enters verifying; exit 0 "
+                                            "is the only admissible 'done' evidence. Must be "
+                                            "deterministic and actually check the acceptance "
+                                            "criteria (S2.5 rejects green-but-vacuous)."),
                      "dependencies": {"type": "array", "items": {"type": "string"},
                                       "description": "task_ids that must complete first"},
                      "priority": {"type": "string", "enum": ["tail", "head"],
                                   "description": "Queue position among live tasks (default tail)"}},
-                    ["goal", "workdir"]),
+                    ["goal", "workdir", "validation_cmd"]),
     "ctl_step_done": (ctl_step_done,
                       "Close one of your controller steps (done / blocked / noop) and "
                       "VERIFY it landed: the reply reports the status actually stored. "
