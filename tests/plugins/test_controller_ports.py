@@ -215,6 +215,9 @@ def _agree(conn, task_id):
 def _make_ready_task(conn, workdir="/work"):
     from controller import model, transitions
     tid = model.create_task(conn, owner="tester", workdir=workdir, goal="g")
+    f = model.current_contract(conn, tid)
+    f["validation_cmd"] = 'test -n "$HERMES_TASK_ID"'
+    model.revise_contract(conn, tid, f, "MATERIAL")
     _agree(conn, tid)
     transitions.transition(conn, tid, "ready", basis="test plan")
     return tid

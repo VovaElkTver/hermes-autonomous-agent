@@ -13,7 +13,11 @@ def cdc(tmp_path):
 
 
 def _task(model, conn, wd="/w"):
-    return model.create_task(conn, owner="v", workdir=wd, goal="g")
+    tid = model.create_task(conn, owner="v", workdir=wd, goal="g")
+    f = model.current_contract(conn, tid)
+    f["validation_cmd"] = 'test -n "$HERMES_TASK_ID"'
+    model.revise_contract(conn, tid, f, "MATERIAL")
+    return tid
 
 
 def test_routing_requires_task_id():

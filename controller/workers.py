@@ -457,6 +457,8 @@ def run_validation(conn, task_id: str, workdir: str) -> tuple[bool, str]:
     cmd = contract_validation_cmd(conn, task_id)
     if not cmd:
         return True, "no validation_cmd in contract"
+    env = dict(os.environ, HERMES_TASK_ID=task_id)
     p = subprocess.run(cmd, shell=True, cwd=workdir, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=600, check=False)
+                       encoding="utf-8", errors="replace", timeout=600, check=False,
+                       env=env)
     return p.returncode == 0, (p.stdout + p.stderr)[-1000:]

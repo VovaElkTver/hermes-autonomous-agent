@@ -212,6 +212,14 @@ def _dispatch_task(conn: sqlite3.Connection, row: dict) -> str:
                (f" (периодический обзор раз в {row['period_s']}с)" if row["kind"] == "review" else "")))
     tid = model.create_task(conn, owner=scope["owner"], workdir=scope["workdir"],
                             goal=goal, project_id=scope["project_id"] or "")
+    # S2 strict draft gate (decision А, Вл 26.11): the machine meaning of this
+    # task is "the follow-up actually fired" - check exactly that, no prose.
+    fields = model.current_contract(conn, tid)
+    fields["validation_cmd"] = (
+        'sqlite3 "$HOME/.hermes/state.db" "SELECT 1 FROM ctl_followup WHERE '
+        f"followup_id='{row['followup_id']}' AND last_fired_at IS NOT NULL"
+        '" | grep -q 1')
+    model.revise_contract(conn, tid, fields, "MATERIAL")
     # The consequence IS its own mandate source (created_by carries the authorizer);
     # contract v1 is self-agreed, otherwise every reminder would dead-lock on review.
     model.agree_contract(conn, tid)
