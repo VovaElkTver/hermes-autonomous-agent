@@ -81,6 +81,11 @@ DEFAULT_CONFIG = {
     # as a negative. Env override: HERMES_MESSAGE_SHADOW.
     "message_shadow": {"enabled": False,
                        "judge_url": "http://192.168.9.100:8012/v1/chat/completions"},
+    # L2 (TZ-memdoor-5090-v2): per-task bounds on agent-registered periodics —
+    # times<=60, horizon (default 12h) clamp on the repeat chain, overlap refuse
+    # (open row with same scope+kind+text); self-remove is already the carrier's
+    # max_repeats exhaustion. Env override: HERMES_AGENT_PERIODIC_BOUNDS.
+    "agent_periodic_bounds": {"enabled": False},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the

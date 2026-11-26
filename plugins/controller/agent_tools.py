@@ -345,6 +345,31 @@ def _ctl_decision(args: dict, **kw: Any) -> str:
         return _err("unknown kind (noop|reprioritize; draft -> ctl_enqueue)")
 
 
+def _periodic_kwargs(conn, args: dict, kind: str, scope_task: str,
+                     text: str) -> dict:
+    """L2 (TZ-memdoor-5090-v2): translate validated per-task bounds into
+    followups.add kwargs. Flag-off: new args refused, created_by unchanged."""
+    from controller.periodic_bounds import agent_periodic_bounds_enabled
+    base = {"created_by": "agent-tool"}
+    has_new = args.get("times") is not None or args.get("expiry_h") is not None
+    if not agent_periodic_bounds_enabled():
+        if has_new:
+            raise ValueError("times/expiry_h require agent_periodic_bounds.enabled")
+        return base
+    import time as _time
+    from controller.periodic_bounds import validate_add
+    verdict = validate_add(conn, kind=kind, scope_task=scope_task, text=text,
+                           due_at=args.get("due_at"),
+                           period_s=args.get("period_s"),
+                           rrule=args.get("rrule"), now=_time.time(),
+                           times=args.get("times"), expiry_h=args.get("expiry_h"))
+    if verdict.get("error"):
+        raise ValueError(verdict["error"])
+    if verdict.get("max_repeats") is not None:
+        base["max_repeats"] = verdict["max_repeats"]
+    return base
+
+
 def _ctl_followup(args: dict, **kw: Any) -> str:
     """Due-date wake notes (S2.2): the ticker delivers them as events — an agent
     cannot wake itself with model text, only register a due row here."""
@@ -367,7 +392,7 @@ def _ctl_followup(args: dict, **kw: Any) -> str:
                                     period_s=args.get("period_s"),
                                     rrule=args.get("rrule"),
                                     recipient=str(args.get("recipient") or "agent"),
-                                    created_by="agent-tool")
+                                    **_periodic_kwargs(conn, args, kind, scope_task, text))
             except ValueError as exc:
                 return _err(str(exc))
             return _out(ok=True, followup_id=fid, scope_task=scope_task)
@@ -495,6 +520,10 @@ _TOOLS: dict[str, tuple[Any, str, dict, list[str]]] = {
                       "recipient": {"type": "string", "enum": ["agent", "user"],
                                     "description": "Default agent (self-wake); user pings the owner in chat"},
                       "followup_id": _str("Target for cancel"),
+                      "times": {"type": "integer",
+                                 "description": "L2: repeat cap 1..60 (needs agent_periodic_bounds)"},
+                      "expiry_h": {"type": "number",
+                                    "description": "L2: horizon cap in hours, default 12 (needs agent_periodic_bounds)"},
                       "reason": _str("Why cancelling (cancel)")},
                      ["op"]),
     "ctl_decision": (_ctl_decision,
