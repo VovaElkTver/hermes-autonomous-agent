@@ -62,6 +62,11 @@ findings); a stale lease on a DIRTY git tree is not stealable; scratch trees
 (gettempdir root, TMPDIR subtree, plugin dir) are excluded; log-only mode
 mints nothing. Two sessions mixing one index is exactly the history damage
 this prevents (23.11/24.11).
+v0.6.0 (26.11, ToDo «Про́риоцепция» §3, Вл 21.11): every trace the guard emits
+carries the session's human-readable name — audit lines, write-ledger records,
+lease mint records and foreign-block messages resolve sid → pinned
+``sessions.title`` from state.db (read-only, TTL-cached, degrades to the sid).
+«Имя сессии — имя, а не хэш», проверяемо в write-пути, не в промпте.
 """
 from __future__ import annotations
 
@@ -108,20 +113,23 @@ _delegation_ok: set[str] = set()
 _ctx = None
 _FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
              "outbound_approve", "date_context",
-             "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease")
+             "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease",
+             "session_names")
 DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
+DEFAULT_STATE_DB = "~/.hermes/state.db"
 _TURN_STATE_FILE = "auth_state.json"
 
 
 def _settings() -> dict:
     """Hot-read the settings subtree. Never raises; degrades to 0.2.x defaults."""
     out: dict = {"enabled": True, "log_only": False, "audit_log": DEFAULT_AUDIT_LOG,
+                 "state_db": DEFAULT_STATE_DB,
                  "features": {f: True for f in _FEATURES}}
     get = getattr(_ctx, "get_config", None)
     if not callable(get):
         return out
     for key, fallback in (("enabled", out["enabled"]), ("log_only", out["log_only"]),
-                          ("audit_log", out["audit_log"])):
+                          ("audit_log", out["audit_log"]), ("state_db", out["state_db"])):
         try:
             value = get(key, fallback)
         except Exception:
@@ -153,6 +161,7 @@ def _audit(kind: str, decision: dict, tool_name: str, args: dict, kw: dict, s: d
             "rule_key": (decision or {}).get("rule_key"),
             "tool": tool_name,
             "session_id": _sid(kw),
+            "session_name": _session_name(s, _sid(kw)),
             "turn_id": kw.get("turn_id") or "",
             "text": text or None,
         }
@@ -164,6 +173,41 @@ def _audit(kind: str, decision: dict, tool_name: str, args: dict, kw: dict, s: d
 
 def _sid(kw: dict) -> str:
     return kw.get("session_id") or kw.get("task_id") or "_global"
+
+
+_NAMES_TTL_S = 30.0
+_names_cache: dict[str, tuple[float, str]] = {}
+
+
+def _session_name(s: dict, sid: str) -> str:
+    """Human-readable name for traces (ToDo «Про́риоцепция» §3, Вл 21.11: «имя сессии —
+    имя, а не хэш»). The pinned `sessions.title` from state.db when it exists — titles
+    are unique across the DB (the title generator dedups with #N), so the title alone
+    identifies the session — otherwise the sid. Read-only, TTL-cached, never raises:
+    name resolution must never block or crash a guarded call."""
+    if not sid:
+        return sid
+    if not s["features"].get("session_names", True):
+        return sid
+    now = time.time()
+    hit = _names_cache.get(sid)
+    if hit is not None and now - hit[0] < _NAMES_TTL_S:
+        return hit[1]
+    name = sid
+    try:
+        import sqlite3
+        db = os.path.expanduser(str(s.get("state_db") or DEFAULT_STATE_DB))
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = con.execute("SELECT title FROM sessions WHERE id = ?", (sid,)).fetchone()
+        finally:
+            con.close()
+        if row and row[0] and str(row[0]).strip():
+            name = str(row[0]).strip()
+    except Exception:
+        pass  # unreadable DB = fall back to the hash, the old discipline
+    _names_cache[sid] = (now, name)
+    return name
 
 
 def _sig(tool: str, args: dict) -> str:
@@ -430,7 +474,8 @@ def _remote_write_record(text: str, tool_name: str, args: dict, kw: dict, s: dic
     op_id = uuid.uuid4().hex[:12]
     turn_now = int(_load_turn_state(s).get("turn", 0))
     _ledger(s, {"kind": "remote_write", "hosts": sorted(hosts), "targets": targets,
-                "cmd": text[:300], "tool": tool_name, "session_id": sid, "turn_id": kw.get("turn_id") or "",
+                "cmd": text[:300], "tool": tool_name, "session_id": sid,
+                "session_name": _session_name(s, sid), "turn_id": kw.get("turn_id") or "",
                 "md5_before": md5, "md5_note": note,
                 "op_id": op_id, "op_class": op_classes, "turn": turn_now})
     with _lock:
@@ -741,6 +786,7 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
     lease = _read_lease(lf)
     now = time.time()
     holder = str((lease or {}).get("session_id") or "")
+    holder_name = _session_name(s, holder) if holder else ""
     if lease and holder == sid:
         if not s["log_only"]:
             lease["ts"] = now
@@ -752,7 +798,7 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
         return None
     if lease and (now - float(lease.get("ts") or 0)) < CHECKOUT_TTL_S:
         return _verdict({"action": "block", "rule_key": "fork-guardrails:resource-lease",
-                         "message": f"{resource} is leased to session {holder!r} "
+                         "message": f"{resource} is leased to {holder_name!r} "
                                     f"(branch {lease.get('branch')!r}, active "
                                     f"{int(now - float(lease['ts']))}s ago). Do not write from two "
                                     "sessions into one directory: take your own worktree/subdir or "
@@ -763,14 +809,15 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
             dirty = [l[3:] for l in _git_out(resource, "status", "--porcelain=v1").splitlines() if l.strip()][:20]
             if dirty:
                 return _verdict({"action": "block", "rule_key": "fork-guardrails:lease-dirty",
-                                 "message": f"{resource}: stale lease of {holder!r}, but the tree is "
+                                 "message": f"{resource}: stale lease of {holder_name!r}, but the tree is "
                                             f"dirty ({len(dirty)} paths, e.g. {', '.join(dirty[:4])}). The old "
                                             "owner must commit/clean first; stealing a dirty tree is how "
                                             "histories got mixed 23.11/24.11."})
     if s["log_only"]:
         return None
     os.makedirs(os.path.dirname(lf), exist_ok=True)
-    rec = {"session_id": sid, "resource": resource, "tool": tool_name,
+    rec = {"session_id": sid, "name": _session_name(s, sid),
+           "resource": resource, "tool": tool_name,
            "branch": _git_out(resource, "rev-parse", "--abbrev-ref", "HEAD").strip() or "-",
            "ts": now, "took_over_from": holder or None}
     try:
