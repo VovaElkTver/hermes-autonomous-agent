@@ -162,6 +162,15 @@ def prepare_iteration(
         except Exception as _step_err:
             logger.debug("step_callback error (iteration %s): %s", api_call_count, _step_err)
 
+    # M3 (TZ-memdoor-5090-v2): progress shadow. Phase 1 only journals; phase 2
+    # (separate flag, off) injects a tools-off wrap-up once the score fires.
+    # Flag-off: one boolean check, no writes — behavior byte-identical.
+    from agent.turn_shadow import turn_shadow_enabled
+    if turn_shadow_enabled():
+        from agent import turn_shadow as _shadow
+        _shadow.observe(agent, messages, api_call_count)
+        _shadow.maybe_inject_wrap_up(agent, messages)
+
     # Tool-calling iterations for the skill nudge; resets whenever skill_manage is used.
     if agent._skill_nudge_interval > 0 and "skill_manage" in agent.valid_tool_names:
         agent._iters_since_skill += 1

@@ -68,6 +68,12 @@ DEFAULT_CONFIG = {
     # Deterministic markers until L1 lands. OFF: no judgement, no extra keys.
     # Env override: HERMES_RESULT_ACCEPTANCE.
     "result_acceptance": {"enabled": False},
+    # M3 (TZ-memdoor-5090-v2): turn-progress shadow. enabled: journal stuck
+    # scores to ~/.hermes/logs/turn_shadow.jsonl (phase 1, watch only).
+    # wrap_up_enabled: phase 2 — inject a no-tools wrap-up directive when the
+    # score crosses FIRE (off until the journal is calibrated). Env overrides:
+    # HERMES_TURN_SHADOW / HERMES_TURN_WRAPUP.
+    "turn_shadow": {"enabled": False, "wrap_up_enabled": False},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the
