@@ -62,6 +62,23 @@ findings); a stale lease on a DIRTY git tree is not stealable; scratch trees
 (gettempdir root, TMPDIR subtree, plugin dir) are excluded; log-only mode
 mints nothing. Two sessions mixing one index is exactly the history damage
 this prevents (23.11/24.11).
+v0.6.0 (26.11, ToDo «Про́риоцепция» §3, Вл 21.11): every trace the guard emits
+carries the session's human-readable name — audit lines, write-ledger records,
+lease mint records and foreign-block messages resolve sid → pinned
+``sessions.title`` from state.db (read-only, TTL-cached, degrades to the sid).
+«Имя сессии — имя, а не хэш», проверяемо в write-пути, не в промпте.
+v0.6.1 (26.11, ToDo «Про́риоцепция» §1, Вл 21.11): service lease — мутирующие
+операции над systemd-юнитами/docker-контейнерами (start/stop/restart/kill/…)
+минтят lease на ресурс ``unit:<name>``; чужая сессия блокируется с именем
+владельца; stop владельцем освобождает юнит следующему в очереди; read-only
+(status/show/journalctl) не минтят. Регрессия на 21.11: чужой stop serving
+:8006 без арбитража = 45 минут простоя. Арбитраж в write-пути ядра, не в
+промпте.
+v0.6.2 (26.11, ToDo «Про́риоцепция» §4, Вл 21.11): один проект = один
+семафор: ``_repo_root_for`` резолвит linked worktree к ГЛАВНОМУ checkout
+(git worktree list --porcelain, первый запись) — две сессии в разных checkout
+одного проекта теперь блокируются друг другом, как и в подкаталогах.
+Регрессия 21.11: main+worktree одного репо писали одновременно.
 """
 from __future__ import annotations
 
@@ -108,20 +125,23 @@ _delegation_ok: set[str] = set()
 _ctx = None
 _FEATURES = ("retry_guard", "delegation_gate", "force_push_block",
              "outbound_approve", "date_context",
-             "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease")
+             "write_ledger", "auth_epoch", "mandate_gate", "checkout_lease",
+             "session_names", "service_lease")
 DEFAULT_AUDIT_LOG = "~/.hermes/fork-guardrails/audit.jsonl"
+DEFAULT_STATE_DB = "~/.hermes/state.db"
 _TURN_STATE_FILE = "auth_state.json"
 
 
 def _settings() -> dict:
     """Hot-read the settings subtree. Never raises; degrades to 0.2.x defaults."""
     out: dict = {"enabled": True, "log_only": False, "audit_log": DEFAULT_AUDIT_LOG,
+                 "state_db": DEFAULT_STATE_DB,
                  "features": {f: True for f in _FEATURES}}
     get = getattr(_ctx, "get_config", None)
     if not callable(get):
         return out
     for key, fallback in (("enabled", out["enabled"]), ("log_only", out["log_only"]),
-                          ("audit_log", out["audit_log"])):
+                          ("audit_log", out["audit_log"]), ("state_db", out["state_db"])):
         try:
             value = get(key, fallback)
         except Exception:
@@ -153,6 +173,7 @@ def _audit(kind: str, decision: dict, tool_name: str, args: dict, kw: dict, s: d
             "rule_key": (decision or {}).get("rule_key"),
             "tool": tool_name,
             "session_id": _sid(kw),
+            "session_name": _session_name(s, _sid(kw)),
             "turn_id": kw.get("turn_id") or "",
             "text": text or None,
         }
@@ -164,6 +185,41 @@ def _audit(kind: str, decision: dict, tool_name: str, args: dict, kw: dict, s: d
 
 def _sid(kw: dict) -> str:
     return kw.get("session_id") or kw.get("task_id") or "_global"
+
+
+_NAMES_TTL_S = 30.0
+_names_cache: dict[str, tuple[float, str]] = {}
+
+
+def _session_name(s: dict, sid: str) -> str:
+    """Human-readable name for traces (ToDo «Про́риоцепция» §3, Вл 21.11: «имя сессии —
+    имя, а не хэш»). The pinned `sessions.title` from state.db when it exists — titles
+    are unique across the DB (the title generator dedups with #N), so the title alone
+    identifies the session — otherwise the sid. Read-only, TTL-cached, never raises:
+    name resolution must never block or crash a guarded call."""
+    if not sid:
+        return sid
+    if not s["features"].get("session_names", True):
+        return sid
+    now = time.time()
+    hit = _names_cache.get(sid)
+    if hit is not None and now - hit[0] < _NAMES_TTL_S:
+        return hit[1]
+    name = sid
+    try:
+        import sqlite3
+        db = os.path.expanduser(str(s.get("state_db") or DEFAULT_STATE_DB))
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1.0)
+        try:
+            row = con.execute("SELECT title FROM sessions WHERE id = ?", (sid,)).fetchone()
+        finally:
+            con.close()
+        if row and row[0] and str(row[0]).strip():
+            name = str(row[0]).strip()
+    except Exception:
+        pass  # unreadable DB = fall back to the hash, the old discipline
+    _names_cache[sid] = (now, name)
+    return name
 
 
 def _sig(tool: str, args: dict) -> str:
@@ -430,7 +486,8 @@ def _remote_write_record(text: str, tool_name: str, args: dict, kw: dict, s: dic
     op_id = uuid.uuid4().hex[:12]
     turn_now = int(_load_turn_state(s).get("turn", 0))
     _ledger(s, {"kind": "remote_write", "hosts": sorted(hosts), "targets": targets,
-                "cmd": text[:300], "tool": tool_name, "session_id": sid, "turn_id": kw.get("turn_id") or "",
+                "cmd": text[:300], "tool": tool_name, "session_id": sid,
+                "session_name": _session_name(s, sid), "turn_id": kw.get("turn_id") or "",
                 "md5_before": md5, "md5_note": note,
                 "op_id": op_id, "op_class": op_classes, "turn": turn_now})
     with _lock:
@@ -524,6 +581,10 @@ def _decide(tool_name: str, args: dict, kw: dict):
         _lv = _checkout_gate(tool_name, args, text, kw, s, _verdict)
         if _lv is not None:
             return _lv
+    if s["features"].get("service_lease", True):
+        _sv = _service_gate(tool_name, text, kw, s, _verdict)
+        if _sv is not None:
+            return _sv
     if text:
         if s["features"]["force_push_block"] and FORCE_PUSH_PROTECTED.search(text):
             return _verdict({"action": "block",
@@ -657,6 +718,18 @@ def _repo_root_for(path: str) -> str:
         root = os.path.realpath(r.stdout.strip()) if r.returncode == 0 else ""
     except Exception:
         root = ""
+    if root:
+        # One project = one semaphore (proprioception §4, 21.11): a linked
+        # worktree is the SAME project as its main checkout — resolve there.
+        try:
+            w = subprocess.run(["git", "-C", key, "worktree", "list", "--porcelain"],
+                               capture_output=True, text=True, timeout=5, check=False)
+            first = next((l[len("worktree "):] for l in w.stdout.splitlines()
+                          if l.startswith("worktree ")), "")
+            if first and w.returncode == 0:
+                root = os.path.realpath(first)
+        except Exception:
+            pass
     _REPO_CACHE[key] = root
     return root
 
@@ -741,6 +814,7 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
     lease = _read_lease(lf)
     now = time.time()
     holder = str((lease or {}).get("session_id") or "")
+    holder_name = _session_name(s, holder) if holder else ""
     if lease and holder == sid:
         if not s["log_only"]:
             lease["ts"] = now
@@ -752,7 +826,7 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
         return None
     if lease and (now - float(lease.get("ts") or 0)) < CHECKOUT_TTL_S:
         return _verdict({"action": "block", "rule_key": "fork-guardrails:resource-lease",
-                         "message": f"{resource} is leased to session {holder!r} "
+                         "message": f"{resource} is leased to {holder_name!r} "
                                     f"(branch {lease.get('branch')!r}, active "
                                     f"{int(now - float(lease['ts']))}s ago). Do not write from two "
                                     "sessions into one directory: take your own worktree/subdir or "
@@ -763,14 +837,15 @@ def _lease_decide(resource: str, sid: str, tool_name: str, args: dict, kw: dict,
             dirty = [l[3:] for l in _git_out(resource, "status", "--porcelain=v1").splitlines() if l.strip()][:20]
             if dirty:
                 return _verdict({"action": "block", "rule_key": "fork-guardrails:lease-dirty",
-                                 "message": f"{resource}: stale lease of {holder!r}, but the tree is "
+                                 "message": f"{resource}: stale lease of {holder_name!r}, but the tree is "
                                             f"dirty ({len(dirty)} paths, e.g. {', '.join(dirty[:4])}). The old "
                                             "owner must commit/clean first; stealing a dirty tree is how "
                                             "histories got mixed 23.11/24.11."})
     if s["log_only"]:
         return None
     os.makedirs(os.path.dirname(lf), exist_ok=True)
-    rec = {"session_id": sid, "resource": resource, "tool": tool_name,
+    rec = {"session_id": sid, "name": _session_name(s, sid),
+           "resource": resource, "tool": tool_name,
            "branch": _git_out(resource, "rev-parse", "--abbrev-ref", "HEAD").strip() or "-",
            "ts": now, "took_over_from": holder or None}
     try:
@@ -813,6 +888,99 @@ def _checkout_gate(tool_name: str, args: dict, text: str, kw: dict, s: dict, _ve
         out = _lease_decide(r, sid, tool_name, args, kw, s, _verdict)
         if out is not None:
             return out
+    return None
+
+
+# ── v0.6.1 service lease (proprioception §1, 21.11 incident: foreign stop of
+#    :8006 serving left it down 45 min). Mutating ops on systemd units / docker
+#    containers mint a lease; a foreign session is blocked with the holder NAME;
+#    owner stop releases the unit for the next arrival in the queue.
+_SERVICE_MUTATIONS = {"start", "stop", "restart", "reload", "try-restart",
+                      "reload-or-restart", "kill", "enable", "disable",
+                      "mask", "unmask"}
+_SERVICE_SEGMENT_SPLIT = re.compile(r"[;&|]{1,2}|\$\(")
+
+
+def _service_ops(text: str):
+    """Yield (resource, verb) for mutating service ops mentioned in a command."""
+    out = []
+    for seg in _SERVICE_SEGMENT_SPLIT.split(text or ""):
+        toks = seg.split()
+        if "systemctl" in toks:
+            i = toks.index("systemctl")
+            rest = [t for t in toks[i + 1:] if not t.startswith("-")]
+            if not rest or rest[0] not in _SERVICE_MUTATIONS:
+                continue  # status/show/is-active/list-* are read-only: no mint
+            verb, units = rest[0], rest[1:]
+            for u in units:
+                if re.fullmatch(r"[A-Za-z0-9@:._-]+(\.service|\.socket|\.timer|\.mount)?", u):
+                    out.append((f"unit:{u}", verb))
+        elif "docker" in toks and len(toks) > 1 and toks[toks.index("docker") + 1] in ("stop", "restart", "kill"):
+            verb = toks[toks.index("docker") + 1]
+            for u in [t for t in toks[toks.index("docker") + 2:] if not t.startswith("-")]:
+                out.append((f"docker:{u}", verb))
+    return out
+
+
+def _service_gate(tool_name: str, text: str, kw: dict, s: dict, _verdict):
+    """Arbitration for services: owner+queue, enforced in the kernel write path."""
+    if tool_name not in ("terminal", "execute_code") or not text:
+        return None
+    ops = _service_ops(text)
+    if not ops:
+        return None
+    sid = _sid(kw)
+    if not sid or sid == "unknown":
+        return None
+    args = {"command": text[:200]}
+    now = time.time()
+    for resource, verb in ops:
+        lf = _lease_file(s, resource)
+        lease = _read_lease(lf)
+        holder = str((lease or {}).get("session_id") or "")
+        if lease and holder == sid:
+            if verb in ("stop", "kill"):
+                try:
+                    os.unlink(lf)
+                except OSError:
+                    pass
+                _audit("service_lease_release", {"action": "allow",
+                        "rule_key": "fork-guardrails:service-lease",
+                        "message": f"{sid} released {resource}"},
+                        tool_name, args, kw, s)
+            else:
+                if not s["log_only"]:
+                    lease["ts"] = now
+                    try:
+                        with open(lf, "w", encoding="utf-8") as fh:
+                            json.dump(lease, fh)
+                    except Exception:
+                        pass
+            continue
+        if lease and (now - float(lease.get("ts") or 0)) < CHECKOUT_TTL_S:
+            if s["log_only"]:
+                continue
+            holder_name = _session_name(s, holder)
+            return _verdict({"action": "block", "rule_key": "fork-guardrails:service-lease",
+                             "message": f"{resource} is leased to {holder_name!r} (service lease, "
+                                        f"active {int(now - float(lease['ts']))}s ago). Stopping another "
+                                        "session's service without arbitration is the 21.11 :8006 outage: "
+                                        "coordinate with the holder or win the queue; the lease goes stale "
+                                        f"after {CHECKOUT_TTL_S}s of holder silence."})
+        if s["log_only"]:
+            continue
+        os.makedirs(os.path.dirname(lf), exist_ok=True)
+        rec = {"session_id": sid, "name": _session_name(s, sid), "resource": resource,
+               "tool": tool_name, "branch": "service", "verb": verb, "ts": now,
+               "took_over_from": holder or None}
+        try:
+            with open(lf, "w", encoding="utf-8") as fh:
+                json.dump(rec, fh)
+        except Exception:
+            return None
+        _audit("service_lease_acquire", {"action": "allow",
+                "rule_key": "fork-guardrails:service-lease",
+                "message": f"{sid} -> {resource} ({verb})"}, tool_name, args, kw, s)
     return None
 
 
