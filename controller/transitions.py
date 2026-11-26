@@ -14,9 +14,9 @@ from . import mandate, model, wake
 OPEN_TASK_STATES_FOR_RESUME = ("blocked", "failed", "needs_human")
 
 ALLOWED: dict[str, set[str]] = {
-    "draft": {"needs_clarification", "deferred", "ready"},
-    "needs_clarification": {"draft", "deferred", "ready"},
-    "deferred": {"ready"},
+    "draft": {"needs_clarification", "deferred", "ready", "cancelled"},
+    "needs_clarification": {"draft", "deferred", "ready", "cancelled"},
+    "deferred": {"ready", "cancelled"},
     "ready": {"running"},
     "running": {"verifying", "blocked", "paused", "needs_human", "failed", "cancelled"},
     "verifying": {"completed", "ready", "needs_human", "failed", "cancelled"},
