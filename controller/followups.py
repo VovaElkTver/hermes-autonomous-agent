@@ -43,6 +43,53 @@ _OPEN_TASK_STATES = ("draft", "ready", "running", "blocked", "paused",
                      "needs_human", "verifying", "failed")
 _TERMINAL_TASK_STATES = ("completed", "cancelled")
 
+# ---------------------------------------------------------------------------
+# S3 (TZ-memdoor-5090-v2): HEARTBEAT_OK dedup of periodic review answers.
+#
+# Donor: gateway/server_jobs.go:585-600 (isHeartbeatOK) + ADR-0022 — «a check with
+# nothing to report wakes nobody; it answers HEARTBEAT_OK, and an answer identical
+# to the last run's wakes nobody either.» We borrow the *mechanics*, not the Go runtime.
+#
+# A periodic review whose body is the bare token (or repeats its last delivered body)
+# is skipped_quiet: no dispatch, no chat wake, the window advances so it is not
+# re-tried every beat. A longer body ("HEARTBEAT_OK — but note that…") is NOT the
+# bare token and therefore still wakes. OFF by default (byte-for-byte pre-S3);
+# agents may use the token deliberately once the flag is on.
+HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK"
+
+_heartbeat_dedup_enabled = False   # ВЫКЛЮЧЕНО по умолчанию: при OFF поведение побайтово как до S3.
+_last_body: dict[str, str] = {}    # followup_id -> last actually-delivered body (process-local)
+
+
+def set_heartbeat_dedup_enabled(flag: bool) -> None:
+    """Enable S3 HEARTBEAT_OK dedup (bare-token / identical-body review answers are skipped_quiet)."""
+    global _heartbeat_dedup_enabled
+    _heartbeat_dedup_enabled = bool(flag)
+
+
+def is_heartbeat_dedup_enabled() -> bool:
+    """Whether S3 dedup is active (OFF = byte-for-byte pre-S3 behavior)."""
+    return _heartbeat_dedup_enabled
+
+
+def _heartbeat_quiet(row: dict) -> bool:
+    """S3: True when a review row's body should be skipped_quiet (flag-gated).
+
+    Quiet when the body is the bare HEARTBEAT_OK token, or identical to the body
+    last delivered for this followup. OFF -> always False."""
+    if not _heartbeat_dedup_enabled:
+        return False
+    body = str(row.get("text") or "")
+    if body.strip() == HEARTBEAT_OK_TOKEN:
+        return True
+    prev = _last_body.get(row.get("followup_id") or "")
+    return bool(body) and prev is not None and body == prev
+
+
+def _remember_body(rid: str, body: str) -> None:
+    """Record the body actually delivered for a followup (drives identical-body dedup)."""
+    _last_body[rid] = str(body or "")
+
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create ctl_followup when absent (additive, canonical SCHEMA_SQL keeps the
@@ -289,6 +336,19 @@ def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) ->
         if in_flight:
             return None                   # reviews never pile up
         # review: previous cycle finished → slot free, enqueue next cycle below
+    # S3: a review whose answer is quiet (bare HEARTBEAT_OK, or identical to the last
+    # delivery) must not dispatch a task. Advance the window so it is not re-tried
+    # every beat, keep the row in place for the next real answer. OFF -> no-op.
+    if row["kind"] == "review" and _heartbeat_quiet(row):
+        logger.info("followup %s skipped_quiet (S3 heartbeat dedup)", rid)
+        with conn:
+            conn.execute("UPDATE ctl_followup SET last_fired_at=? WHERE followup_id=?",
+                         (now, rid))
+        if row.get("rrule"):
+            with conn:
+                conn.execute("UPDATE ctl_followup SET due_at=? WHERE followup_id=?",
+                             (_next_due(row, now), rid))
+        return None
     try:
         tid = _dispatch_task(conn, row)
     except LookupError as exc:
@@ -311,6 +371,8 @@ def _fire_agent_row(conn: sqlite3.Connection, row: dict, deliver, now: float) ->
         conn.execute(
             "UPDATE ctl_followup SET state=?, dispatch_ref=?, last_fired_at=?, retries=retries+1"
             " WHERE followup_id=?", (next_state, tid, now, rid))
+    if row["kind"] == "review":
+        _remember_body(rid, row.get("text") or "")   # S3: drives identical-body dedup
     if row["kind"] == "review" and row.get("rrule"):
         # B4: re-plate the SAME row to the series' next occurrence (id stable;
         # the dispatch ref above is kept — reviews never pile up).
@@ -402,6 +464,18 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
             with conn:
                 conn.execute("UPDATE ctl_followup SET state='done' WHERE followup_id=?", (rid,))
             continue
+        # S3: a review whose body is quiet (bare HEARTBEAT_OK, or identical to the last
+        # delivery) must not wake the feed. Advance the window, don't deliver. OFF -> no-op.
+        if row["kind"] == "review" and _heartbeat_quiet(row):
+            logger.info("followup %s skipped_quiet (S3 heartbeat dedup, user path)", rid)
+            with conn:
+                conn.execute("UPDATE ctl_followup SET last_fired_at=? WHERE followup_id=?",
+                             (now, rid))
+            if rseries:
+                with conn:
+                    conn.execute("UPDATE ctl_followup SET due_at=? WHERE followup_id=?",
+                                 (_next_due(row, now), rid))
+            continue
         ok = _deliver_one({"text": row["text"]}, deliver)
         # Success: pending→awaiting_ack (reminder) or stays pending (review).
         # Refused send: row keeps its state, but the window restarts — a broken
@@ -411,6 +485,8 @@ def scan(conn: sqlite3.Connection, deliver, *, now: float | None = None,
             conn.execute(
                 "UPDATE ctl_followup SET state=?, last_fired_at=?, retries=retries+1 WHERE followup_id=?",
                 (next_state, now, rid))
+        if ok and row["kind"] == "review":
+            _remember_body(rid, row["text"] or "")   # S3: drives identical-body dedup
         if ok and rseries and row["kind"] == "review":
             # B4: re-plate the same row to the series' next occurrence (id stable).
             with conn:
