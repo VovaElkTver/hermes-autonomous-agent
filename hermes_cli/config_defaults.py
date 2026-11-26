@@ -93,6 +93,9 @@ DEFAULT_CONFIG = {
         "rtx5090": "@rtx5090:mx.elk.mobi",
         "hermes": "@hermes:mx.elk.mobi",
     }},
+    # L1 (TZ-memdoor-5090-v2): thin decision server (Kev contract) base URL —
+    # the server is opt-in by launch (python -m systemone.server), clients here.
+    "systemone": {"url": "http://127.0.0.1:8002"},
     # S5 (TZ-memdoor-5090-v2): fresh anchors after an edit. When enabled, the patch
     # diff is extended with per changed-region windows of the new lines ±3, numbered
     # (fresh anchors for the next edit without a re-read; the numbered windows, not the
