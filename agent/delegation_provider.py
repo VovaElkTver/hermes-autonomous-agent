@@ -44,6 +44,7 @@ from agent.provider_base import ProviderBase
 #: raw route fields (``provider``/``model``/``base_url``/``api_key``) never become model-facing.
 RESERVED_TASK_PARAMETERS = frozenset({
     "goal", "context", "index", "output_schema", "images", "group", "role", "toolsets",
+    "workdir",
     "acp_command", "acp_args", "provider", "model", "base_url", "api_key", "api_mode",
 })
 

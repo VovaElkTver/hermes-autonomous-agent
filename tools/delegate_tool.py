@@ -48,7 +48,8 @@ from tools.delegate_tool_registry import (
     steer_subagent,
 )
 from tools.delegate_tool_tasks import (
-    _MAX_TASK_IMAGES, _coerce_task_images, _coerce_task_schemas, _normalize_task_images, _normalize_task_list,
+    _MAX_TASK_IMAGES, _coerce_task_images, _coerce_task_schemas, _coerce_task_workdirs,
+    _normalize_task_images, _normalize_task_list,
 )
 from tools.delegate_tool_tuning import pin_child_service_tier
 from tools.delegate_tool_toolsets import (
@@ -229,6 +230,10 @@ def _build_child_agent(
     # effort that beats delegation.reasoning_effort, and the profile home the child runs as.
     override_reasoning_effort: Any = None,
     profile_home: Optional[Path] = None,
+    # Per-task working directory (claim rtx5000 delegate-workdir-scope): the child's
+    # starting directory — its terminal/file tools start there and its autonomy scope
+    # resolves from it. None = inherit the parent's cwd (legacy behavior).
+    workdir: Optional[str] = None,
     override_service_tier: Optional[str] = None,  # a route's checked speed tier (tools/delegate_tool_tuning.py)
 ):
     """Build (don't run) a child AIAgent on the main thread. override_* (from delegation config) replace parent
@@ -255,7 +260,7 @@ def _build_child_agent(
     delegation_cfg = _load_config()
     child_toolsets, child_disabled_toolsets = _resolve_child_toolsets(parent_agent, toolsets, effective_role)
     child_prompt = _build_child_system_prompt(
-        goal, context, workspace_path=_resolve_workspace_hint(parent_agent), role=effective_role,
+        goal, context, workspace_path=workdir or _resolve_workspace_hint(parent_agent), role=effective_role,
         max_spawn_depth=max_spawn, child_depth=child_depth,
     )
     parent_api_key = getattr(parent_agent, "api_key", None)
@@ -357,6 +362,10 @@ def _build_child_agent(
         child._session_init_model_config["_delegate_from"] = parent_sid
         child._session_init_model_config[SUBAGENT_ID_KEY] = subagent_id
     child._delegate_profile_home = profile_home  # _ChildRun.await_child runs the conversation in this scope
+    if workdir:
+        # seed_workspace seeds the child's cwd record with this (claim rtx5000
+        # delegate-workdir-scope); its autonomy scope resolves from it too.
+        child._delegate_workdir = workdir
     if child_pool is not None:
         child._credential_pool = child_pool
 
@@ -465,6 +474,7 @@ def _build_children(
     task_list: list[dict[str, Any]], task_schemas: list[Optional[dict[str, Any]]], routes: list[Any], *,
     top_role: str, max_iterations: int, parent_agent,
     live_deleg_id: Optional[str], live_writers: list, task_images: Optional[list[Optional[list[str]]]] = None,
+    task_workdirs: Optional[list[Optional[str]]] = None,
 ) -> tuple[list[tuple], Optional[str]]:
     """Build every child on the main thread (construction is not thread-safe), each on its task's route;
     ``(children, None)`` or ``([], error)`` on an explicit-pin preflight failure."""
@@ -484,7 +494,9 @@ def _build_children(
                 task_index=i, goal=t["goal"], context=_child_context,
                 toolsets=None,  # always inherit the parent's toolsets
                 model=route.creds["model"], max_iterations=max_iterations, task_count=len(task_list),
-                parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role), **_route_overrides(route),
+                parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role),
+                workdir=task_workdirs[i] if task_workdirs and i < len(task_workdirs) else None,
+                **_route_overrides(route),
             )
         except ValueError as exc:
             # An owner refusal can land mid-batch: the siblings built so far hold reservations.
@@ -530,6 +542,53 @@ def _routes_for(task_list: list[dict[str, Any]], cfg: dict[str, Any], credential
     except ValueError as exc:
         return [], str(exc)
     return [route] * len(task_list), None
+
+
+def _refuse_disabled_autonomy_scopes(routes: list[Any], task_workdirs: Optional[list[Optional[str]]],
+                                     parent_agent: Any) -> None:
+    """Controller spawn preflight (claim rtx5000 delegate-workdir-scope, bonus point):
+    a child whose target workdir sits in a disabled or never-enabled autonomy scope
+    would die on its first tool call with an opaque barrier block (field: 7 fan-out
+    children each burned up to 9 API calls); refuse it at spawn with a clear entry
+    error instead. The child's target workdir is the task's explicit workdir, else
+    the inherited parent cwd (process cwd as last resort). No-op unless the
+    managed-autonomy controller is active."""
+    try:
+        from gateway.run_inbound import _ctl_flag_on
+        if not _ctl_flag_on():
+            return
+        from controller import model as _ctl_model, scope as _ctl_scope
+        from tools.terminal_tool import get_session_cwd
+    except Exception:
+        return
+    try:
+        conn = _ctl_model.connect()
+    except Exception as exc:
+        # Controller active but its state unreadable: the per-call barrier would
+        # fail closed for every child anyway — refuse the whole spawn with a
+        # clear error instead of spawning doomed children (same stance as the
+        # barrier's fail-closed contract).
+        for route in routes:
+            if not route.error:
+                route.error = f"[controller] spawn preflight unavailable ({exc}) — no children spawned"
+        return
+    try:
+        parent_task_id = getattr(parent_agent, "_current_task_id", None)
+        for i, route in enumerate(routes):
+            if route.error:
+                continue
+            target = task_workdirs[i] if task_workdirs and i < len(task_workdirs) and task_workdirs[i] else None
+            if target is None:
+                target = get_session_cwd(parent_task_id) or str(Path.cwd().resolve())
+            scope = _ctl_scope.nearest_permission_scope(conn, str(Path(target).resolve()))
+            if not _ctl_model.get_permission(conn, scope)["enabled"]:
+                route.error = (
+                    f"[controller] spawn refused: autonomy is off for workdir {target} "
+                    f"(scope {scope}) — enable that scope or pass a workdir inside an enabled one; "
+                    f"ctl_enqueue the goal if it must wait for enablement"
+                )
+    finally:
+        conn.close()
 
 
 def _settle_refused_transcripts(refused: list[dict[str, Any]], live_deleg_id: Optional[str], live_writers: list,
@@ -620,6 +679,8 @@ def delegate_task(
     if not err:
         task_images, err = _coerce_task_images(task_list, images)
     if not err:
+        task_workdirs, err = _coerce_task_workdirs(task_list)
+    if not err:
         # One route per task from the active delegation provider (delegation.backend), or from credentials_cfg
         # (internal callers only, e.g. /review → auxiliary.review: a per-call routing owner shaped like the
         # delegation section, kept together with its fallback policy through child construction). Explicit-pin
@@ -627,6 +688,11 @@ def delegate_task(
         routes, err = _routes_for(task_list, cfg, credentials_cfg, parent_agent)
     if err:
         return tool_error(err)
+    # Controller spawn preflight (claim rtx5000 delegate-workdir-scope, bonus): a child whose
+    # target workdir sits in a disabled/never-enabled autonomy scope dies on its first tool
+    # call with an opaque barrier block; refuse it at spawn instead. No-op unless the
+    # managed-autonomy controller is active.
+    _refuse_disabled_autonomy_scopes(routes, task_workdirs, parent_agent)
     # Fail closed per task: a task its backend cannot route is refused alone (its entry carries the error); the call
     # is a tool error only when no task can run.
     runnable = [r for r in routes if not r.error]
@@ -667,7 +733,7 @@ def delegate_task(
 
     children, err = _build_children(
         task_list, task_schemas, routes, top_role=top_role, max_iterations=default_max_iter, parent_agent=parent_agent,
-        live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images,
+        live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images, task_workdirs=task_workdirs,
     )
     if err:
         return tool_error(err)
@@ -844,6 +910,15 @@ DELEGATE_TASK_SCHEMA = {
                             "is enabled; otherwise the whole call returns as one message). Tasks sharing a group return "
                             "together in ONE message; ungrouped tasks return individually as each finishes. This does not "
                             "order execution; if B needs A's output, dispatch B after A returns.",
+                        ),
+                        "workdir": _p(
+                            "string",
+                            "Optional working directory the child starts in: an absolute path or a ~/... or relative "
+                            "path to an EXISTING directory. Defaults to inheriting the parent's current directory. The "
+                            "child's terminal/file tools start there. When managed autonomy (the controller) is active, "
+                            "the child's autonomy scope resolves from this path: a workdir inside an enabled scope lets "
+                            "the child work while ancestor scopes stay paused; a workdir inside a paused/never-enabled "
+                            "scope refuses the spawn with a clear error.",
                         ),
                     },
                     "required": ["goal"],

@@ -48,6 +48,13 @@ def check(conn, *, scope: str, origin: str, task_id: str | None = None,
         return True, "interactive"
     perm = model.get_permission(conn, scope)
     if not perm["enabled"]:
+        # No row at all (granted_via None, epoch 0) means the scope was never
+        # enabled — say so, so a session resolving into an unmanaged directory
+        # gets an actionable block instead of the pause wording (claim
+        # rtx5000 delegate-workdir-scope: dead children burned API calls on
+        # the opaque 'paused' message).
+        if perm["granted_via"] is None and perm["execution_epoch"] == 0:
+            return False, f"no autonomy grant for scope {scope} (never enabled) — queue not advancing"
         return False, "autonomy paused/off — queue not advancing"
     if task_id:
         task = model.get_task(conn, task_id)

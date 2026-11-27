@@ -124,6 +124,36 @@ def _coerce_task_schemas(
 # Per-task image ceiling: enough for screenshots/mocks while keeping the child's first request small.
 _MAX_TASK_IMAGES = 8
 
+
+def _coerce_task_workdirs(
+    task_list: list[dict[str, Any]]
+) -> tuple[list[Optional[str]], Optional[str]]:
+    """Per-task validated workdirs: ``(list[Optional[str]], None)`` — a task's
+    optional ``workdir`` (the directory the child starts in), else ``(None, error)``.
+    ``None`` entries inherit the parent's current directory (legacy behavior).
+    A path is validated as an existing directory; relative paths resolve against
+    the process cwd. Scope gating (managed autonomy) is a separate concern: a
+    workdir inside a disabled scope is refused at spawn by the controller
+    preflight, not here."""
+    from pathlib import Path
+    task_workdirs: list[Optional[str]] = []
+    for i, task in enumerate(task_list):
+        raw = task.get("workdir")
+        if raw is None:
+            task_workdirs.append(None)
+            continue
+        if not isinstance(raw, str) or not raw.strip():
+            return [], f"Task {i} 'workdir' must be a non-empty string path."
+        path = Path(raw.strip()).expanduser()
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path = path.resolve()
+        if not path.is_dir():
+            return [], f"Task {i} workdir {raw!r} is not an existing directory."
+        task_workdirs.append(str(path))
+    return task_workdirs, None
+
+
 def _normalize_task_images(task: dict, i: int) -> tuple[Optional[list[str]], Optional[str]]:
     """``(cleaned_list_or_None, None)`` for a task's optional ``images`` (local paths, http(s) or data: URLs), else
     ``(None, error)``. A bare string is wrapped into a one-entry list (small models emit scalars for arrays)."""

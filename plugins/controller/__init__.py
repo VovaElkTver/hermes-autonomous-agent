@@ -66,10 +66,24 @@ def _db():
 # ---- dispatch barrier --------------------------------------------------------
 
 def _default_scope() -> str:
-    """Fallback queue scope when a session was never registered by the
-    dispatcher: the process working directory (tasks are queued per workdir)."""
+    """Last-resort queue scope when a session has neither a pin nor a cwd
+    record: the process working directory (tasks are queued per workdir)."""
     from pathlib import Path
     return str(Path.cwd().resolve())
+
+
+def _resolve_live_scope(task_id: str) -> str:
+    """Live session→scope (claim rtx5000 delegate-workdir-scope, defect 2):
+    the session's terminal cwd record — seeded with the child's spawn workdir,
+    refreshed after every completed command — resolved to the nearest managed
+    scope up the tree. Explicit pins in ``_scope_by_session`` still win over
+    the live record; the process cwd is the last resort. Any resolver failure
+    falls back to the legacy process-cwd scope (no regression)."""
+    try:
+        from controller import scope as _scope_mod
+        return _scope_mod.resolve_session_scope(_db(), task_id, _default_scope())
+    except Exception:
+        return _default_scope()
 
 
 def _origin_of(task_id: str, session_id: str) -> str:
@@ -97,7 +111,7 @@ def _on_pre_tool_call(tool_name: str = "", args: dict | None = None, task_id: st
         # tool). This is what lets a paused or untasked child still think.
         if barrier.is_cognitive(tool_name):
             return None
-        scope = _scope_by_session.get(session_id) or _default_scope()
+        scope = _scope_by_session.get(session_id) or _resolve_live_scope(task_id)
         task_id_ctl = kw.get("controller_task_id") or os.environ.get(_TASK_ENV) \
             or _task_for_scope(_db(), scope)
         ok, why = barrier.check(_db(), scope=scope, origin=origin, task_id=task_id_ctl)
@@ -210,11 +224,11 @@ def _maybe_pump(scope: str) -> None:
         logger.debug("controller pump spawn failed: %s", exc)
 
 
-def _on_post_llm_call(session_id: str = "", **kw):
+def _on_post_llm_call(session_id: str = "", task_id: str = "", **kw):
     if not _enabled():
         return
     try:
-        scope = _scope_by_session.get(session_id) or _default_scope()
+        scope = _scope_by_session.get(session_id) or _resolve_live_scope(task_id or kw.get("task_id", ""))
         _maybe_pump(scope)
     except Exception as exc:
         logger.debug("controller post-llm pump check failed: %s", exc)
