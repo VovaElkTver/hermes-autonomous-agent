@@ -193,3 +193,63 @@ def _raw_yesno(base, q):
     with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
+
+
+class TokenIdBackend(BaseHTTPRequestHandler):
+    """Real-shape vLLM (this fleet): top_logprobs keyed token_id:NNN, top
+    candidate a layout newline, the yes/no words behind it."""
+    IDS = {7179: " Yes", 21114: " No", 271: "\n\n", 25: "I", 279: " the"}
+
+    def log_message(self, format, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        payload = json.loads(self.rfile.read(n).decode())
+        if self.path == "/detokenize":
+            raw = json.dumps({"prompt": "".join(
+                self.IDS.get(int(t), "?") for t in payload["tokens"])}).encode()
+        else:
+            top = {"token_id:271": -0.02, "token_id:7179": -2.5,
+                   "token_id:21114": -4.0, "token_id:25": -4.5,
+                   "token_id:279": -5.0}
+            raw = json.dumps({"choices": [{"text": "\n\n", "logprobs":
+                                  {"top_logprobs": [top]}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+def test_token_id_shape_with_newline_top_is_parsable(monkeypatch):
+    """Port defect claim 27.11 (rtx5000 E2E): keys token_id:NNN and a \n\n
+    first candidate used to produce 'unparsable' — they must resolve via
+    /detokenize and be filtered as non-signal."""
+    import os
+    bport, oport = free_port(), free_port()
+    stub = ThreadingHTTPServer(("127.0.0.1", bport), TokenIdBackend)
+    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "systemone.server", "--port", str(oport),
+         "--backend", f"http://127.0.0.1:{bport}"],
+        cwd=root, env={**os.environ, "PYTHONPATH": root},
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        base = f"http://127.0.0.1:{oport}"
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(base + "/nope", timeout=0.5)
+                break
+            except urllib.error.HTTPError:
+                break
+            except Exception:
+                time.sleep(0.1)
+        monkeypatch.setenv("HERMES_SYSTEMONE_URL", base)
+        d = decide_yesno("q")
+        assert d.status == "ok", (d.status, d.reason)
+        assert d.value is True and 0 < d.p < 1  # yes outranks no, \n filtered
+    finally:
+        proc.terminate()
+        stub.shutdown()

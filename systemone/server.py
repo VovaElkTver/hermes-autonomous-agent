@@ -49,6 +49,33 @@ def _cache_put(key: str, blob: dict) -> None:
         _cache[key] = (time.time(), blob)
 
 
+_TOKEN_TEXT: dict[int, str] = {}
+_TOKEN_TEXT_LOCK = threading.Lock()
+
+
+def _token_text(token_id: int) -> str:
+    """Detokenize one id via the backend /detokenize (cached per id).
+
+    Some vLLM builds answer ``top_logprobs`` keyed ``token_id:NNN`` instead of
+    token text; the contract speaks tokens, so ids are resolved — a failed
+    lookup degrades to "" and simply drops that candidate."""
+    with _TOKEN_TEXT_LOCK:
+        if token_id in _TOKEN_TEXT:
+            return _TOKEN_TEXT[token_id]
+    try:
+        req = urllib.request.Request(
+            _backend.rstrip("/") + "/detokenize",
+            data=json.dumps({"tokens": [token_id]}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=_BACKEND_TIMEOUT_S) as resp:
+            text = json.loads(resp.read().decode()).get("prompt", "")
+    except Exception:
+        text = ""
+    with _TOKEN_TEXT_LOCK:
+        _TOKEN_TEXT[token_id] = text
+    return text
+
+
 def _complete(prompt: str) -> tuple[dict[str, float] | None, str]:
     """First-token logprob map {token: logprob}; (None, reason) on degradation."""
     body = {"model": _model, "prompt": prompt, "max_tokens": 1, "logprobs": 5,
@@ -65,11 +92,21 @@ def _complete(prompt: str) -> tuple[dict[str, float] | None, str]:
     except Exception:
         return None, "model_down"
     if isinstance(top, dict):  # vllm shape {token: logprob}
-        return {str(t).lower().strip(): float(v) for t, v in top.items()}, ""
+        out: dict[str, float] = {}
+        for t, v in top.items():
+            name = str(t)
+            if name.startswith("token_id:"):
+                name = _token_text(int(name.split(":", 1)[1]))
+            key = name.lower().strip()
+            # base models emit layout tokens (\n) before the answer word: they
+            # carry no decision signal and must not mask the candidates.
+            if key:
+                out[key] = max(out.get(key, -math.inf), float(v))
+        return out, ""
     if isinstance(top, list):  # openai shape [{"token","logprob"}]
         try:
             return ({str(e["token"]).lower().strip(): float(e["logprob"])
-                     for e in top}), ""
+                     for e in top if str(e["token"]).strip()}), ""
         except Exception:
             return None, "degraded_no_logprobs"
     return None, "degraded_no_logprobs"
