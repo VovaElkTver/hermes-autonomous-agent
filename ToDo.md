@@ -164,3 +164,17 @@ p.1 residual на ноде rtx5000 (terminal-default печатает process-cw
 - Точка стыка двух доноров: вход Automodel-RL = JSONL траекторий; AgentTracer — референсная форма
   контракта траектории/GRPO-экспортёра для сверки нашей схемы harness-rl-data.
 - Статус: «иди» не дано; решение о заимствованиях за Вл.
+- Fable-датасет (MoreThought/Fable-5.1-Max-Reasoning-Filtered-10000x, разбор 28.11 в чате: 5k —
+  100% плейсхолдер-аргументы, 10k — 53% пустых, 0% видимого thinking, 82% обрывов трасс):
+  **вердикт Вл 28.11 — не берём.**
+
+## Разобрать датасет google/multimodal-knowledge-agent (отложено Вл 28.11)
+
+https://huggingface.co/datasets/google/multimodal-knowledge-agent — «Multimodal Knowledge
+Agent (MKA) Showcase Examples», Google, Apache-2.0, <1K строк (imagefolder: image/document/
+geospatial), обновлён 10.11.2026, 10.5k скачиваний.
+Что разобрать: формат агентных мультимодальных трасс (документы/карты/VQA), схема
+шагов и тулзов; пригодность как (а) референс формы наших intake-трасс pass2/pass3
+(Qwen3.8-27B/Flash-Next :8001/:8002 читают растры PDF — прямой стык), (б) eval-набор
+длинных мультимодальных эпизодов, (в) кандидаты в dataloader Automodel.
+Ссылка рядом: секция «Доноры тренировочной/RL-линии» (Automodel+Motif) — тот же контур.
