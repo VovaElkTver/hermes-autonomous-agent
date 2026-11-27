@@ -1971,7 +1971,7 @@ DEFAULT_CONFIG = {
         "keep_head": 1200,
         "keep_tail": 800,
         # Tools whose own contracts already bound/paginate output; never cut again.
-        "exempt_tools": ["read_file", "execute_code", "session_search", "ccr_retrieve", "search_files"],
+        "exempt_tools": ["read_file", "execute_code", "session_search", "ccr_retrieve", "search_files", "skill_view"],
     },
     # Tool Search replaces deferred tools in the model-facing array with the
     # tool_search / tool_describe / tool_call bridges and surfaces them on demand.
