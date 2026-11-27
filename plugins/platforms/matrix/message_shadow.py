@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -105,11 +106,14 @@ def ask_judge(ctx: list[dict]) -> tuple[float | None, str]:
         text = (blob["choices"][0]["message"]["content"] or "").strip().lower()
     except Exception:
         return None, "unavailable"
-    if text.startswith("yes"):
-        return 1.0, "ok"
-    if text.startswith("no"):
-        return 0.0, "ok"
-    return None, "unparsable"
+    # L8 verdict-parsing lesson (28.11): reasoning models prefix the verdict
+    # with prose ("The user asks X ... answer: yes"). The first character is
+    # not the decision — trust the LAST standalone yes/no token; the
+    # yes/no ambiguity of "yes/no" resolves conservatively to no-reply.
+    hits = re.findall(r"\b(yes|no)\b", text)
+    if not hits:
+        return None, "unparsable"
+    return (1.0, "ok") if hits[-1] == "yes" else (0.0, "ok")
 
 
 def _log_line(entry: dict) -> None:

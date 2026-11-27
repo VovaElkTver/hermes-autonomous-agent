@@ -78,6 +78,42 @@ def test_judge_parses_yes_no_unparsable(on, monkeypatch):
     assert ms.ask_judge([{"from": "a", "text": "b"}]) == (None, "unavailable")
 
 
+def test_judge_reasoning_preamble_uses_last_verdict_token(on, monkeypatch):
+    """L8 lesson (28.11): a reasoning preamble must not mask the verdict."""
+    class R:
+        def __init__(self, payload):
+            self.payload = payload
+        def read(self):
+            return json.dumps(self.payload).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    import urllib.request
+
+    def fake(req, timeout=None):
+        return R({"choices": [{"message": {"content":
+            "The user did not mention the bot and it is mid-conversation. "
+            "On the other hand it could answer the question. So yes, the "
+            "bot should reply."}}]})
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    assert ms.ask_judge([{"from": "a", "text": "b"}]) == (1.0, "ok")
+
+    def fake_negated(req, timeout=None):
+        return R({"choices": [{"message": {"content":
+            "Should it reply? Yes, the question looks addressable — "
+            "but the owner is clearly talking to another person. no."}}]})
+    monkeypatch.setattr(urllib.request, "urlopen", fake_negated)
+    assert ms.ask_judge([{"from": "a", "text": "b"}]) == (0.0, "ok")
+
+    def fake_neither(req, timeout=None):
+        return R({"choices": [{"message": {"content":
+            "none of the options seems certain"}}]})
+    monkeypatch.setattr(urllib.request, "urlopen", fake_neither)
+    assert ms.ask_judge([{"from": "a", "text": "b"}]) == (None, "unparsable")
+
+
 def test_drop_journals_would_and_never_invents_negative(on, home, monkeypatch):
     monkeypatch.setattr(ms, "ask_judge", lambda ctx: (1.0, "ok"))
     ms.observe_dropped(None, "!r", "$e1", "@u", "please help")
