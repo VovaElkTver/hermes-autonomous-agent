@@ -220,3 +220,25 @@ hallucination AUC 0.70-0.73; domain acc 0.64; два fact_check-holdout выда
 Риски: лицензия per-source (14 non-commercial, Stack Exchange CC BY-SA), 4 гейтнутых корпуса
 (WildGuard/WildJailbreak/HackAPrompt/AggreFact — токен), часть меток модельная.
 Первый шаг по мандату: прогнать наш skill-router на их tool_need-корпусе. Статус: мандата нет.
+
+## Форк Hermes-3-Dataset как общий инсттакт-фундамент LoRA (отложено Вл 28.11)
+
+https://huggingface.co/datasets/NousResearch/Hermes-3-Dataset (apache-2.0 — единственный
+чистый лицензионно датасет серии; 1.695 ГБ, ~762 тыс. строк, срез 11.07.2025, не живой;
+разбор 28.11 в чате — 3 среза, 46 717 строк).
+
+Роль в нашем форке: СЛОЙ 0 = общий инсттакт-фон (regularizer к mail-gate траекториям,
+иначе LoRA на 1 098 трассах перекашивается). НЕ агентский корпус: медиана диалога — 3
+сообщения (system+1 пара), tool_calls/```tool_code/[API calls] = 0 на 104 МБ, tool-ролей
+нет; файл НЕ перемешан (head=персон-ролеплей, mid=Q&A без system, tail=креатив).
+
+Обязательные наши изменения перед использованием:
+1. provenance-поля (source/subset/sha/lang) — в исходнике их нет вовсе + перемешать;
+2. схема: слой 1 = наши агентские траектории (mail-gate LoRA-корпус + trace-export) в
+   расширенной схеме с tool-ролями; не валить в одну схему со слоем 0;
+3. system-промпты персон перегенерировать под наш chat template (срез эпохи Hermes-3/Qwen2);
+4. RU-подмешивание (кириллицы в корпусе 1%) из наших intake/mail-корпусов.
+Формат from/value ShareGPT совпадает с нашим export_to_sharegpt.py — конвертер не нужен.
+
+Первый шаг по мандату: скрипт fork_hermes3_base.py (схема+provenance+shuffle+языковые
+метки) + mixing-ratio слой0:слой1 для первого LoRA-прогона. Статус: мандата нет.
