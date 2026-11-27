@@ -111,10 +111,10 @@ OUTBOUND = {
     "rm-recursive": re.compile(r"\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|-r\s+-f|-f\s+-r|--recursive)\b"),
 }
 DELEGATION_ASK = re.compile(r"\b(?:sub-?agents?|parallel agents?|delegate|delegation)\b"
-                            r"|(?:субагент\w*|суб-агент\w*|делегат\w*|делегироват\w*)",
+                            r"|(?:субагент\w*|суб-агент\w*|сабагент\w*|делег\w*|фан-?аут\w*)",
                             re.IGNORECASE)
 DELEGATION_NEG = re.compile(r"\b(?:don'?t|do not|no|never|without)\s+(?:\w+\s+){0,2}(?:sub-?agents?|delegat\w*)"
-                            r"|\b(?:без|никаких|не)\s+(?:\w+\s+){0,2}(?:субагент\w*|делегат\w*)",
+                            r"|\b(?:без|никаких|не)\s+(?:\w+\s+){0,2}(?:субагент\w*|сабагент\w*|делег\w*|фан-?аут\w*)",
                             re.IGNORECASE)
 
 _lock = threading.Lock()                     # tool batches run on a thread pool
