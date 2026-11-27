@@ -1,24 +1,32 @@
 """L6 write-gate on L9 site-skill replay (28.11): write-class steps are
 skipped in replay by default, executed only with replay_writes: true, and
-recorded as evidence in mint.json."""
+recorded as evidence in mint.json. No direct PyYAML (repo ban): skill YAML is
+literal text parsed by the loader under test."""
 import json
 
 import pytest
-import yaml
 
 from tools import site_skill as ss
 
+SKILL_TEXT = """\
+name: {name}
+start_url: file:///x
+steps:
+  - action: wait_for_text
+    text: Up
+  - action: click
+    selector: button.go
+  - action: get_text
+    selector: body
+{extra}"""
+
 
 def _skill(tmp_path, name="demo-gate", *, replay_writes=None):
-    doc = {"name": name, "start_url": "file:///x",
-           "steps": [{"action": "wait_for_text", "text": "Up"},
-                     {"action": "click", "selector": "button.go"},
-                     {"action": "get_text", "selector": "body"}]}
-    if replay_writes is not None:
-        doc["replay_writes"] = replay_writes
+    extra = "replay_writes: true" if replay_writes else ""
     d = tmp_path / name
     d.mkdir(parents=True)
-    (d / "skill.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    (d / "skill.yaml").write_text(SKILL_TEXT.format(name=name, extra=extra),
+                                  encoding="utf-8")
     return d
 
 
@@ -65,12 +73,8 @@ def test_mint_records_write_step_indices(tmp_path, monkeypatch, capsys):
                         lambda u, s, *, fresh: (True, "", {}))
     monkeypatch.setattr(ss, "_ab", lambda *a, **k: None)
     src = tmp_path / "src.yaml"
-    src.write_text(yaml.safe_dump(
-        {"name": "demo-gate", "start_url": "file:///x",
-         "steps": [{"action": "wait_for_text", "text": "Up"},
-                   {"action": "click", "selector": "button.go"},
-                   {"action": "get_text", "selector": "body"}]}),
-        encoding="utf-8")
+    src.write_text(SKILL_TEXT.format(name="demo-gate", extra=""),
+                   encoding="utf-8")
     assert ss.mint(src) == 0
     mint = json.loads((tmp_path / "demo-gate" / "mint.json").read_text())
     assert mint["write_steps"] == [1]

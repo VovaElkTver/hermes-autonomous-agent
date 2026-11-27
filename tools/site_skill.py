@@ -40,7 +40,7 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
+from agent.skill_utils import yaml_load  # repo-standard safe loader (no direct PyYAML dep)
 
 AB = str(Path.home() / "zoo/tinyhumansai/agent-browser/cli/target/release/agent-browser")
 AB_ENV = {
@@ -158,7 +158,7 @@ def _skill_dir(name: str) -> Path:
 
 
 def mint(path: Path) -> int:
-    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc = yaml_load(path.read_text(encoding="utf-8"))
     err = _validate(doc)
     if err:
         print(json.dumps({"published": False, "error": err}))
@@ -192,7 +192,7 @@ def replay(name: str, *, screenshot_on_fail: bool = True) -> int:
     if not yaml_path.exists():
         print(json.dumps({"ok": False, "error": f"skill {name!r} not minted"}))
         return 3
-    doc = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    doc = yaml_load(yaml_path.read_text(encoding="utf-8"))
     captured = {}
     skipped: list[int] = []
     allow_writes = doc.get("replay_writes") is True
