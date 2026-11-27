@@ -27,7 +27,7 @@ from collections import deque
 
 from typing import Any
 
-_MAX_JUDGE_MS = 2000
+_MAX_JUDGE_MS = 8000  # reasoning-model judge: 2s truncated healthy probes to 'unavailable'
 _CTX_WINDOW = 8
 
 _history: dict[str, deque] = {}
@@ -54,6 +54,16 @@ def judge_url() -> str:
                    or "http://192.168.9.100:8012/v1/chat/completions")
     except Exception:
         return "http://192.168.9.100:8012/v1/chat/completions"
+
+
+def judge_model() -> str:
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+        return str((cfg.get("message_shadow") or {}).get("judge_model")
+                   or "critic")
+    except Exception:
+        return "critic"
 
 
 def note_message(room_id: str, sender: str, body: str) -> None:
@@ -86,7 +96,7 @@ def ask_judge(ctx: list[dict]) -> tuple[float | None, str]:
         req = urllib.request.Request(
             judge_url(),
             data=json.dumps({
-                "model": "critic", "temperature": 0, "max_tokens": 2,
+                "model": judge_model(), "temperature": 0, "max_tokens": 256,
                 "messages": [{"role": "user", "content": prompt}],
             }).encode(),
             headers={"Content-Type": "application/json"}, method="POST")

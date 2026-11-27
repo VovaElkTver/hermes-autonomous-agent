@@ -79,7 +79,7 @@ DEFAULT_CONFIG = {
     # {msg_id, p_reply, would} to ~/.hermes/logs/message_shadow.jsonl. The wake
     # decision never changes; an unavailable judge is recorded as null, never
     # as a negative. Env override: HERMES_MESSAGE_SHADOW.
-    "message_shadow": {"enabled": False,
+    "message_shadow": {"enabled": False, "judge_model": "critic",
                        "judge_url": "http://192.168.9.100:8012/v1/chat/completions"},
     # L2 (TZ-memdoor-5090-v2): per-task bounds on agent-registered periodics —
     # times<=60, horizon (default 12h) clamp on the repeat chain, overlap refuse
