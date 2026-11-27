@@ -79,6 +79,14 @@ def task_queue(args: dict | None = None, **_kw) -> dict:
     args = args or {}
     action = args.get("action")
     chat_id = args.get("chat_id") or ""
+    # thL7 (TZ-tinyhumansai, tinyflows completion-fence): a delegated child may
+    # report and emit, but closing tracked work (skip/cancel) is the parent's call.
+    if action in {"skip", "cancel"}:
+        from agent.delegation_context import is_delegated_child_context
+        if is_delegated_child_context():
+            return {"ok": False, "error": (
+                f"{action} closes tracked work — delegated children return findings, "
+                "the parent decides the transition")}
     try:
         if action == "create_batch":
             raw_items = args.get("items") or []

@@ -159,6 +159,12 @@ def ctl_step_done(args: dict, **kw: Any) -> str:
     (gateway/verdict_ledger): the agent's own success grade is recorded as a
     revocable row — issuer pinned to 'agent', confirmable only from outside,
     overturnable from any state — and re-injected into the session from then on."""
+    # thL7 (TZ-tinyhumansai, tinyflows completion-fence): tracked work closes
+    # in the parent that owns it; a delegated child returns findings instead.
+    from agent.delegation_context import is_delegated_child_context
+    if is_delegated_child_context():
+        return _err("delegated children cannot close steps (ctl_step_done is parent-only); "
+                    "return your findings and let the parent decide the transition")
     step_id = str(args.get("step_id") or "").strip()
     status = str(args.get("status") or "done").strip()
     reason = str(args.get("reason") or "").strip()
