@@ -32,6 +32,20 @@ def test_nearest_permission_scope_no_rows(tmp_path):
         conn.close()
 
 
+def test_managed_scope_distinguishes_row_from_closed_world(tmp_path):
+    """Acceptance #5 helper: 'a managed scope exists up here' (returns the
+    row) vs 'nothing managed up the tree' (None) — the two log lines a
+    dispatch-block must not conflate."""
+    conn = model.connect(tmp_path / "c.db")
+    try:
+        root = str(tmp_path / "proj")
+        model.set_permission(conn, root, enabled=False, granted_via="user-command")
+        assert S.managed_scope(conn, root + "/a/b") == root
+        assert S.managed_scope(conn, str(tmp_path / "elsewhere")) is None
+    finally:
+        conn.close()
+
+
 def test_resolve_session_scope_uses_live_cwd_record(tmp_path, monkeypatch):
     import tools.terminal_tool as tt
     conn = model.connect(tmp_path / "c.db")
@@ -42,9 +56,14 @@ def test_resolve_session_scope_uses_live_cwd_record(tmp_path, monkeypatch):
         model.set_permission(conn, enabled, enabled=True, granted_via="user-command")
         monkeypatch.setattr(tt, "_session_cwd", {"sa-child": enabled + "/src"})
         monkeypatch.setattr(tt, "_qualify_task_key", lambda k: k)
+        # a recorded cwd inside a managed subtree → the managed scope row
         assert S.resolve_session_scope(conn, "sa-child", "process-cwd") == enabled
-        # no record yet → the caller's default (legacy process-cwd fallback)
-        assert S.resolve_session_scope(conn, "sa-other", "process-cwd") == "process-cwd"
+        # no record yet → the caller's default, resolved to the nearest managed
+        # scope up its tree (here: nothing managed above the pytest cwd, so the
+        # resolved default itself — scopes are permission-table keys, never a
+        # raw relative string)
+        from pathlib import Path
+        assert S.resolve_session_scope(conn, "sa-other", "process-cwd") == str(Path("process-cwd").resolve())
     finally:
         conn.close()
 

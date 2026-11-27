@@ -81,9 +81,47 @@ def _resolve_live_scope(task_id: str) -> str:
     falls back to the legacy process-cwd scope (no regression)."""
     try:
         from controller import scope as _scope_mod
-        return _scope_mod.resolve_session_scope(_db(), task_id, _default_scope())
+        scope = _scope_mod.resolve_session_scope(_db(), task_id, _default_scope())
+        _diagnose_scope(task_id, scope)
+        return scope
     except Exception:
         return _default_scope()
+
+
+def _diagnose_scope(task_id: str, scope: str) -> None:
+    """Claim rtx5000 stage C, acceptance #5: a dispatch that lands under a
+    non-managed scope must be readable in the log WITHOUT re-inference from
+    restart-erased in-memory state — which input was missing: the session's
+    cwd record (the seed) or the permission row. Fires only on the degraded
+    paths; a clean record→managed-scope resolution stays quiet."""
+    try:
+        from controller import scope as _scope_mod
+        import tools.terminal_tool as tt
+        conn = _db()
+        recorded = tt.get_session_cwd(task_id)  # same read resolve_session_scope does
+        managed = _scope_mod.managed_scope(conn, scope)
+        if recorded:
+            base = str(Path(recorded).resolve())
+            if managed is None:
+                logger.warning(
+                    "controller scope: task=%s recorded cwd=%s has no "
+                    "ctl_autonomy_permission row up its tree; the barrier "
+                    "fails 'never enabled' — no managed scope exists there",
+                    task_id, base)
+        else:
+            if managed is None:
+                logger.warning(
+                    "controller scope: task=%s has no session cwd record "
+                    "(seed lost or never written) AND no managed scope above "
+                    "the process cwd (%s); the barrier fails 'never enabled'",
+                    task_id, scope)
+            else:
+                logger.info(
+                    "controller scope: task=%s has no session cwd record; "
+                    "resolved to managed scope %s above the process cwd",
+                    task_id, scope)
+    except Exception:
+        pass  # diagnostics must never disturb the barrier
 
 
 def _origin_of(task_id: str, session_id: str) -> str:

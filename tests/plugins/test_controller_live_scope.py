@@ -93,6 +93,48 @@ def test_no_cwd_record_falls_back_to_process_scope(env, monkeypatch):
     assert blocked is not None and blocked["action"] == "block"
 
 
+# ── dispatch diagnostics (claim rtx5000 stage C, acceptance #5) ─────────────
+
+def test_diagnostic_warns_when_recorded_cwd_unmanaged(env, monkeypatch, caplog):
+    """Recorded cwd with no permission row up its tree: the log must say
+    exactly that (not 'seed lost' — the seed is present, the row is not)."""
+    import logging
+    plug = env["plug"]
+    _set_cwd(monkeypatch, "sa-child", "/tmp/nowhere-managed")
+    with caplog.at_level(logging.WARNING, logger="controller"):
+        plug._on_pre_tool_call("terminal", task_id="sa-child", session_id="chat-sess")
+    warns = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("recorded cwd=/tmp/nowhere-managed" in m and "never enabled" in m
+               for m in warns), warns
+
+
+def test_diagnostic_warns_when_seed_lost_and_unmanaged(env, monkeypatch, caplog):
+    """No record AND no managed scope above the process cwd: the log must
+    name both missing inputs (seed and row) — the rtx5000 stage C shape."""
+    import logging
+    plug = env["plug"]
+    _set_cwd(monkeypatch, "sa-child", None)
+    with caplog.at_level(logging.WARNING, logger="controller"):
+        plug._on_pre_tool_call("terminal", task_id="sa-child", session_id="chat-sess")
+    warns = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("no session cwd record" in m and "seed lost or never written" in m
+               for m in warns), warns
+
+
+def test_diagnostic_infos_when_seed_lost_but_ancestor_managed(env, monkeypatch, caplog):
+    """No record, but a managed (paused) ancestor above the process cwd:
+    the fallback resolves to that ancestor and the log says so (acceptance #4
+    path made visible)."""
+    import logging
+    plug, home = env["plug"], env["home"]
+    _set_cwd(monkeypatch, "sa-child", None)
+    monkeypatch.chdir(home)  # process cwd inside the (paused) managed home
+    with caplog.at_level(logging.INFO, logger="controller"):
+        plug._on_pre_tool_call("terminal", task_id="sa-child", session_id="chat-sess")
+    infos = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert any("no session cwd record" in m and home in m for m in infos), infos
+
+
 # ── spawn preflight (claim bonus point) ──────────────────────────────────────
 
 def _ctl_flag_off(monkeypatch):
