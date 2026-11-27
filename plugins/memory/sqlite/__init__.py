@@ -70,6 +70,7 @@ MEMORY_TOOL_SCHEMA = {
                 "description": "Entity names this fact is about (add).",
             },
             "limit": {"type": "integer", "description": "Max results (default 5)."},
+            "scope": {"type": "string", "description": "Restrict search/related to facts written by this profile/namespace (omit = all)."},
         },
         "required": ["action"],
     },
@@ -80,7 +81,8 @@ CREATE TABLE IF NOT EXISTS facts(
   id TEXT PRIMARY KEY, text TEXT NOT NULL, kind TEXT DEFAULT 'fact',
   source_profile TEXT, author TEXT,
   created_at TEXT, valid_at TEXT, invalid_at TEXT,
-  embedding BLOB);
+  embedding BLOB, norm TEXT);
+CREATE INDEX IF NOT EXISTS ix_facts_profile ON facts(source_profile);
 CREATE TABLE IF NOT EXISTS entities(name TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS fact_entities(fact_id TEXT, name TEXT, PRIMARY KEY(fact_id, name));
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(text, content='facts', content_rowid='rowid');
@@ -94,6 +96,11 @@ CREATE TABLE IF NOT EXISTS checkpoints(
   session_id TEXT, profile TEXT, ts TEXT NOT NULL,
   sha TEXT NOT NULL, n_messages INTEGER NOT NULL, payload TEXT NOT NULL);
 """
+
+
+def _norm(text: str) -> str:
+    """Admission-gate normalization (Tier L5): casefold + whitespace collapse."""
+    return " ".join((text or "").casefold().split())
 
 
 def _pack(vec: list[float]) -> bytes:
@@ -189,8 +196,28 @@ class SqliteMemoryProvider(MemoryProvider):
             self._conn = sqlite3.connect(str(path), check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
+            self._migrate_norm_column()
             self._conn.commit()
             self._conn_path = str(path)
+
+    def _migrate_norm_column(self) -> None:
+        """Tier L5 (TZ-tinyhumansai): norm column (whitespace-collapsed lowercase text)
+        backs the exact-duplicate admission gate. Older DBs predate the column — add it
+        and backfill live rows once; new DBs get it from _SCHEMA."""
+        assert self._conn is not None  # called from _open under self._lock
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(facts)")}
+        if "norm" not in cols:
+            try:
+                self._conn.execute("ALTER TABLE facts ADD COLUMN norm TEXT")
+            except sqlite3.OperationalError:
+                return  # added concurrently; backfill below is idempotent
+        self._conn.execute("CREATE INDEX IF NOT EXISTS ix_facts_norm ON facts(norm)")
+        pending = self._conn.execute(
+            "SELECT id, text FROM facts WHERE norm IS NULL").fetchall()
+        for fid, text in pending:
+            self._conn.execute("UPDATE facts SET norm=? WHERE id=?", (_norm(text), fid))
+        if pending:
+            logger.info("sqlite memory: backfilled norm for %d facts", len(pending))
 
     def _migrate_if_empty(self) -> None:
         src = str(self._cfg("migrate_from", "") or "")
@@ -344,6 +371,13 @@ class SqliteMemoryProvider(MemoryProvider):
                   author: str = "", created: Optional[str] = None,
                   invalid_at: Optional[str] = None,
                   embedding: Optional[list[float]] = None) -> str:
+        norm = _norm(text)
+        with self._lock:
+            assert self._conn is not None
+            dup = self._conn.execute(
+                "SELECT id FROM facts WHERE norm=? AND invalid_at IS NULL", (norm,)).fetchone()
+        if dup:
+            return dup[0]  # exact-duplicate admission: one live fact per normalized text
         fid = uuid.uuid4().hex[:12]
         if embedding is None:
             try:
@@ -354,10 +388,10 @@ class SqliteMemoryProvider(MemoryProvider):
         with self._lock:
             assert self._conn is not None
             self._conn.execute(
-                "INSERT INTO facts(id,text,kind,source_profile,author,created_at,valid_at,invalid_at,embedding)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO facts(id,text,kind,source_profile,author,created_at,valid_at,invalid_at,embedding,norm)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (fid, text, kind, self._profile, author, now, now, invalid_at,
-                 _pack(embedding) if embedding else None))
+                 _pack(embedding) if embedding else None, norm))
             for ent in entities[:8]:
                 name = ent.strip().lower()
                 if not name:
@@ -367,17 +401,18 @@ class SqliteMemoryProvider(MemoryProvider):
             self._conn.commit()
         return fid
 
-    def _search(self, query: str, limit: int) -> list[dict]:
+    def _search(self, query: str, limit: int, scope: Optional[str] = None) -> list[dict]:
         limit = max(1, min(int(limit or 5), 20))
         try:
             vec = self._embed(query)
         except (RuntimeError, OSError, KeyError) as e:
             logger.debug("sqlite memory: query embed failed (%s), FTS fallback", e)
-            return self._fts(query, limit)
+            return self._fts(query, limit, scope=scope)
         with self._lock:
             assert self._conn is not None
             rows = self._conn.execute(
-                "SELECT id,text,kind,embedding FROM facts WHERE invalid_at IS NULL").fetchall()
+                "SELECT id,text,kind,embedding FROM facts WHERE invalid_at IS NULL"
+                " AND (? IS NULL OR source_profile=?)", (scope, scope)).fetchall()
         scored = []
         maxd = float(self._cfg("min_score", 0.35))
         for rid, rtext, rkind, blob in rows:
@@ -399,7 +434,7 @@ class SqliteMemoryProvider(MemoryProvider):
             return fts
         return scored[:limit]
 
-    def _fts(self, query: str, limit: int) -> list[dict]:
+    def _fts(self, query: str, limit: int, scope: Optional[str] = None) -> list[dict]:
         from sqlite3 import OperationalError
         with self._lock:
             assert self._conn is not None
@@ -407,21 +442,23 @@ class SqliteMemoryProvider(MemoryProvider):
                 rows = self._conn.execute(
                     "SELECT f.id,f.text,f.kind FROM facts_fts j "
                     "JOIN facts f ON f.rowid = facts_fts.rowid "
-                    "WHERE facts_fts MATCH ? AND f.invalid_at IS NULL LIMIT ?",
-                    (query, max(1, min(int(limit or 5), 20)))).fetchall()
+                    "WHERE facts_fts MATCH ? AND f.invalid_at IS NULL"
+                    " AND (? IS NULL OR f.source_profile=?) LIMIT ?",
+                    (query, scope, scope, max(1, min(int(limit or 5), 20)))).fetchall()
             except OperationalError:
                 return []
         return [{"id": r[0], "text": r[1], "kind": r[2], "score": 0.0} for r in rows]
 
-    def _related(self, entity: str, limit: int) -> list[dict]:
+    def _related(self, entity: str, limit: int, scope: Optional[str] = None) -> list[dict]:
         with self._lock:
             assert self._conn is not None
             rows = self._conn.execute(
                 "SELECT f.id,f.text,f.kind FROM facts f "
                 "JOIN fact_entities fe ON fe.fact_id=f.id "
                 "WHERE fe.name=? AND f.invalid_at IS NULL "
+                "AND (? IS NULL OR f.source_profile=?) "
                 "ORDER BY f.created_at DESC LIMIT ?",
-                (entity.strip().lower(), max(1, min(int(limit or 10), 30)))).fetchall()
+                (entity.strip().lower(), scope, scope, max(1, min(int(limit or 10), 30)))).fetchall()
         return [{"id": r[0], "text": r[1], "kind": r[2], "score": 0.0} for r in rows]
 
     def _invalidate(self, fact_id: str) -> bool:
@@ -511,6 +548,13 @@ class SqliteMemoryProvider(MemoryProvider):
                 text = (args.get("text") or "").strip()
                 if not text:
                     return json.dumps({"error": "text required"})
+                # Tier L5 admission gate: reject fragments too short to be durable facts.
+                # Exact duplicates are admitted idempotently (_add_fact returns the live id).
+                min_chars = int(self._cfg("admission_min_chars", 24) or 0)
+                if min_chars and len(_norm(text)) < min_chars:
+                    return json.dumps({"error": (
+                        f"admission: fact too short ({len(text)} chars < {min_chars}) — "
+                        "store complete durable statements, not fragments")})
                 fid = self._add_fact(text, args.get("kind", "fact"),
                                      args.get("entities") or [])
                 return json.dumps({"ok": True, "id": fid})
@@ -518,12 +562,14 @@ class SqliteMemoryProvider(MemoryProvider):
                 q = (args.get("text") or "").strip()
                 if not q:
                     return json.dumps({"error": "text required"})
-                return json.dumps({"results": self._search(q, args.get("limit", 5))})
+                return json.dumps({"results": self._search(q, args.get("limit", 5),
+                                                           scope=args.get("scope"))})
             if action == "related":
                 e = (args.get("entity") or "").strip()
                 if not e:
                     return json.dumps({"error": "entity required"})
-                return json.dumps({"results": self._related(e, args.get("limit", 10))})
+                return json.dumps({"results": self._related(e, args.get("limit", 10),
+                                                            scope=args.get("scope"))})
             if action == "invalidate":
                 return json.dumps({"ok": self._invalidate(args.get("fact_id") or "")})
             if action == "stats":

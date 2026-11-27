@@ -17,6 +17,9 @@ NO_EFFECT_TOOL_NAMES = frozenset({
     "read_file", "search_files", "session_search", "skill_view", "skills_list",
     "web_extract", "web_search", "vision_analyze", "browser_snapshot",
     "browser_get_images", "browser_console", "read_terminal",
+    # Tier L3 (TZ-tinyhumansai) coverage: lazy-catalog readers and the CCR blob
+    # reader re-run cleanly after an interrupted turn — no external state involved.
+    "tool_search", "tool_describe", "ccr_retrieve",
 })
 
 
