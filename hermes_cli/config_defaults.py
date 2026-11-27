@@ -1960,6 +1960,19 @@ DEFAULT_CONFIG = {
         "kernel_idle_timeout": 1800,
         "max_session_kernels": 4,
     },
+    # Tier L1 (TZ-tinyhumansai): CCR for tool outputs — lossy head+tail view in-context,
+    # byte-exact original cached under $HERMES_HOME/cache/ccr, retrieved by hash via the
+    # ccr_retrieve tool. Opt-in: every entry point is a zero-work passthrough when off.
+    "tool_output_ccr": {
+        "enabled": False,
+        # Outputs shorter than this are never compressed (below ~2k tokens compression rarely pays).
+        "min_chars": 8192,
+        # Visible slice of the original kept inline; the rest lives behind the [ccr:HASH] footer.
+        "keep_head": 1200,
+        "keep_tail": 800,
+        # Tools whose own contracts already bound/paginate output; never cut again.
+        "exempt_tools": ["read_file", "execute_code", "session_search", "ccr_retrieve", "search_files"],
+    },
     # Tool Search replaces deferred tools in the model-facing array with the
     # tool_search / tool_describe / tool_call bridges and surfaces them on demand.
     # Working-set core tools stay eager, while the explicit ``defer`` list below
@@ -1994,7 +2007,7 @@ DEFAULT_CONFIG = {
             # tool eager. The runtime fallback in tools/tool_search.py derives from this value.
             "defer": [
                 "computer_use", "session_search", "image_generate",
-                "todo_list", "process_manage", "browser_vault",
+                "todo_list", "process_manage", "browser_vault", "ccr_retrieve",
                 # Desktop GUI surface (desktop_ui, project and catalog toolsets)
                 "drive_preview", "gui_tour", "desktop_preview", "annotate_preview", "manage_catalog",
                 "show_tip", "desktop_project", "close_terminal",

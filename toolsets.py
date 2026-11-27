@@ -21,6 +21,7 @@ _HERMES_CORE_TOOLS = [
     "todo_list", "memory",
     "task_queue",  # tasks_kernel v0: durable queue, event-driven continuation
     "session_search",
+    "ccr_retrieve",  # Tier L1 CCR retrieval; deferred by default (tools.tool_search.defer)
     "clarify",
     "execute_code", "delegate_task",
     "kanban_show", "kanban_list",
@@ -124,6 +125,7 @@ TOOLSETS = {
     "memory": _ts("Persistent memory across sessions (personal notes + user profile)", ["memory"]),
     "context_engine": _ts("Runtime tools exposed by the active context engine"),
     "session_search": _ts("Search and recall past conversations with summarization", ["session_search"]),
+    "ccr_retrieve": _ts("Retrieve the byte-exact tool output cached behind a [ccr:HASH] marker", ["ccr_retrieve"]),
     "connections": _ts("Remote connector discovery, execution, and account authorization", ["manage_connections"]),
     "project": _ts("Desktop Projects — create/switch named workspaces (GUI sessions only)", ["desktop_project"]),
     "bot_room": _ts("Verified text-only Group Chat turn capabilities"),

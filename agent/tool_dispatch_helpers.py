@@ -460,6 +460,11 @@ def make_tool_result_message(
     tool_call_id = _normalize_tool_call_id(tool_call_id)
     # Elision notice is appended to the RAW content first, THEN wrapped, so it sits inside
     # the untrusted block next to the data it describes — once, at construction (cache-safe).
+    # Tier L1 CCR (TZ-tinyhumansai): a large string result is replaced by a lossy head+tail
+    # view with a [ccr:HASH] footer and the byte-exact original cached for ccr_retrieve.
+    # Idempotent (already-marked content passes), never-grows, zero-work when disabled.
+    from agent.tool_output_ccr import maybe_compress as _ccr_maybe_compress
+    content = _ccr_maybe_compress(name, content)
     wrapped = _maybe_wrap_untrusted(name, _maybe_append_elision_notice(name, content))
     message = stamp_message_timestamp({
         "role": "tool",
