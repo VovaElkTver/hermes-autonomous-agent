@@ -22,6 +22,11 @@ Mint: каждая строка steps исполняется против start_
 отказ mint (навык не публикуется). Replay: тот же цикл, без модели, fail-fast,
 при падении — снапшот в $HERMES_HOME/site_skills/<name>/failure-<ts>.
 
+Write-gate (L6): шаги click/type/fill/select/press меняют состояние сайта.
+Replay по умолчанию их ПРОПУСКАЕТ (индекс — в skipped_write_steps); выполняет
+только навык с явно проверенным человеком флагом `replay_writes: true`.
+Mint исполняет всё один раз (это проверка) и пишет write_steps в mint.json.
+
 Граница процесса: агент-браузерный CLI (pinned 0.39.1) — GPL-код не импортируется.
 """
 
@@ -55,6 +60,16 @@ def _ab(*argv: str, timeout: int = 60) -> subprocess.CompletedProcess:
 
 _STEP_ACTIONS = {"wait_for_text", "wait_for_selector", "get_text", "get_html",
                  "click", "type", "fill", "select", "scroll", "read", "press", "screenshot"}
+
+# L6 write-gate (L9 contract, 28.11): these steps mutate page/server state.
+# Mint runs them once to verify; replay SKIPS them unless the skill carries an
+# explicit `replay_writes: true` human-reviewed marker — a blind re-click of a
+# submit button is a second side effect on a live site.
+_WRITE_ACTIONS = {"click", "type", "fill", "select", "press"}
+
+
+def _step_class(action: str) -> str:
+    return "write" if action in _WRITE_ACTIONS else "read"
 
 
 def _wait_for_text(text: str, timeout_s: int = 10) -> tuple[bool, str]:
@@ -160,9 +175,13 @@ def mint(path: Path) -> int:
     d = _skill_dir(doc["name"])
     d.mkdir(parents=True, exist_ok=True)
     shutil.copy(path, d / "skill.yaml")
+    classes = [_step_class(str(s.get("action") or "")) for s in doc["steps"]]
+    writes = [i for i, c in enumerate(classes) if c == "write"]
     (d / "mint.json").write_text(json.dumps(
-        {"minted_at": int(time.time()), "steps_verified": len(doc["steps"])}, indent=2))
+        {"minted_at": int(time.time()), "steps_verified": len(doc["steps"]),
+         "write_steps": writes}, indent=2))
     print(json.dumps({"published": True, "skill": doc["name"], "path": str(d),
+                      "write_steps": len(writes),
                       "captured_keys": sorted(captured)}))
     return 0
 
@@ -175,8 +194,15 @@ def replay(name: str, *, screenshot_on_fail: bool = True) -> int:
         return 3
     doc = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     captured = {}
+    skipped: list[int] = []
+    allow_writes = doc.get("replay_writes") is True
+    first = True
     for i, step in enumerate(doc["steps"]):
-        ok, note, cap = _run_step(doc["start_url"], step, fresh=(i == 0))
+        if _step_class(str(step.get("action") or "")) == "write" and not allow_writes:
+            skipped.append(i)
+            continue
+        ok, note, cap = _run_step(doc["start_url"], step, fresh=first)
+        first = False
         captured.update(cap)
         if not ok:
             fail = d / f"failure-{int(time.time())}"
@@ -196,7 +222,8 @@ def replay(name: str, *, screenshot_on_fail: bool = True) -> int:
         (d / "last_result.json").write_text(json.dumps(
             {"saved_at": int(time.time()), key: captured.get("read", "")[:4000]},
             indent=2), encoding="utf-8")
-    print(json.dumps({"ok": True, "skill": name, "steps": len(doc["steps"])}))
+    print(json.dumps({"ok": True, "skill": name, "steps": len(doc["steps"]),
+                      "skipped_write_steps": skipped}))
     return 0
 
 
