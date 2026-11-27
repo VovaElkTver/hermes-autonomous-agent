@@ -242,3 +242,37 @@ https://huggingface.co/datasets/NousResearch/Hermes-3-Dataset (apache-2.0 — е
 
 Первый шаг по мандату: скрипт fork_hermes3_base.py (схема+provenance+shuffle+языковые
 метки) + mixing-ratio слой0:слой1 для первого LoRA-прогона. Статус: мандата нет.
+
+## Donors «agents»: эвалы и self-judgement-слой (отложено Вл 28.11)
+
+Проход https://huggingface.co/datasets?search=agents (664 репо, разбор 28.11 в чате;
+контент-проверка 12 верхних кандидатов). Полезное — в основном ЭВАЛЫ, не тренировка.
+
+Eval-линия (приоритет):
+- meta-agents-research-environments/gaia2 (CC-BY) — 6 осей ×160 задач
+  (execution/search/ambiguity/adaptability/time) — готовые оси для eval-матрицы
+  hermes-train;
+- agents-last-exam/agents-last-exam (★238, CC-BY) — v1.1=122 таска + qcow2-VM,
+  потолок-бенч 2026, тяжёлый обвес;
+- AgentSuite/tau-bench-trajectories — 30 файлов сравнительных траекторий по моделям
+  (DeepSeek-R1/Kimi-K2/thinking on-off) — реплеи и negative-корпус; ЛИЦЕНЗИИ НЕТ — риск;
+- oro-agents/smb-bench (CC-BY, живой) — 192 таска ×16 моделей + prices/controls
+  (экономика прогонов) — ближайший к elk/закупочному домену;
+- mercor/apex-agents (★227, CC-BY) — бизнес-таски с gold-файлами (docx/xlsx/pptx-эталоны)
+  — формат «сделай документ как эталон»; репаки-паразиты того же — не брать;
+- crawlcheck/agent-safety-benchmark (CC-BY) + sixujinzhu/agent-security-exam-bank —
+  кейсы для верификации fork-guardrails.
+
+LoRA-линия (в candidates/ staged-пака ~/need2lora/hermes-staged-sft-v1 поACCEPT):
+- Self-Improving-Coding-Agents/SI2CA-Training-Trajectories (CC-BY, 10 780 ×4 среза:
+  standard/discovered_strategy/full_self_judgement/tasks) — агент судит себя, прямо в
+  supervisor/critic-линию и hermes-agent-self-evolution; кандидат в этап 2.5;
+- nex-agi/agent-sft (ODC-BY, ★129, 5 271 строк: agent/coding/research/chat,
+  messages+tools) — компактный чистый SFT-донор (проверено);
+- Autonomous-Scientific-Agents/{requests,results,groundtruth} (Apache) — request-level
+  дампы + groundtruth — образец артефактной культуры для trace-export.
+
+Шум: agents-course/* (сертификаты курса, топ dl — обманка), agentshot (99 998 файлов с
+.venv), agent-swarm-traces (62 478 логов, лицензий нет), apex-репаки, emgena-teasers,
+D2E/Minecraft-видео, SciPhi/AgentSearch-V1 (20.9M, 2024, тяжёлый/древний).
+Статус: мандата нет. Обучение hermes-staged-sft-v1 — «пока не проводить» (Вл 28.11).
