@@ -196,3 +196,27 @@ AGPL — только внешний CLI (pip heretic-llm), в форк не в�
 Grimoire-манифест reproduce.json (9КБ, побайтовое воспроизведение + append-only коллекция).
 Соседи автора: lophius (LM-workbench, AGPL), llm-beliefs (визуализация убеждений моделей) —
 не разобраны. Статус: мандата нет.
+
+## Router-signal suite: фикстуры для линии роутеров/GEPA (донор оценки, отложено Вл 28.11)
+
+https://huggingface.co/datasets/vllm-sr/router-signal-suite (vLLM Semantic Router, IBM;
+600 959 строк, текстов 86%, обновлён 28.11; разбор 28.11 в чате). Бенчмарк 10
+сигналов-классификаторов: domain, tool_need, fact_check, hallucination, safety, hazard,
+jailbreak, pii, feedback, modality. НЕ учебные данные для LoRA — донор ОЦЕНКИ и фикстур.
+
+Три применения:
+1. tool_need (26 654 стр., when2call/BFCL, поле tools с описаниями функций) — фикстур и
+   донор для гейта «звать ли tool_search/skill или ответить прямо» (L1 decision-server
+   :8002, wake-seam ≤15 с). Их latency-замеры 0.6B на CPU: ms-бюджет у такого гейта реален.
+2. fresh-ru-pii (1 842 стр. русских реквизитов: ООО/адреса/телефоны — проверено, наше
+   intake-сырьё один в один) — фикстур PII-маскирования перед облачным фолбэком wake-proxy.
+3. Методология для GEPA-week (каркас остановлен): frozen fresh set до тренировок, сплиты по
+   group_sha256 (целые треды), paired bootstrap + BH-коррекция, построчные предсказания всех
+   сравниваемых моделей в комплекте, docker-билдер с sha256-манифестами (36 ГБ rebuild).
+
+Их честные цифры (калибровка ожиданий): tool_need AUC 0.91 при recall@5%FPR 0.26-0.31;
+hallucination AUC 0.70-0.73; domain acc 0.64; два fact_check-holdout выдают метку длиной
+текста. Вывод совпадает с нашим: дешёвый шлюзовый сигнал не пускают напрямую в вердикт.
+Риски: лицензия per-source (14 non-commercial, Stack Exchange CC BY-SA), 4 гейтнутых корпуса
+(WildGuard/WildJailbreak/HackAPrompt/AggreFact — токен), часть меток модельная.
+Первый шаг по мандату: прогнать наш skill-router на их tool_need-корпусе. Статус: мандата нет.
