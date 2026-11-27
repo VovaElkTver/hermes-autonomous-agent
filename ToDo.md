@@ -132,5 +132,5 @@ M1 (target_accept), M2 (result_acceptance). Прод fed22d33fe7, все гей�
 3. L3 (bot_relay_mentions.enabled; проверить roster перед включением).
 
 Вне очереди: Tier A (elk/openhuman-autonomy-tire-a @00eef5f2dee на GH) — не мержен;
-p.1 residual на рте rtx5000 (terminal-default печатает process-cwd вместо workdir) —
+p.1 residual на ноде rtx5000 (terminal-default печатает process-cwd вместо workdir) —
 копает plan-200255; TZ-openhuman-autonomy-v2.md не прочитан.
