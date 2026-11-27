@@ -134,3 +134,33 @@ M1 (target_accept), M2 (result_acceptance). Прод fed22d33fe7, все гей�
 Вне очереди: Tier A (elk/openhuman-autonomy-tire-a @00eef5f2dee на GH) — не мержен;
 p.1 residual на ноде rtx5000 (terminal-default печатает process-cwd вместо workdir) —
 копает plan-200255; TZ-openhuman-autonomy-v2.md не прочитан.
+
+## Доноры тренировочной/RL-линии: Automodel + Motif (сгруппировано по слову Вл 28.11)
+
+Общая линия: тренировочный харнес и данные для НАШИХ моделей. Оба донора размечены;
+тиры заимствования ждут «иди» Вл. Рядом стоит секция «Harness-адаптеры LoRA под Hermes»
+(paired-замер 21.11 сделан) — та же линия, третья нога.
+
+- **Automodel** (NousResearch/Automodel = зеркало NVIDIA-NeMo, Apache-2.0; клон ~/zoo/automodel
+  @922e6b0; разбор automodel-analysis-v1.md + cluster-A1..A4-v1.md там же). Главное: официальный
+  тренировочный путь Qwen3.8-27B/Flash-Next/GLM-5.3; JSONL agent-траектории как вход (agent_chat.py) —
+  кандидат-движок harness-rl-data; EAGLE-3 speculative drafter — единственная полностью отсутствующая
+  у нас фича. На .100: LoRA/Full-SFT 27B идут (gbs 8→6), блокер диск (195G free против DCP-чекпойнта
+  27B ≈162ГБ); Flash-Next 180B мёртв (нужно 64×H100). NVFP4-тренировок у донора нет. Supply chain:
+  пин transformers==5.12.1, megatron-fsdp из личного форка, wandb default-on. Тиры S1/S2/S3 не объявлены.
+- **Motif stack** (Motif-Technologies; разбор ~/projects/donor-audits/motif-analysis-v1.md, 28.11):
+  - HF-kernels `optimizer` — Parallel Muon с произвольным N-D шартингом (проверен до 2TP×2DP-R×2DP-S),
+    Polar Express NS, MoE-расщепление 3D, Per-Head Muon, QK clipping; 19 бинарей torch 2.7–2.10 ×
+    CUDA/ROCm, x86_64-linux. Ценен для много-GPU full FT/pretrain; на одном GPU избыточен
+    (torch.optim.Muon с 2.9 хватает).
+  - Харнес **AgentTracer** (github MotifTechnologies/AgentTracer, Apache-2.0, pip motif-agent-tracer) —
+    прямой аналог нашего harness-rl-data: vLLM-first эндпоинт, docker-песочница на задачу,
+    MCP attach-серверы, схема на 12 типов событий, экспортёры ShareGPT/HF/**GRPO**, resume прогонов.
+  - Датасеты: `agenttracer` (1 023 траектории Kimi-K3, 999 отфильтрованы correct=True) +
+    `agenttracer-tooluse` (5 756, из них 72% — не траектории, а чтение; у web-search все tool-результаты
+    вырезаны в плейсхолдер — дефектный учебный материал). Точечно брать: ~1 300 честных траекторий +
+    категории abstention (89) / memory (180) / multi-turn-tool-use (101) как шаблоны классов задач.
+    Лицензии mixed (HotpotQA CC BY-SA, Kimi K3 §2/§3) — при редистрибуции резать subset'ы.
+- Точка стыка двух доноров: вход Automodel-RL = JSONL траекторий; AgentTracer — референсная форма
+  контракта траектории/GRPO-экспортёра для сверки нашей схемы harness-rl-data.
+- Статус: «иди» не дано; решение о заимствованиях за Вл.
