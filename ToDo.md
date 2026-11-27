@@ -112,3 +112,25 @@ recall@5 в selftest роутера (/home/qwen/projects/gepa/router/skill_route
 
 После починки — вторая половина: проверка надстройки (вариант 3: роутер раскрывает
 тела 2-3 вероятных умений поверх целого индекса), решение по ней от Вла отдельно.
+
+
+## Активация фич Tier M/L — продолжение позже (Вл 27.11)
+
+Постановка Вл: «тогда отметь в ToDo, что продолжим позже».
+
+Состояние на 27.11 22:50: активированы L1 (decision-server :8002, enabled),
+M4 (message_shadow + judge_model=glm-5.3-flash-libert), M3ф1 (turn_shadow.enabled),
+M1 (target_accept), M2 (result_acceptance). Прод fed22d33fe7, все гейты зелёные
+(L1 9/9, M-тесты 58, M2 8/8, M1 10/10, shadow 4/4).
+
+Осталось в очереди (каждый пункт — отдельная команда Вл):
+1. M3ф2 (turn_shadow.wrap_up_enabled): включить после ~недели естественного
+   накопления ~/.hermes/logs/turn_shadow.jsonl; сведение A1: распределение скоров,
+   доля would_wrap_up, совпадение с реальными зависаниями; синтетику
+   session=m3f1-pipeline-probe-2711 отсечь. Пороги при ложных — править до активации.
+2. L2 (agent_periodic_bounds.enabled).
+3. L3 (bot_relay_mentions.enabled; проверить roster перед включением).
+
+Вне очереди: Tier A (elk/openhuman-autonomy-tire-a @00eef5f2dee на GH) — не мержен;
+p.1 residual на рте rtx5000 (terminal-default печатает process-cwd вместо workdir) —
+копает plan-200255; TZ-openhuman-autonomy-v2.md не прочитан.
