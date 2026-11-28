@@ -66,6 +66,13 @@ AUTOMATION_INTERRUPTED_NOTICE = (
     "An automated delivery was interrupted and was not run again. Some "
     "actions may already have run; verify their effects."
 )
+# A person's turn that the gateway KNOWS was cut by an in-flight update (receipt named it at
+# pause time, fleet Д1b 28.11): terminal, never replayed, but with a truthful cause instead of
+# the open-ended unknown pause that bounced every later message.
+UPDATE_INTERRUPTED_NOTICE = (
+    "Your request was interrupted by a running update and was not resumed. Some actions may "
+    "already have run; verify their effects, then send it again."
+)
 # Durable tail roles a failed turn leaves open: its accepted ``user`` row, or the ``tool`` row of a
 # call that ran before the failure. An ``assistant`` tail is already closed (a reply or a boundary).
 OPEN_TURN_TAIL_ROLES = frozenset({"user", "tool"})
@@ -79,6 +86,7 @@ def untyped_failed_turn_display_kind(role: Any, content: Any) -> Optional[str]:
     (exact notice text, so a real reply quoting it stays a reply); read-side only."""
     if role == "assistant" and isinstance(content, str) and content.strip() in (
         FAILED_TURN_NOTICE, PARTIAL_FAILED_TURN_NOTICE, AUTOMATION_INTERRUPTED_NOTICE,
+        UPDATE_INTERRUPTED_NOTICE,
     ):
         return FAILED_TURN_DISPLAY_KIND
     return None

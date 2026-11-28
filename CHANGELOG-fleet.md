@@ -11,6 +11,7 @@
 | Д1 | Самоубийство хода при `hermes update` из активного хода (28.11, Win) | 🔴 spike-тесты, реализация в работе |
 | Д2 | Зомби-гейт 9¼ ч без обработки Matrix (28.11); примитивы свежести есть, потребителя внутри форка нет | 🔴 spike-тесты, реализация в работе |
 | Д3 | Потери трнов «Your request was not processed» (12 случаев на снимке GEPA 28.11) | ⏳ очередь (P0, следующая итерация) |
+| Д1b | Win 28.11 13:31: updater SIGKILL'нул гейтвей в окне drain (гейтвей объявил 1800s defer, ACK нёс ~30s config drain) → пользовательский turn ампутирован → sticky `unknown_execution` паузы, отбивающие каждое сообщение | P0 | **реализовано 28.11**: (а) pause-ACK несёт эффективный deferral-budget (max(config, _restart_after_turn_timeout) + active_work); (б) durable receipt активных leases в момент паузы → boot settle как `update_interrupted` (никогда не re-run, consume-once, TTL 3600s); (в) person-unknown при второй встрече оседает terminal (one-shot) | `tests/gateway/test_fleet_maint_d1b_*` 8 passed |
 | Д4 | Дубли `platform_message_id` (11 случаев, gap 0 с) — дедуп в памяти адаптера, не переживает рестарт | 🔴 spike-тесты, реализация в работе |
 | Д5 | След временного патча `runtime_ownership.py` на rtx5090 — в живом дереве `main@38130e4660d` **не найден** (28.11 read-back); проверить эквивалентность upstream-версии | ⏳ P1 |
 | Д6 | E2EE на Windows: python-olm недостижим (manylinux-only). Режим `optional`, предупреждение при старте — штатное | ⚪ наблюдение, кода не требует |
