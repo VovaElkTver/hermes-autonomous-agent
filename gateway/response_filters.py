@@ -153,9 +153,16 @@ def is_machinery_display_kind(display_kind: Any) -> bool:
     return display_kind in MACHINERY_DISPLAY_KINDS
 
 
-def silence_allowed(display_kind: Any, reply_expected: Optional[bool] = None) -> bool:
-    """Whether a successful bare silence marker may remain silent for this turn."""
-    return is_machinery_display_kind(display_kind) or reply_expected is False
+def silence_allowed(display_kind: Any, reply_expected: Optional[bool] = None,
+                    sender_is_bot: bool = False) -> bool:
+    """Whether a successful bare silence marker may remain silent for this turn.
+
+    Д7(в): a bot-to-bot turn (the input's sender is a registered peer bot) is a normal
+    machinery outcome, not a human conversation: its silence marker vanishes like on any
+    machinery turn — no ⚠️ fallback text, no re-opened handling. The storm room proved the
+    visible ⚠️ on such turns is itself feed for the other bot."""
+    return (is_machinery_display_kind(display_kind) or reply_expected is False
+            or bool(sender_is_bot))
 
 
 def reply_expected_metadata(reply_expected: Optional[bool]) -> dict:

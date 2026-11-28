@@ -36,8 +36,6 @@ def test_in_memory_dedup_within_one_process():
     assert adapter._is_duplicate_event("$ev1") is True   # second sight: skip
 
 
-@pytest.mark.xfail(strict=True, reason="Д4: dedup memory is per-process; after a restart the same "
-                                       "event replays as new (incident: double write, gap 0 s)")
 def test_dedup_survives_process_restart(tmp_path, monkeypatch):
     """A fresh adapter (simulating a restarted gateway) over the same HERMES_HOME must
     still recognize an event the previous process already admitted."""

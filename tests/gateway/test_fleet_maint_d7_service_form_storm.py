@@ -19,8 +19,6 @@ import inspect
 import os
 import sys
 
-import pytest
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
@@ -36,8 +34,6 @@ def test_notice_drop_convention_is_default():
     assert 'if msgtype == "m.notice" and not self._process_notices' in src
 
 
-@pytest.mark.xfail(strict=True, reason="Д7(а): service/status senders still emit m.text, so the "
-                                       "peer bot admits them as human input (storm 28.11)")
 def test_service_form_senders_use_notice_msgtype():
     """Every machinery-form sender must choose m.notice; today the adapter has no notice-typed
     send path for status/queue/response forms."""
@@ -45,8 +41,6 @@ def test_service_form_senders_use_notice_msgtype():
     assert 'send_notice' in src or '"msgtype": "m.notice"' in src or 'msgtype="m.notice"' in src
 
 
-@pytest.mark.xfail(strict=True, reason="Д7(б): queue admission does not filter unaddressed peer-bot "
-                                       "messages; in the incident room their forms were captured as input")
 def test_unaddressed_bot_messages_stay_out_of_the_queue():
     """The admission path (gateway/session_ingress.py — the one owner of messaging admission)
     must apply an addressed filter (mention/reply) for peer-bot senders, independent of the
@@ -57,8 +51,6 @@ def test_unaddressed_bot_messages_stay_out_of_the_queue():
         "admit_message has no bot-address filter"
 
 
-@pytest.mark.xfail(strict=True, reason="Д7(в): a bare silence marker on a bot-vs-bot turn surfaces "
-                                       "as a visible ⚠️/re-opened handling instead of vanishing")
 def test_bot_vs_bot_silence_marker_is_ordinary():
     """response_filters decides whether a successful silence marker may stay silent; it must be
     True for machinery (bot-vs-bot) turns without the human-visible fallback."""

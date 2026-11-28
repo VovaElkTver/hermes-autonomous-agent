@@ -721,6 +721,7 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         # Reply-ownership (patch 27.09, ported): a reply to an event this adapter sent
         # counts as addressing the bot. Bounded LRU of our own event ids, newest kept.
         self._reply_ownership: bool = self._parse_reply_ownership(config)
+        self._bot_users: frozenset = self._parse_bot_users(config)
         self._sent_event_ids: deque = deque(maxlen=4096)
         self._sent_event_ids_set: set[str] = set()
         self._thread_require_mention: bool = self._parse_thread_require_mention(config)
@@ -800,12 +801,53 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
             except re.error as exc:
                 logger.warning("Matrix: ignoring invalid MATRIX_IGNORE_USER_PATTERNS entry %r: %s", pattern, exc)
 
+    def _seen_events_db(self):
+        """Д4: durable seen-event ledger under HERMES_HOME (in-process memory alone forgets
+        everything on a restart and the Matrix sync replay re-admits processed events —
+        incident 28.11: one platform_message_id written twice, gap 0 s). Returns a live
+        sqlite connection or None when the store is unavailable (then: memory-only, old behavior)."""
+        import os
+        home = os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+        cached = getattr(self, "_seen_db_conn", None)
+        if cached is not None and getattr(self, "_seen_db_home", None) == home:
+            return cached
+        try:
+            import sqlite3
+            from pathlib import Path
+            state = Path(home) / "state"
+            state.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(state / "matrix_seen_events.db"), timeout=2.0)
+            conn.execute("CREATE TABLE IF NOT EXISTS seen_events (event_id TEXT PRIMARY KEY, ts REAL)")
+            self._seen_db_conn, self._seen_db_home = conn, home
+            return conn
+        except Exception as exc:
+            logger.debug("matrix dedup store unavailable: %s", exc)
+            return None
+
     def _is_duplicate_event(self, event_id) -> bool:
-        """Return True if this event was already processed. Tracks the ID otherwise."""
+        """Return True if this event was already processed. Tracks the ID otherwise.
+
+        Д4: the answer must survive a gateway restart — the durable ledger is the authority,
+        the in-memory deque is only its fast path."""
         if not event_id:
             return False
         if event_id in self._processed_events_set:
             return True
+        conn = self._seen_events_db()
+        if conn is not None:
+            import time
+            now = time.time()
+            try:
+                hit = conn.execute("SELECT 1 FROM seen_events WHERE event_id = ?", (event_id,)).fetchone()
+                if hit is not None:
+                    self._processed_events.append(event_id)
+                    self._processed_events_set.add(event_id)
+                    return True
+                conn.execute("INSERT OR IGNORE INTO seen_events (event_id, ts) VALUES (?, ?)", (event_id, now))
+                conn.execute("DELETE FROM seen_events WHERE ts < ?", (now - 14 * 86400,))
+                conn.commit()
+            except Exception as exc:
+                logger.debug("matrix dedup store check failed: %s", exc)
         if len(self._processed_events) == self._processed_events.maxlen:
             self._processed_events_set.discard(self._processed_events[0])
         self._processed_events.append(event_id)
@@ -841,6 +883,18 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         """MATRIX_REPLY_OWNERSHIP (scoped) -> reply_ownership in config.extra -> false."""
         configured = _extra_or_secret(config.extra, "reply_ownership", "MATRIX_REPLY_OWNERSHIP", False)
         return configured if isinstance(configured, bool) else str(configured).strip().lower() in {"1", "true", "on", "yes"}
+
+    @staticmethod
+    def _parse_bot_users(config) -> frozenset:
+        """MATRIX_BOT_USERS (scoped) -> ``bot_users`` in config.extra -> empty.
+
+        Д7(б): comma-separated Matrix user IDs of peer bots. Messages from these senders
+        that are not addressed to this bot (no mention, no reply to our own message) are
+        dropped at admission, independent of the operator's require_mention opt-in —
+        the 28.11 form-storm showed model-level NO_REPLY cannot stop machinery chatter.
+        """
+        configured = _extra_or_secret(config.extra, "bot_users", "MATRIX_BOT_USERS", "")
+        return frozenset(s.strip() for s in str(configured).split(",") if s.strip())
 
     @staticmethod
     def _parse_thread_require_mention(config) -> bool:
@@ -1307,10 +1361,19 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         metadata: Optional[dict[str, Any]] = None) -> SendResult:
         if not content:
             return SendResult(success=True)
+        # Д7(а): machinery/service forms travel as m.notice — addressed-only by client
+        # convention, and the peer bot's receive side drops notices by default. Markers:
+        # a gateway-side ServiceForm instance, or an explicit metadata flag on this call.
+        try:
+            from gateway.service_form import is_service_form
+            _notice = is_service_form(content) or bool((metadata or {}).get("service_form"))
+        except Exception:
+            _notice = bool((metadata or {}).get("service_form"))
+        _msgtype = "m.notice" if _notice else "m.text"
         last_event_id = None
         for chunk in self.truncate_message(
                 self.format_message(content), self.max_message_length, len_fn=self.message_len_fn):
-            msg_content = self._build_text_message_content(chunk)
+            msg_content = self._build_text_message_content(chunk, msgtype=_msgtype)
             self._apply_relation_metadata(msg_content, reply_to=reply_to, metadata=metadata)
             try:
                 last_event_id = await self._send_room_message(chat_id, msg_content)
@@ -1402,6 +1465,14 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
         if self._client:
             with suppress(Exception):
                 await self._client.set_typing(RoomID(chat_id), timeout=timeout)
+
+    async def send_notice(self, chat_id: str, content: str, reply_to: Optional[str] = None,
+                          metadata: Optional[dict[str, Any]] = None) -> SendResult:
+        """Д7(а): send a service/status form as m.notice (addressed-only). Peer bots of this
+        fork drop notices on receive (process_notices default false), so status forms can no
+        longer wake each other into a form-storm (incident 28.11, room #hermes-win)."""
+        md = {**(metadata or {}), "service_form": True}
+        return await self.send(chat_id, content, reply_to=reply_to, metadata=md)
 
     async def send_typing(self, chat_id: str, metadata: Optional[dict[str, Any]] = None) -> None:
         await self._set_typing(chat_id, 30000)
@@ -2191,6 +2262,8 @@ class MatrixAdapter(TransportObservationMixin, BasePlatformAdapter):
             reply_to_message_id=reply_to, reply_to_text=reply_to_text, reply_to_author_id=reply_to_author_id,
             reply_to_author_name=reply_to_author_name, reply_to_is_own_message=reply_to_is_own,
             # Top-level sender fields mirror source.* — downstream prompt code reads them.
+            # Д7(б): mark registered peer bots so admission can filter their unaddressed chatter.
+            metadata={**(extra.pop("metadata", None) or {}), "sender_is_bot": sender in self._bot_users},
             user_id=sender, user_name=display_name, **extra)
 
     async def _handle_text_message(

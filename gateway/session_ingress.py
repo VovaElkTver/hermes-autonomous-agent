@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from dataclasses import replace
 
 from gateway.platforms.event import MessageEvent
+from gateway.service_form import service_form
 from gateway.session_envelope import restore_native
 from hermes_state_runtime import RuntimeStoreError
 
@@ -28,11 +29,25 @@ _CONTENT_CLAUSES = frozenset({
 })
 
 # Nothing was committed (main's busy-queue cap); /retry answers it before rewriting (#139257).
-QUEUE_FULL_REPLY = ('⏳ Too many messages are already waiting in this conversation; '
+# Д7(а): every acknowledgement below is a machinery service form — m.notice, addressed-only.
+QUEUE_FULL_REPLY = service_form('⏳ Too many messages are already waiting in this conversation; '
                     'send this again after the current reply.')
 
 
 async def admit_message(authority, event):
+    # Д7(б): an unaddressed message from a registered peer bot never enters the queue,
+    # independent of the operator's require_mention opt-in (form-storm 28.11: two gateways
+    # of this fork trained each other's queue/pause forms 30+ times a minute). Addressing
+    # means: reply_expected (mention/DM/command), a reply to our own message, or an internal
+    # event (synthetic turns are this gateway's own machinery, not peer chatter).
+    metadata = getattr(event, 'metadata', None) or {}
+    if metadata.get('sender_is_bot') and not (
+            getattr(event, 'reply_expected', None)
+            or getattr(event, 'reply_to_is_own_message', False)
+            or getattr(event, 'internal', False)):
+        logger.info("admission: unaddressed peer-bot message %s dropped (Д7)",
+                    getattr(event, 'message_id', '?'))
+        return None
     from gateway.session_authority import messaging_admission
     accepted, committed = busy_acceptance.get(), busy_commit.get()
     busy_acceptance.set(None)  # the drain task this schedules must not inherit the busy caller's future
@@ -50,8 +65,8 @@ async def admit_message(authority, event):
             # The reply reaches the whole chat, so only content clauses are named; trust and provenance
             # clauses (and any new one) stay generic, and gateway.log keeps the clause (``_refuse``).
             named = f'{exc.reason}: {exc.field}' if exc.field in _CONTENT_CLAUSES else exc.reason
-            return (f'⚠️ Hermes refused this message ({named}), so it was not saved '
-                    'or answered. Ask the operator to check gateway.log.')
+            return service_form(f'⚠️ Hermes refused this message ({named}), so it was not saved '
+                                'or answered. Ask the operator to check gateway.log.')
         if exc.reason != 'queue_full':
             raise
         # Nothing was committed (main's busy-queue cap): say so instead of a generic turn error.
@@ -198,22 +213,22 @@ def pause_notice(authority, ref, reason):
     live.pause_notified = True
     if reason == 'runtime_draining':
         # Transient: the row runs when the restarted owner drains it, so /reset would be wrong advice.
-        return '⏳ Hermes is restarting — your message is saved and will be answered when it is back.'
+        return service_form('⏳ Hermes is restarting — your message is saved and will be answered when it is back.')
     if reason == 'session_busy':
         # Transient: queued behind work already running on this conversation (a worker execution).
-        return '⏳ Your message is saved and will be answered when the work running in this conversation finishes.'
+        return service_form('⏳ Your message is saved and will be answered when the work running in this conversation finishes.')
     if reason == 'unknown_execution':
         # GW-10: the way out is in this chat. /discard acknowledges the lost turn (never replayed)
         # through the same fenced resolve_unknown as Desktop/TUI, and the saved messages then run.
         # Slack registers no native /discard (its slash cap): the umbrella `/hermes discard` reaches it.
         slack = getattr(getattr(live.source, 'platform', None), 'value', None) == 'slack'
         discard = '/hermes discard' if slack else '/discard'
-        return ('⏸️ This conversation is paused: a previous turn did not finish when Hermes restarted, '
-                f'and only you know whether to send it again. Your message is saved. Send {discard} to drop '
-                'the lost turn and continue (it is not re-run), or /reset to start a fresh conversation.')
+        return service_form('⏸️ This conversation is paused: a previous turn did not finish when Hermes restarted, '
+                            f'and only you know whether to send it again. Your message is saved. Send {discard} to drop '
+                            'the lost turn and continue (it is not re-run), or /reset to start a fresh conversation.')
     cause = f'a queued message could not be re-authorized ({reason})'
-    return (f'⏸️ This conversation is paused: {cause}. Your message is saved but will not be answered here. '
-            'Send /reset to start a fresh conversation, or ask the operator to resume this one.')
+    return service_form(f'⏸️ This conversation is paused: {cause}. Your message is saved but will not be answered here. '
+                        'Send /reset to start a fresh conversation, or ask the operator to resume this one.')
 
 
 def row_turn_author(policy, row):
