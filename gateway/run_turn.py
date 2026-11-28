@@ -270,7 +270,9 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
                 reply_expected=event.reply_expected,
                 persist_user_display_metadata={
                     "gateway_input_owner": prepared.persistence_owner, **persisted_user_metadata_for_event(event),
-                    **reply_expected_metadata(event.reply_expected), **diagnostic_metadata(event)},
+                    **reply_expected_metadata(event.reply_expected), **diagnostic_metadata(event),
+                    # Д7: crash recovery must judge the silence marker as the live turn did.
+                    "sender_is_bot": bool((getattr(event, "metadata", None) or {}).get("sender_is_bot"))},
                 message_type=event.message_type,
                 scheduled_heartbeat=bool(getattr(event, "_heartbeat_session_id", None)),
             )
@@ -300,6 +302,8 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
                 _quick_key, run_generation, _run_start_session_id, _platform_name, _msg_start_time,
                 persist_user_display_kind=prepared.persist_user_display_kind,
                 reply_expected=event.reply_expected,
+                # Д7(в): a registered peer bot's input makes silence an ordinary outcome.
+                sender_is_bot=bool((getattr(event, "metadata", None) or {}).get("sender_is_bot")),
             )
             response = self._usage_window_chat_wording(agent_result, self._hmwa_prepend_reasoning(agent_result, response, source, _intentional_silence))
             _footer_line = self._hmwa_runtime_footer_line(agent_result, source, _turn_seconds)
@@ -1629,7 +1633,9 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
         _silent = False
         if self._is_intentional_silence(_delivery_result, first_response):
             _silent = self._silence_allowed_for_source(
-                turn_ctx.source, turn_ctx.persist_user_display_kind, turn_ctx.reply_expected, _delivery_result)
+                turn_ctx.source, turn_ctx.persist_user_display_kind, turn_ctx.reply_expected, _delivery_result,
+                # Д7(в): the queued follow-up inherits the input's bot verdict.
+                sender_is_bot=bool((getattr(turn_ctx, "persist_user_display_metadata", None) or {}).get("sender_is_bot")))
             if _silent:
                 logger.info(
                     "Queued follow-up for session %s: suppressing intentional silence marker before continuing.",
@@ -1845,6 +1851,9 @@ class GatewayTurnMixin(GatewayBackgroundMixin, GatewayTurnPrepareMixin, GatewayT
                 "queued_terminal_display_kind": next_display_kind,
                 "queued_terminal_reply_expected": next_reply_expected,
                 "queued_terminal_source": next_source,
+                # Д7(в): the terminal turn inherits the chain event's bot verdict, not the opener's.
+                "queued_terminal_sender_is_bot": bool(
+                    (getattr(pending_event, "metadata", None) or {}).get("sender_is_bot")),
                 "queued_terminal_notification_category": (
                     (pending_event.metadata or {}).get("notification_category", "result")
                     if pending_event is not None and pending_event.internal else "result"),

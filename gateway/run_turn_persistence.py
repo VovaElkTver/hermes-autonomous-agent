@@ -104,6 +104,7 @@ class GatewayTurnPersistenceMixin:
         _quick_key, run_generation, _run_start_session_id, _platform_name, _msg_start_time,
         persist_user_display_kind: Optional[str] = None,
         reply_expected: Optional[bool] = None,
+        sender_is_bot: Optional[bool] = None,
     ):
         """Turn the raw agent result into the outbound text: sentinel/silence handling, response
         logging, resume-pending clear, empty-response normalization, and identity-guarded
@@ -133,6 +134,8 @@ class GatewayTurnPersistenceMixin:
             _silence_reply_expected = False
         if _intentional_silence and not self._silence_allowed_for_source(
             _silence_source, _silence_kind, _silence_reply_expected, agent_result,
+            # Д7(в): the terminal of a queued chain inherits the input's bot verdict.
+            sender_is_bot=bool(agent_result.get("queued_terminal_sender_is_bot", sender_is_bot)),
         ):
             logger.warning(
                 "silence marker rejected on a user turn: platform=%s chat=%s",

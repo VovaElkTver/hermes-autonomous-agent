@@ -226,13 +226,16 @@ def is_machinery_display_kind(display_kind: Any) -> bool:
 def silence_allowed(
     display_kind: Any, reply_expected: Optional[bool] = None, *,
     allow_silence: Optional[bool] = None, agent_result: Optional[dict] = None,
+    sender_is_bot: bool = False,
 ) -> bool:
     """Keep existing exemptions; room opt-in additionally requires a healthy completed result.
 
     Marker recognition stays with the caller. Extra health restrictions apply only to the new
     room permission, preserving the established internal/unaddressed semantics.
-    """
-    if is_machinery_display_kind(display_kind) or reply_expected is False:
+    Д7(в): a bot-to-bot turn (registered peer bot sender) is an ordinary machinery outcome —
+    its silence marker vanishes with no visible fallback; the 28.11 storm room proved the
+    visible warning itself feeds the other bot."""
+    if is_machinery_display_kind(display_kind) or reply_expected is False or sender_is_bot:
         return True
     return (allow_silence is True and isinstance(agent_result, dict)
             and not any(agent_result.get(k) for k in ("failed", "partial", "interrupted", "error"))

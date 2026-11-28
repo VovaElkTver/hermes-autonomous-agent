@@ -108,10 +108,11 @@ class GatewayConfigLoadersMixin:
             return None
         return _get_channel_override(config, platform, chat_id, thread_id=thread_id, parent_id=parent_id)
 
-    def _silence_allowed_for_source(self, source, display_kind, reply_expected, agent_result) -> bool:
+    def _silence_allowed_for_source(self, source, display_kind, reply_expected, agent_result,
+                                    sender_is_bot: bool = False) -> bool:
         """Evaluate existing exemptions before consulting the optional room permission."""
         from gateway.response_filters import silence_allowed
-        return silence_allowed(display_kind, reply_expected) or silence_allowed(
+        return silence_allowed(display_kind, reply_expected, sender_is_bot=sender_is_bot) or silence_allowed(
             display_kind, reply_expected, allow_silence=self._room_allow_silence(source),
             agent_result=agent_result)
 
