@@ -280,6 +280,46 @@ class GatewaySessionWatchersMixin:
         except Exception:
             return "{}"
 
+    async def _stale_transport_guard(self, interval: float = 60.0, threshold_s: float = 600.0,
+                                     startup_grace_s: float = 120.0) -> None:
+        """Д2 (incident 28.11: gateway lived 9h15m with the loop alive and Matrix unprocessed).
+
+        ``start_loop_liveness_watchdog`` proves the loop dispatches; it cannot see a dead
+        sync task inside a healthy loop. A connected Matrix adapter stamps ``_last_sync_ts``
+        on every applied sync response (``_absorb_sync``) — long-polling advances it even
+        with zero traffic, so its age is a true transport-freshness clock. Past
+        ``threshold_s`` (10 min per the fleet TZ) on two consecutive ticks: one critical
+        diag line + ``request_restart`` (drain-aware; durable inbound admissions in the
+        state store survive the bounce). Opt out: ``gateway.stale_transport_watchdog=false``.
+        """
+        config = getattr(self, "config", None)
+        if config is not None and not getattr(config, "stale_transport_watchdog", True):
+            return
+        if config is not None:
+            threshold_s = float(getattr(config, "stale_transport_threshold_s", threshold_s))
+        strikes: dict = {}
+        await _interruptible_sleep(self, int(max(1, startup_grace_s)))
+        while getattr(self, "_running", True):
+            now = time.time()
+            for name, adapter in list((getattr(self, "adapters", None) or {}).items()):
+                if getattr(adapter, "_client", None) is None:
+                    continue  # not connected: nothing to declare fresh
+                ts = float(getattr(adapter, "_last_sync_ts", 0.0) or 0.0)
+                if ts <= 0:
+                    continue  # never completed a sync: connect path owns that failure
+                if now - ts > threshold_s:
+                    strikes[name] = strikes.get(name, 0) + 1
+                    if strikes[name] >= 2:
+                        logger.critical(
+                            "stale transport (Д2 guard): %s last sync %.0fs ago > %.0fs; "
+                            "requesting gateway restart, queued inbound persists",
+                            name, now - ts, threshold_s)
+                        self.request_restart(via_service=True)
+                        return
+                else:
+                    strikes[name] = 0
+            await _interruptible_sleep(self, int(max(1, interval)))
+
     async def _session_stall_watcher(self, interval: float = 30.0):
         """Pending-inbound + stale-activity stall watchdog. Progress comes only from
         ``get_activity_summary()``; pending inbound is a notify policy gate, not a progress clock.

@@ -1501,6 +1501,15 @@ class GatewayShutdownMixin(GatewaySessionEndMixin):
             "deferring stop() until they finish (cap=%.0fs) so in-flight "
             "turns are not amputated (#77184)", active, timeout,
         )
+        # Д1b: name the in-flight sessions durably NOW, while we can still read them. If this
+        # process is force-killed inside the deferral window, boot recovery settles their
+        # unknown rows as a KNOWN update interruption instead of an open-ended pause.
+        with suppress(Exception):
+            from gateway.update_interrupt_receipt import active_turn_sessions, write_receipt
+            from hermes_constants import get_hermes_home
+            _authority = getattr(self, "session_authority", None)
+            if _authority is not None:
+                write_receipt(get_hermes_home(), active_turn_sessions(_authority.db))
         self._scale_to_zero_status("draining", "restart wait: status mark failed")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout

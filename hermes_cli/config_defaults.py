@@ -2127,6 +2127,11 @@ DEFAULT_CONFIG = {
         "loop_watchdog_probe_interval_s": 30.0,
         "loop_watchdog_probe_timeout_s": 10.0,
         "loop_watchdog_max_strikes": 3,
+        # Transport-freshness guard (Д2, fleet TZ 28.11): a connected Matrix adapter's sync
+        # age past this threshold (two consecutive ticks) triggers a drain-aware service
+        # restart. The loop watchdog above cannot see a dead sync task in a healthy loop.
+        "stale_transport_watchdog": True,
+        "stale_transport_threshold_s": 600.0,
         # Allow all users without allowlists (security opt-in).
         "allow_all_users": False,
         # Bot-to-bot loop guard: max_events per window before a cooldown; max_hops bot messages per exchange.

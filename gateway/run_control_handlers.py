@@ -35,10 +35,21 @@ def pause_for_update_verb(runner: Any, loop: asyncio.AbstractEventLoop) -> Calla
             logger.debug("pause-for-update: drain timeout lookup failed", exc_info=True)
             _drain = 30.0
         accepted_box: list[bool] = []
+        budget_box: list[float] = []
         _done = threading.Event()
 
         def _request() -> None:
             try:
+                # Д1b: the updater may only force-kill beyond the budget the gateway itself
+                # declares. With active work units, request_restart defers stop() up to
+                # _restart_after_turn_timeout (#77184) — the ACK must carry THAT number, not the
+                # teardown-drain config, or the updater amputates the turn mid-wait.
+                budget = float(getattr(runner, "_restart_after_turn_timeout", 0.0) or 0.0)
+                try:
+                    active = int(runner._active_work_count())
+                except Exception:
+                    active = 0
+                budget_box.append(budget if active > 0 else 0.0)
                 accepted_box.append(runner.request_restart(detached=False, via_service=True))
             finally:
                 _done.set()
@@ -46,9 +57,11 @@ def pause_for_update_verb(runner: Any, loop: asyncio.AbstractEventLoop) -> Calla
         loop.call_soon_threadsafe(_request)
         _done.wait(timeout=5.0)
         accepted = bool(accepted_box and accepted_box[0])
+        deferred = budget_box[0] if budget_box else 0.0
         return {
             "pausing": accepted, "already_stopping": not accepted,
-            "pid": os.getpid(), "drain_timeout": _drain}
+            "pid": os.getpid(), "drain_timeout": max(_drain, deferred),
+            "active_work": deferred > 0}
 
     return _pause_for_update_handler
 

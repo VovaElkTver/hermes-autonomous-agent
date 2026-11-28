@@ -684,7 +684,9 @@ class SessionAuthority:
                 self._require_admission_open()
                 self.sessions.setdefault(sid, LiveSession(source, route))
                 if any(row['status'] == 'unknown' for row in rows):
-                    raise RuntimeStoreError('unknown_execution')
+                    if not await self._dismiss_repeated_unknown(
+                            SessionRef(self.profile_id, sid), rows):
+                        raise RuntimeStoreError('unknown_execution')
                 self._schedule(SessionRef(self.profile_id, sid))
                 results[sid] = 'ready'
             except RuntimeStoreError as exc:
@@ -1073,12 +1075,43 @@ class SessionAuthority:
                 raise RuntimeStoreError("invalid_params")
             return live.controls.respond(ref.session_id, generation, prompt_id, response, kind=kind)
 
+    async def _dismiss_repeated_unknown(self, ref, rows) -> bool:
+        """Д1b(в): an ``unknown`` row would otherwise bounce every future message forever. The
+        first bounce carries the one user notice; when the person keeps writing, the second
+        encounter of the SAME rows settles them terminal (never replayed) so the FIFO moves."""
+        from agent.turn_failure_copy import PARTIAL_FAILED_TURN_NOTICE
+        from gateway.session_unattended_unknown import is_unattended
+        from hermes_state_runtime import RuntimeStoreError
+        import logging as _logging
+        logger = _logging.getLogger(__name__)
+        seen = getattr(self, "_unknown_bounces", None)
+        if seen is None:
+            seen = self._unknown_bounces = set()
+        person_rows = [r for r in rows
+                       if r["status"] == "unknown" and not is_unattended(r)]
+        if not person_rows or not all(r["admission_id"] in seen for r in person_rows):
+            seen.update(r["admission_id"] for r in person_rows)
+            return False
+        settled_any = False
+        for row in person_rows:
+            try:
+                await self.resolve_unknown_as_owner(
+                    ref, row["admission_id"], row["generation"],
+                    notice=PARTIAL_FAILED_TURN_NOTICE)
+                settled_any = True
+            except RuntimeStoreError as exc:
+                logger.warning("Unknown admission %s second-encounter dismiss failed: %s",
+                               row["admission_id"], exc.reason)
+            seen.discard(row["admission_id"])
+        return settled_any
+
     async def _claim_next(self, ref, live):
         # False asks the pump to re-read after a queued head changed during preflight.
         async with live.claim_gate, live.mutation_lock:
             pending = list_session_admissions(self.db, session_id=ref.session_id)
             if any(row['status'] == 'unknown' for row in pending):
-                raise RuntimeStoreError('unknown_execution')
+                if not await self._dismiss_repeated_unknown(ref, pending):
+                    raise RuntimeStoreError('unknown_execution')
             first = next((row for row in pending if row['status'] == 'queued'), None)
             from gateway.config import Platform
             if live.source.platform == Platform.LOCAL:
@@ -1459,6 +1492,10 @@ async def initialize_session_authority(runner, *, profile_id, instance_id, db=No
     # A lost automation turn has nobody to resolve it: it settles interrupted before any FIFO runs.
     from gateway.session_unattended_unknown import settle_recovered_unattended
     await asyncio.to_thread(settle_recovered_unattended, db, epoch)
+    # A turn the previous owner named in its update-pause receipt is a KNOWN interruption:
+    # settle it terminal with a truthful notice instead of an open-ended unknown pause (Д1b).
+    from gateway.update_interrupt_receipt import settle_update_interrupted
+    await asyncio.to_thread(settle_update_interrupted, db, epoch, db_key.parent)
     await asyncio.to_thread(backfill_legacy_session_owners, db)
     await asyncio.to_thread(backfill_compression_created_sources, db)
     from gateway.session_local_recovery import release_handed_off_receipts
