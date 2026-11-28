@@ -2345,6 +2345,33 @@ def _update_preflight_handled(args) -> bool:
 from hermes_cli.update_receipt import update_receipt_scope
 
 
+def _spawn_gateway_turn_handoff(argv):
+    """Re-exec the updater fully detached (setsid on POSIX, detach kwargs on Windows) so
+    its pause/drain/restart steps run outside the gateway's process tree. Output lands in
+    ``$HERMES_HOME/update-gateway-handoff.log``; ``--gateway`` mode keeps prompts on the
+    file-IPC path with default-on-timeout, so an unanswered question never wedges it."""
+    import shlex
+    import shutil as _shutil
+    import subprocess
+
+    home = os.environ.get("HERMES_HOME", "").strip() or os.path.expanduser("~/.hermes")
+    log_path = os.path.join(home, "update-gateway-handoff.log")
+    if sys.platform == "win32":
+        from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
+
+        with open(log_path, "ab") as fh:
+            subprocess.Popen(argv, stdout=fh, stderr=subprocess.STDOUT,
+                             **windows_detach_popen_kwargs())
+    else:
+        setsid = _shutil.which("setsid")
+        script = " ".join(shlex.quote(part) for part in argv) + f" >> {shlex.quote(log_path)} 2>&1"
+        inner = [setsid, "sh", "-c", script] if setsid else ["sh", "-c", script]
+        subprocess.Popen(inner, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    print(f"↪ Update handed off to a detached gateway updater (this turn stays alive); "
+          f"log: {log_path}")
+
+
 @update_receipt_scope()
 def cmd_update(args):
     """Update Hermes Agent: hangup protection + update lock around ``_cmd_update_impl``."""
@@ -2358,6 +2385,15 @@ def cmd_update(args):
     if _update_preflight_handled(args):
         return
     gateway_mode = getattr(args, "gateway", False)
+    if not gateway_mode:
+        # Д1: from inside a live gateway turn, a bare update would pause/restart its own
+        # host and kill the initiating turn — hand off to a detached ``--gateway`` run.
+        from hermes_cli.update_cmd import gateway_turn_handoff_argv
+
+        _handoff_argv = gateway_turn_handoff_argv()
+        if _handoff_argv is not None:
+            _spawn_gateway_turn_handoff(_handoff_argv)
+            return
 
     _update_io_state = _install_hangup_protection(gateway_mode=gateway_mode)
     # Cross-process mutual exclusion: dashboard Update button, Tauri updater

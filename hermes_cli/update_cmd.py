@@ -141,6 +141,29 @@ def _pip_install_prefix(uv_bin) -> NoReturn:
     stop_for_relaunch()
 
 
+def gateway_turn_handoff_argv(*, base_argv=None):
+    """Д1 (incident 28.11, Win): a bare ``hermes update`` started from an *active gateway
+    turn* inherits ``_HERMES_GATEWAY=1`` from the gateway environment (stamped by
+    ``gateway/run.py``, read by every tool-spawned child). Running the update in that
+    process tree means the updater's own gateway pause/restart kills the turn that
+    launched it (the user saw ``conversation is paused`` / ``unknown_execution``).
+
+    Decision: when a gateway marker is present and this is not already the detached
+    ``--gateway`` run, return the argv that must be re-executed **detached**; the caller
+    spawns it outside this process tree and finishes the turn normally. ``None`` = run
+    in place (operator shell, cron, ``--gateway`` child itself).
+    """
+    import os as _os
+    import sys as _sys
+
+    from hermes_cli.update_restart_recovery import _GATEWAY_MARKERS
+
+    if not any(_os.environ.get(marker) for marker in _GATEWAY_MARKERS):
+        return None
+    base = list(base_argv or [_sys.executable, "-m", "hermes_cli.main"])
+    return base + ["update", "--gateway"]
+
+
 def _refuse_update_for_contended_shims(exc: BaseException) -> NoReturn:
     # Shim to stop the old updater doing work until relaunch. Write no markers.
     stop_for_relaunch()

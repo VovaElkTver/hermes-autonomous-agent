@@ -5,17 +5,16 @@ terminal tool; the gateway pause the updater performs killed the very process th
 running the turn ("conversation is paused" / ``paused: unknown_execution``).
 
 Contract (ТЗ §5.1): the initiating turn completes with a deterministic answer; the update
-either runs detached (``--gateway`` hand-off) or the turn yields before the restart.
+runs detached (``--gateway`` hand-off) before any pause step can reach the host.
 
-The ``/update`` slash path already satisfies this (``_spawn_detached_update``); the hole is
-the *terminal*-spawned bare ``hermes update`` — which inherits ``_HERMES_GATEWAY=1`` from
-the gateway (gateway/run.py stamps it) and must therefore hand off, not run in-process.
+The ``/update`` slash path already satisfied this (``_spawn_detached_update``); the hole was
+the *terminal*-spawned bare ``hermes update`` — closed 28.11 by
+``hermes_cli/update_cmd.py::gateway_turn_handoff_argv`` + the hand-off spawn in ``main.cmd_update``.
 """
 
+import inspect
 import os
 import sys
-
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -27,15 +26,30 @@ def test_gateway_marker_is_the_turn_provenance():
     assert "_HERMES_GATEWAY" in _GATEWAY_MARKERS
 
 
-@pytest.mark.xfail(strict=True, reason="Д1: bare `hermes update` from a gateway turn still runs "
-                                       "the pause in-process and kills its own host (incident 28.11 Win)")
 def test_bare_update_under_gateway_marker_hands_off_detached(monkeypatch):
-    """A bare ``hermes update`` launched with ``_HERMES_GATEWAY=1`` must NOT proceed
-    synchronously: it must re-exec detached as ``update --gateway`` (hand-off) or yield."""
-    from hermes_cli import update_cmd
+    """Marker present, bare run: the decision is a detached ``--gateway`` argv."""
+    from hermes_cli.update_cmd import gateway_turn_handoff_argv
 
-    handoff = getattr(update_cmd, "gateway_turn_handoff_argv", None)
-    assert callable(handoff), "update_cmd exposes no gateway-turn hand-off decision"
     monkeypatch.setenv("_HERMES_GATEWAY", "1")
-    argv = handoff(base_argv=[sys.executable, "-m", "hermes_cli.main", "update"])
+    argv = gateway_turn_handoff_argv(base_argv=[sys.executable, "-m", "hermes_cli.main"])
     assert argv and "--gateway" in list(argv)
+    assert argv[:3] == [sys.executable, "-m", "hermes_cli.main"]
+
+
+def test_operator_shell_update_is_not_hijacked(monkeypatch):
+    """No marker (operator shell): update proceeds in place."""
+    from hermes_cli.update_cmd import gateway_turn_handoff_argv
+
+    for marker in ("_HERMES_GATEWAY", "HERMES_GATEWAY", "HERMES_GATEWAY_MODE"):
+        monkeypatch.delenv(marker, raising=False)
+    assert gateway_turn_handoff_argv() is None
+
+
+def test_handoff_wired_into_cmd_update():
+    """The decision is invoked from ``cmd_update`` itself — regression pin against a
+    refactor that keeps the helper but drops the call site."""
+    from hermes_cli import main
+
+    fn = getattr(main.cmd_update, "__wrapped__", main.cmd_update)
+    src = inspect.getsource(fn)
+    assert "gateway_turn_handoff_argv" in src and "_spawn_gateway_turn_handoff" in src

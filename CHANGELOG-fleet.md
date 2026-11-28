@@ -30,3 +30,23 @@
 - Разведка: приёмная конвенция есть — чужой `m.notice` отбрасывается (default `process_notices=false`); шторм живёт на **отправке**: все служебные формы идут `m.text` (read-back комнаты: 20+ форм за 70 с, оба бота).
 - Проверка: `pytest -q` — `4 passed, 7 xfailed` (зелёный пин конвенции notice-drop; строгие xfail: notice-отправка форм, фильтр «не адресовано — не в очередь» в `admit_message`, штатный silence-marker для bot-vs-bot).
 - Откат: `git revert` коммита. Выкатка: как выше.
+
+## 28.11 — P0 итерация 1: Д1 hand-off + Д2 stale-transport guard (elk/fleet-maint)
+
+- **Д1**: `hermes_cli/update_cmd.py::gateway_turn_handoff_argv` (решение по маркеру
+  `_HERMES_GATEWAY`) + вызов из `main.cmd_update` до hangup-защиты/лока; детей —
+  detached setsid/`windows_detach_popen_kwargs`, `--gateway` режим (prompt → default по
+  таймауту), лог `$HERMES_HOME/update-gateway-handoff.log`. xfails Д1 погашены.
+- **Д2**: `gateway/run_watchers.py::GatewaySessionWatchersMixin._stale_transport_guard` —
+  внутренняя (не крон!) реакция на живой-луп/мёртвый-транспорт: возраст `_last_sync_ts`
+  подключённого matrix-адаптера > 600 с два тика подряд → critical diag +
+  `request_restart(via_service=True)` (drain-aware, durably admitted очереди живут в
+  state-store). Регистрация в `_POST_RECONNECT_WATCHERS`. Оптовут `stale_transport_watchdog=false`.
+  Поведенческие тесты (зомби-инъекция + негатив) вместо xfail.
+- Проверка: fleet-maint suite `9 passed, 4 xfailed` (остались Д4/Д7 — следующая итерация);
+  consumers `test_cmd_update.py`, `test_old_updater_main_shims.py`, `test_local_runtime_updates.py`
+  — `6 passed, 3 skipped`; imports чисто.
+- Известно: `test_cmd_update_docker.py::...guidance...` падает и на чистой базе bd5eea7f
+  в комбинации main-venv × worktree (ретаргет владеющей установки) — не регрессия
+  (базовая проверка на detached worktree).
+- Откат: `git revert` этого коммита. Выкатка: после мержа — ноды `hermes update`'ом.
