@@ -276,3 +276,14 @@ LoRA-линия (в candidates/ staged-пака ~/need2lora/hermes-staged-sft-v1
 .venv), agent-swarm-traces (62 478 логов, лицензий нет), apex-репаки, emgena-teasers,
 D2E/Minecraft-видео, SciPhi/AgentSearch-V1 (20.9M, 2024, тяжёлый/древний).
 Статус: мандата нет. Обучение hermes-staged-sft-v1 — «пока не проводить» (Вл 28.11).
+
+## L8-RU: вердикт-парсеры и русские диалоги (отложено Вл 28.11: «отложи в todo, вернемся еще к теме»)
+
+L8 (vote+quorum) не выкидывать. Гипотеза Вл: диалоги и промпты на русском — вердикты
+могут проходить мимо EN-парсеров; либо наш форк мимо стандартных механизмов hermes.
+Измерено 28.11 (пилот `~/zoo/tinyhumansai/thl8/ru/`, реальные русские сообщения из state.db):
+— harness-hermes на EN-промпте ask_judge: 0/24 parser-miss (отвечает по-английски, мимо не проходит);
+— production-судья message_shadow: модель `critic` на :8012 НЕ обслуживается (там glm53-алиасы)
+  → каждый вызов ask_judge = HTTP 400 → статус `unavailable`; message_shadow.jsonl пуст.
+Что вернуться просит: решение по живому судье (алиас/эндпоинт), промер false-rate на
+mention-gated комнатах, затем quorum-надстройка поверх ask_judge.
