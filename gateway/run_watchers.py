@@ -261,6 +261,8 @@ class GatewaySessionWatchersMixin:
         config = getattr(self, "config", None)
         if config is not None and not getattr(config, "stale_transport_watchdog", True):
             return
+        if config is not None:
+            threshold_s = float(getattr(config, "stale_transport_threshold_s", threshold_s))
         strikes: dict = {}
         await _interruptible_sleep(self, int(max(1, startup_grace_s)))
         while getattr(self, "_running", True):
